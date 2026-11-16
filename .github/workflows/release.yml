@@ -64,5 +64,15 @@ jobs:
           user: ${{ vars.NUGET_USER }}
 
       # Pushes each .nupkg; its .snupkg symbols beside it go with it.
+      # One push per file: on the Windows runner a quoted wildcard reaches dotnet as text and matches nothing.
       - name: Push to NuGet
-        run: dotnet nuget push "artifacts/*.nupkg" --source https://api.nuget.org/v3/index.json --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }} --skip-duplicate
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+        run: |
+          $packages = @(Get-ChildItem artifacts -Filter *.nupkg)
+          if ($packages.Count -ne 3) { throw "Expected 3 packages in artifacts, found $($packages.Count)." }
+          foreach ($package in $packages) {
+            dotnet nuget push $package.FullName --source https://api.nuget.org/v3/index.json --api-key $env:NUGET_API_KEY --skip-duplicate
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
