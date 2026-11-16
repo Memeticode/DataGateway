@@ -1,8 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <!-- Not published as a package yet. -->
-    <IsPackable>false</IsPackable>
+    <Description>DataGateway's SQL Server engine (Microsoft.Data.SqlClient). Register it with AddEngine to serve catalogued SQL Server sources.</Description>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>

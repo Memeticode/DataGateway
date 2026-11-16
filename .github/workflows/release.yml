@@ -17,7 +17,7 @@ jobs:
       contents: read
     env:
       # The packages this release publishes.
-      PACKAGES: DataGateway/DataGateway.csproj DataGateway.Core/DataGateway.Core.csproj DataGateway.Data/DataGateway.Data.csproj
+      PACKAGES: DataGateway/DataGateway.csproj DataGateway.Core/DataGateway.Core.csproj DataGateway.Data/DataGateway.Data.csproj DataGateway.Data.PostgreSql/DataGateway.Data.PostgreSql.csproj DataGateway.Data.SqlServer/DataGateway.Data.SqlServer.csproj
     steps:
       - uses: actions/checkout@v4
 
@@ -71,7 +71,8 @@ jobs:
           NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
         run: |
           $packages = @(Get-ChildItem artifacts -Filter *.nupkg)
-          if ($packages.Count -ne 3) { throw "Expected 3 packages in artifacts, found $($packages.Count)." }
+          $expected = $env:PACKAGES.Split(' ').Count
+          if ($packages.Count -ne $expected) { throw "Expected $expected packages in artifacts, found $($packages.Count)." }
           foreach ($package in $packages) {
             dotnet nuget push $package.FullName --source https://api.nuget.org/v3/index.json --api-key $env:NUGET_API_KEY --skip-duplicate
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -1,8 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <!-- Not published as a package yet. -->
-    <IsPackable>false</IsPackable>
+    <Description>DataGateway's PostgreSQL engine (Npgsql). Register it with AddEngine to serve catalogued PostgreSQL sources.</Description>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
@@ -10,6 +9,6 @@
   <ItemGroup>
     <ProjectReference Include="../DataGateway.Data/DataGateway.Data.csproj" />
     <PackageReference Include="SqlKata" Version="4.0.1" />
-    <PackageReference Include="Npgsql" Version="[10.0.3]" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
   </ItemGroup>
 </Project>

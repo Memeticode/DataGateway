@@ -8,9 +8,10 @@ The app owns authentication, authorization, catalog storage and logging provider
 
 ```powershell
 dotnet add package DataGateway --prerelease
+dotnet add package DataGateway.Data.PostgreSql --prerelease   # or DataGateway.Data.SqlServer
 ```
 
-DataGateway brings DataGateway.Core and DataGateway.Data. Add a database engine for your database: derive `DatabaseEngine<TConnection>` from DataGateway.Data for any ADO.NET provider. [ENGINES.md](https://github.com/mkonstan/DataGateway/blob/main/ENGINES.md) walks through its five members; the PostgreSQL, SQL Server and SQLite engines in this repository are 60 to 85 lines each. Ready-made PostgreSQL and SQL Server engine packages follow in the next release.
+DataGateway brings DataGateway.Core and DataGateway.Data. The engine packages DataGateway.Data.PostgreSql and DataGateway.Data.SqlServer serve those databases. For any other ADO.NET provider, derive `DatabaseEngine<TConnection>` from DataGateway.Data: [ENGINES.md](https://github.com/mkonstan/DataGateway/blob/main/ENGINES.md) walks through its five members; the PostgreSQL, SQL Server and SQLite engines in this repository are 60 to 85 lines each.
 
 ## Add it to a new app
 
