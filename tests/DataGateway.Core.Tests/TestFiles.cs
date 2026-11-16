@@ -1,10 +1,9 @@
-using System.Runtime.CompilerServices;
-
 namespace DataGateway.Core.Tests;
 
 internal static class TestFiles
 {
-    internal static string RepoRoot => Path.GetFullPath(Path.Combine(SourceDirectory(), "../.."));
+    // Found from the test binaries, not from source paths: a CI build maps source paths to /_/ for reproducible packages.
+    internal static string RepoRoot { get; } = FindRepoRoot();
 
     internal static byte[] ReadFixture(string relativePath) =>
         File.ReadAllBytes(InRepo(Path.Combine("tests/fixtures", relativePath)));
@@ -22,6 +21,11 @@ internal static class TestFiles
         return fullPath;
     }
 
-    private static string SourceDirectory([CallerFilePath] string sourceFile = "") =>
-        Path.GetDirectoryName(sourceFile)!;
+    private static string FindRepoRoot()
+    {
+        for (var folder = new DirectoryInfo(AppContext.BaseDirectory); folder is not null; folder = folder.Parent)
+            if (File.Exists(Path.Combine(folder.FullName, "DataGateway.slnx")))
+                return folder.FullName;
+        throw new InvalidOperationException($"No DataGateway.slnx above the test binaries in {AppContext.BaseDirectory}.");
+    }
 }
