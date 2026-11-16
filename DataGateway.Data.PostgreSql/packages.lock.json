@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "Npgsql": {
+        "type": "Direct",
+        "requested": "[10.0.3, 10.0.3]",
+        "resolved": "10.0.3",
+        "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w==",
+        "dependencies": {
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.0"
+        }
+      },
+      "SqlKata": {
+        "type": "Direct",
+        "requested": "[4.0.1, )",
+        "resolved": "4.0.1",
+        "contentHash": "uGGSjc5tHMQCTy17EZxXr74ty4P79rjtuiPWT2VsZQ8v+K6uoLaTyW050ezU3VRBmaL00b5+x0+6OfjA3l9USA=="
+      },
+      "Dapper": {
+        "type": "Transitive",
+        "resolved": "2.1.89",
+        "contentHash": "1VjFE664wnxvuhlgP8kS4PeFFF4jqD3VkbIHW6Zlc52zuibgcz5ICnIHcQXlTp6pURpPNGLV0ZpNe5x9KePJnA=="
+      },
+      "Dapper.Data": {
+        "type": "Transitive",
+        "resolved": "3.1.2",
+        "contentHash": "64SZ/zyC6vZYklLNCkXMDuDhLuHt2kU4WXCGaJGTkji+gzJGfpIbO3lumZ1LC0BneL4bJDb+g/xRRlnebUcaSg==",
+        "dependencies": {
+          "Dapper": "2.1.89"
+        }
+      },
+      "Microsoft.Extensions.DependencyInjection.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "L3AdmZ1WOK4XXT5YFPEwyt0ep6l8lGIPs7F5OOBZc77Zqeo01Of7XXICy47628sdVl0v/owxYJTe86DTgFwKCA=="
+      },
+      "Microsoft.Extensions.Logging.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "FU/IfjDfwaMuKr414SSQNTIti/69bHEMb+QKrskRb26oVqpx3lNFXMjs/RC9ZUuhBhcwDM2BwOgoMw+PZ+beqQ==",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.0"
+        }
+      },
+      "SqlKata.JsonQuery": {
+        "type": "Transitive",
+        "resolved": "0.2.0",
+        "contentHash": "CNh/GKxbjxMPqSkxCf4bXVU8K8KUmD4MJoajgAqjLO169lOru/AfF5wi30E7VScvg/TzzEo5xA9n8qcCc/3WCQ==",
+        "dependencies": {
+          "SqlKata": "4.0.1"
+        }
+      },
+      "datagateway.core": {
+        "type": "Project",
+        "dependencies": {
+          "SqlKata.JsonQuery": "[0.2.0, )"
+        }
+      },
+      "datagateway.data": {
+        "type": "Project",
+        "dependencies": {
+          "Dapper.Data": "[3.1.2, )",
+          "DataGateway.Core": "[1.0.0, )"
+        }
+      }
+    }
+  }
+}

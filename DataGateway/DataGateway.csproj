@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Description>Read-only JSON and MCP endpoints over relational data for ASP.NET Core apps: list, describe and query catalogued sources with row caps and validated queries. Bring a database engine: derive DatabaseEngine&lt;TConnection&gt; from DataGateway.Data for any ADO.NET database.</Description>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>DataGateway</AssemblyName>
+    <RootNamespace>DataGateway</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="../DataGateway.Core/DataGateway.Core.csproj" />
+    <ProjectReference Include="../DataGateway.Data/DataGateway.Data.csproj" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.1.0" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.14" />
+    <PackageReference Include="Scalar.AspNetCore" Version="2.18.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Microsoft.AspNetCore.Builder" />
+    <Using Include="Microsoft.AspNetCore.Http" />
+    <Using Include="Microsoft.AspNetCore.Routing" />
+    <Using Include="Microsoft.Extensions.DependencyInjection" />
+    <Using Include="Microsoft.Extensions.Logging" />
+  </ItemGroup>
+  <!-- Keep the API document free of XML doc comments: Microsoft.AspNetCore.OpenApi's source generator copies them in
+       when doc files exist (here or in referenced assemblies), and the frozen-document tests pin the document byte for
+       byte (HostCompositionTests.T8, NamedGatewayApiPageTests). Microsoft's documented opt-out. -->
+  <Target Name="DisableOpenApiXmlComments" BeforeTargets="CoreCompile">
+    <ItemGroup>
+      <Analyzer Remove="@(Analyzer)" Condition="'%(Filename)' == 'Microsoft.AspNetCore.OpenApi.SourceGenerators'" />
+    </ItemGroup>
+  </Target>
+</Project>

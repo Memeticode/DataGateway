@@ -1,0 +1,15 @@
+<Solution>
+  <Project Path="DataGateway.Core/DataGateway.Core.csproj" />
+  <Project Path="DataGateway.Data/DataGateway.Data.csproj" />
+  <Project Path="DataGateway.Data.SqlServer/DataGateway.Data.SqlServer.csproj" />
+  <Project Path="DataGateway.Data.PostgreSql/DataGateway.Data.PostgreSql.csproj" />
+  <Project Path="DataGateway.Data.Sqlite/DataGateway.Data.Sqlite.csproj" />
+  <Project Path="DataGateway/DataGateway.csproj" />
+  <Project Path="DataGateway.Web/DataGateway.Web.csproj" />
+  <Project Path="DataGateway.Demo/DataGateway.Demo.csproj" />
+  <Project Path="DataGateway.Proxy/DataGateway.Proxy.csproj" />
+  <Folder Name="/tests/">
+    <Project Path="tests/DataGateway.Web.Tests/DataGateway.Web.Tests.csproj" />
+    <Project Path="tests/DataGateway.Core.Tests/DataGateway.Core.Tests.csproj" />
+  </Folder>
+</Solution>

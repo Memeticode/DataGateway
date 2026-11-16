@@ -1,0 +1,8 @@
+# Test fixtures are compared byte for byte; never convert their line endings.
+tests/fixtures/** -text
+# Files the tests read byte for byte or match line by line; keep their committed line endings on every platform.
+db/*.sql -text
+tests/DataGateway.Web.Tests/LibraryQuickstart.cs -text
+/*.md -text
+DataGateway.Web/*.md -text
+DataGateway.Data.Sqlite/README.md -text

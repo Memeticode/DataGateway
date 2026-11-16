@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Description>DataGateway's catalog reader and database engine base classes. Derive DatabaseEngine&lt;TConnection&gt; to add any ADO.NET database.</Description>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Dapper.Data" Version="3.1.2" />
+    <ProjectReference Include="../DataGateway.Core/DataGateway.Core.csproj" />
+  </ItemGroup>
+</Project>

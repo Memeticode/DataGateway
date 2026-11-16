@@ -1,0 +1,68 @@
+# Publishes the NuGet packages when a version tag (v<version>) is pushed. nuget.org Trusted Publishing trades the
+# GitHub OIDC token for a short-lived key, so no API key is stored. Needs a Trusted Publishing policy on nuget.org
+# for this repository and workflow, and the repository variable NUGET_USER (the nuget.org account name).
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    # Windows: the test suites are proven there; Linux runs are not yet validated.
+    runs-on: windows-latest
+    permissions:
+      id-token: write # OIDC token for NuGet Trusted Publishing
+      contents: read
+    env:
+      # The packages this release publishes.
+      PACKAGES: DataGateway/DataGateway.csproj DataGateway.Core/DataGateway.Core.csproj DataGateway.Data/DataGateway.Data.csproj
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Tag matches the package version
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'.TrimStart('v')
+          $version = (dotnet msbuild DataGateway/DataGateway.csproj -getProperty:PackageVersion).Trim()
+          if ($tag -ne $version) { throw "Tag $tag does not match the package version $version in Directory.Build.props." }
+
+      - name: Build
+        run: dotnet build DataGateway.slnx -c Release
+
+      - name: Test
+        shell: pwsh
+        run: |
+          dotnet test tests/DataGateway.Core.Tests -c Release --no-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet test tests/DataGateway.Web.Tests -c Release --no-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Pack
+        shell: pwsh
+        run: |
+          foreach ($project in $env:PACKAGES.Split(' ')) {
+            dotnet pack $project -c Release --no-build -o artifacts
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: artifacts/*nupkg
+
+      - name: NuGet login (OIDC)
+        uses: NuGet/login@v1
+        id: nuget-login
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      # Pushes each .nupkg; its .snupkg symbols beside it go with it.
+      - name: Push to NuGet
+        run: dotnet nuget push "artifacts/*.nupkg" --source https://api.nuget.org/v3/index.json --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }} --skip-duplicate

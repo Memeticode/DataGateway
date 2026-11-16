@@ -1,0 +1,127 @@
+using DataGateway.Failures;
+using System.Text.Json;
+using DataGateway.Web.Configuration;
+using DataGateway.Core.Catalog;
+using DataGateway.Core.Tests;
+using DataGateway.Data.Catalog;
+using DataGateway.Data.Queries;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+namespace DataGateway.Web.Tests;
+
+internal sealed class LoggedHost : IAsyncDisposable
+{
+    internal static readonly LeakScan Scan = LeakScan.Synthetic(("log catalog", ErrorLogSettingsScope.Catalog),
+        ("log source", ErrorLogTests.SourceConnection), ("stored row", "malformed-secret-connection"));
+    internal string DirectoryPath { get; } = TestFiles.InRepo("tests/DataGateway.Web.Tests/obj/error-log/" + Guid.NewGuid());
+    private readonly HostCatalogState? catalog;
+    internal WebApplication App { get; }
+    internal HttpClient Client { get; private set; } = new();
+
+    internal LoggedHost(HostCatalogState? catalog = null, DataGateway.Data.IDatabaseEngine? engine = null,
+        IDictionary<string, string?>? settings = null, bool synthetic = true,
+        Action<WebApplicationBuilder>? configure = null, string environment = "Production")
+    {
+        this.catalog = catalog ?? new HostCatalogState();
+        App = Program.CreateApplication(new WebApplicationOptions
+        {
+            EnvironmentName = environment, ContentRootPath = TestFiles.InRepo("DataGateway.Web"),
+            ApplicationName = typeof(Program).Assembly.GetName().Name, Args = []
+        }, builder =>
+        {
+            if (synthetic) SyntheticSignIn.Use(builder);
+            builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Serilog:WriteTo:File:Args:path"] = Path.Combine(DirectoryPath, "datagateway-.jsonl"),
+                ["DataGateway:Limits:CommandTimeoutSeconds"] = "1",
+                ["DataGateway:Mcp:Title"] = "", ["DataGateway:Mcp:About"] = ""
+            });
+            if (settings is not null) builder.Configuration.AddInMemoryCollection(settings);
+            builder.WebHost.UseSetting("urls", "http://127.0.0.1:0");
+            this.catalog?.Use(builder.Services);
+            if (engine is not null) builder.Services.AddSingleton(engine);
+            configure?.Invoke(builder);
+        });
+    }
+
+    internal async Task Start()
+    {
+        Assert.True(!Directory.Exists(DirectoryPath) || !Directory.EnumerateFileSystemEntries(DirectoryPath).Any(), "Host scratch directory is not empty.");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await App.StartAsync(timeout.Token);
+        catalog?.Arm();
+        Client.Dispose();
+        Client = new() { BaseAddress = new Uri(Assert.Single(App.Urls)), Timeout = TimeSpan.FromSeconds(15) };
+    }
+
+    internal JsonElement[] Lines() => ReadLines(DirectoryPath);
+    internal static JsonElement[] ReadLines(string directory)
+    {
+        if (!Directory.Exists(directory)) return [];
+        var result = new List<JsonElement>();
+        foreach (var path in Directory.GetFiles(directory, "*.jsonl").Order(StringComparer.Ordinal))
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            while (reader.ReadLine() is { } text)
+            {
+                if (text.Length == 0) continue;
+                using var json = JsonDocument.Parse(text);
+                Assert.Equal(JsonValueKind.Object, json.RootElement.ValueKind);
+                var line = json.RootElement.Clone();
+                Scan.LogLine("synthetic file line", line);
+                if (line.GetProperty("SourceContext").GetString() == FailureLog.Category) result.Add(line);
+                else Assert.False(line.GetProperty("SourceContext").GetString()!.StartsWith("DataGateway", StringComparison.Ordinal));
+            }
+        }
+        return result.ToArray();
+    }
+
+    internal JsonElement[] AllLines() => Directory.Exists(DirectoryPath)
+        ? Directory.GetFiles(DirectoryPath, "*.jsonl").Order(StringComparer.Ordinal)
+            .SelectMany(path => ReadText(path).Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            .Select(text => { using var json = JsonDocument.Parse(text); Scan.LogLine("synthetic file line", json.RootElement); return json.RootElement.Clone(); }).ToArray()
+        : [];
+
+    internal static string ReadText(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Client.Dispose();
+        await App.DisposeAsync();
+        if (Directory.Exists(DirectoryPath)) Directory.Delete(DirectoryPath, recursive: true);
+    }
+}
+
+internal sealed class ErrorLogSettingsScope : IDisposable
+{
+    internal const string Catalog = "Server=fake-log-catalog-host;Database=Catalog;User ID=fake-log-reader;Password=fake-log-password;Encrypt=false;Connect Timeout=1;ConnectRetryCount=0";
+    private readonly Dictionary<string, string?> original = new();
+    private readonly string scratch = TestFiles.InRepo("tests/DataGateway.Web.Tests/obj/error-log-settings/" + Guid.NewGuid());
+    internal ErrorLogSettingsScope()
+    {
+        Directory.CreateDirectory(scratch);
+        foreach (var name in new[] { "APPDATA", "HOME", "DOTNET_USER_SECRETS_FALLBACK_DIR" }) Set(name, scratch);
+        Set(DataGatewayConfiguration.ConnectionSetting, Catalog);
+        foreach (var name in new[] { "ConnectTimeoutSeconds", "CommandTimeoutSeconds", "RowCap", "MaxJsonLength", "MaxFilterDepth", "MaxFilterConditions", "MaxInValues" }) Set("DataGateway__Limits__" + name, null);
+    }
+    private void Set(string name, string? value)
+    {
+        original.Add(name, Environment.GetEnvironmentVariable(name));
+        Environment.SetEnvironmentVariable(name, value);
+    }
+    public void Dispose()
+    {
+        foreach (var (name, value) in original) Environment.SetEnvironmentVariable(name, value);
+        Directory.Delete(scratch, recursive: true);
+    }
+}

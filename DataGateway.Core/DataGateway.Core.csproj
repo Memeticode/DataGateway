@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Description>DataGateway's catalog model, query validation and error contract. Brought in by DataGateway; no database dependency.</Description>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="SqlKata.JsonQuery" Version="0.2.0" />
+  </ItemGroup>
+</Project>

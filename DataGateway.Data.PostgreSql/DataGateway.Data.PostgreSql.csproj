@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- Not published as a package yet. -->
+    <IsPackable>false</IsPackable>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../DataGateway.Data/DataGateway.Data.csproj" />
+    <PackageReference Include="SqlKata" Version="4.0.1" />
+    <PackageReference Include="Npgsql" Version="[10.0.3]" />
+  </ItemGroup>
+</Project>
