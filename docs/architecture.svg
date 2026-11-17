@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 760" role="img" aria-labelledby="title desc">
+  <title id="title">DataGateway architecture</title>
+  <desc id="desc">Clients reach a host app over JSON or MCP. Each host owns its sign-in and its catalog reader, and hands the reader to the DataGateway library. The library, DataGateway.Data, DataGateway.Core and the SQL Server and PostgreSQL engines are the NuGet packages. The engines turn a checked request into SQL and read the source views with a read-only login, stopping each query after that source's query_timeout_seconds from the catalog.</desc>
+  <style>
+    svg { --bg: #ffffff; --fg: #16202a; --muted: #566573; --line: #c9d3dc; --accent: #0a6c87; --accent-soft: #e2f0f4;
+          --own: #5b4bb5; --own-soft: #ece9fb; --pkg: #2f7d4f; }
+    @media (prefers-color-scheme: dark) {
+      svg { --bg: #0d1117; --fg: #e6edf3; --muted: #9aa7b4; --line: #30363d; --accent: #56b6d1; --accent-soft: #12303a;
+            --own: #a99bf0; --own-soft: #221d3a; --pkg: #6cc791; }
+    }
+    .bg { fill: var(--bg); }
+    .box { fill: var(--bg); stroke: var(--line); stroke-width: 1.4; }
+    .lib { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.6; }
+    .own { fill: var(--own-soft); stroke: var(--own); stroke-width: 1.6; }
+    .pkg { fill: none; stroke: var(--pkg); stroke-width: 1.5; stroke-dasharray: 7 4; }
+    .t { fill: var(--fg); font: 600 13.5px "Segoe UI", system-ui, -apple-system, sans-serif; }
+    .s { fill: var(--muted); font: 11.5px "Segoe UI", system-ui, -apple-system, sans-serif; }
+    .lbl { fill: var(--muted); font: 10.5px Consolas, "Courier New", monospace; }
+    .pkg-lbl { fill: var(--pkg); font: 11px Consolas, "Courier New", monospace; }
+    .own-lbl { fill: var(--own); }
+    .edge { stroke: var(--muted); stroke-width: 1.4; fill: none; }
+    .own-edge { stroke: var(--own); }
+    .head { fill: var(--muted); }
+    .head-own { fill: var(--own); }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="arrowo" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head-own" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="940" height="760"/>
+
+  <!-- Clients -->
+  <rect class="box" x="50" y="16" width="200" height="44" rx="5"/>
+  <text class="t" x="150" y="43" text-anchor="middle">Claude Desktop · Claude Code</text>
+  <rect class="box" x="270" y="16" width="200" height="44" rx="5"/>
+  <text class="t" x="370" y="43" text-anchor="middle">Scripts · a browser</text>
+  <rect class="box" x="490" y="16" width="400" height="44" rx="5"/>
+  <text class="t" x="690" y="43" text-anchor="middle">Any MCP client or HTTP caller</text>
+
+  <!-- Proxy -->
+  <rect class="box" x="50" y="100" width="200" height="44" rx="5"/>
+  <text class="t" x="150" y="119" text-anchor="middle">DataGateway.Proxy</text>
+  <text class="s" x="150" y="135" text-anchor="middle">example local bridge</text>
+  <line class="edge" x1="150" y1="60" x2="150" y2="98" marker-end="url(#arrow)"/>
+  <text class="lbl" x="158" y="84">stdio</text>
+
+  <!-- Hosts -->
+  <rect class="box" x="50" y="190" width="420" height="120" rx="5"/>
+  <text class="t" x="260" y="212" text-anchor="middle">DataGateway.Web · example host</text>
+  <rect class="own" x="66" y="226" width="186" height="50" rx="4"/>
+  <text class="t" x="159" y="247" text-anchor="middle">its catalog reader</text>
+  <text class="s" x="159" y="265" text-anchor="middle">SQL Server or PostgreSQL</text>
+  <rect class="box" x="268" y="226" width="186" height="50" rx="4"/>
+  <text class="t" x="361" y="247" text-anchor="middle">Windows sign-in</text>
+  <text class="s" x="361" y="265" text-anchor="middle">the host's choice</text>
+  <text class="s" x="260" y="296" text-anchor="middle">API page in Development only</text>
+
+  <rect class="box" x="490" y="190" width="400" height="120" rx="5"/>
+  <text class="t" x="690" y="212" text-anchor="middle">Your app</text>
+  <rect class="box" x="506" y="226" width="176" height="50" rx="4"/>
+  <text class="t" x="594" y="247" text-anchor="middle">your sign-in</text>
+  <text class="s" x="594" y="265" text-anchor="middle">tokens, OAuth, anything</text>
+  <rect class="own" x="698" y="226" width="176" height="50" rx="4"/>
+  <text class="t" x="786" y="247" text-anchor="middle">your catalog reader</text>
+  <text class="s" x="786" y="265" text-anchor="middle">CatalogService&lt;T&gt;</text>
+  <text class="s" x="690" y="296" text-anchor="middle">installs the packages from NuGet</text>
+
+  <line class="edge" x1="150" y1="144" x2="150" y2="188" marker-end="url(#arrow)"/>
+  <text class="lbl" x="158" y="172">HTTP /mcp</text>
+  <line class="edge" x1="370" y1="60" x2="370" y2="188" marker-end="url(#arrow)"/>
+  <text class="lbl" x="378" y="128">JSON API</text>
+  <line class="edge" x1="594" y1="60" x2="594" y2="188" marker-end="url(#arrow)"/>
+  <text class="lbl" x="602" y="128">JSON API or /mcp</text>
+
+  <!-- Each app reads its own catalog -->
+  <polyline class="edge own-edge" points="66,251 28,251 28,716 48,716" marker-end="url(#arrowo)"/>
+  <text class="lbl own-lbl" transform="translate(21,490) rotate(-90)" text-anchor="middle">reads its own catalog (catalogTimeoutSeconds, default 15)</text>
+  <polyline class="edge own-edge" points="874,251 914,251 914,716 892,716" marker-end="url(#arrowo)"/>
+  <text class="lbl own-lbl" transform="translate(920,490) rotate(90)" text-anchor="middle">reads its own catalog, wherever it lives</text>
+
+  <!-- NuGet packages -->
+  <rect class="pkg" x="40" y="336" width="860" height="320" rx="8"/>
+  <text class="pkg-lbl" x="56" y="354">NuGet packages</text>
+
+  <rect class="lib" x="50" y="364" width="840" height="92" rx="5"/>
+  <text class="t" x="470" y="390" text-anchor="middle">DataGateway · the library</text>
+  <text class="s" x="470" y="410" text-anchor="middle">AddDataGateway · UseCatalog · AddEngine · UseMcpServer · MapDataGateway · MapDataGatewayApiPage</text>
+  <text class="s" x="470" y="428" text-anchor="middle">/sources/list · /sources/describe · /query · /mcp (3 tools) · API page</text>
+  <text class="s" x="470" y="446" text-anchor="middle">limits · plain hints · fix-it errors with incident IDs · failure log · sign-in hooks · several gateways per app</text>
+  <line class="edge" x1="260" y1="310" x2="260" y2="362" marker-end="url(#arrow)"/>
+  <text class="lbl" x="268" y="330">UseCatalog(reader)</text>
+  <line class="edge" x1="690" y1="310" x2="690" y2="362" marker-end="url(#arrow)"/>
+  <text class="lbl" x="698" y="330">same public API</text>
+
+  <rect class="box" x="50" y="484" width="410" height="64" rx="5"/>
+  <text class="t" x="255" y="508" text-anchor="middle">DataGateway.Data · contracts</text>
+  <text class="s" x="255" y="528" text-anchor="middle">catalog reader base · engine contract · query runner</text>
+  <rect class="box" x="480" y="484" width="410" height="64" rx="5"/>
+  <text class="t" x="685" y="508" text-anchor="middle">DataGateway.Core · pure rules, no I/O</text>
+  <text class="s" x="685" y="528" text-anchor="middle">check the request · build the query · querySchema · hints · errors</text>
+  <line class="edge" x1="255" y1="456" x2="255" y2="482" marker-end="url(#arrow)"/>
+  <line class="edge" x1="685" y1="456" x2="685" y2="482" marker-end="url(#arrow)"/>
+
+  <polyline class="edge" points="255,548 255,568"/>
+  <polyline class="edge" points="186,568 754,568"/>
+  <line class="edge" x1="186" y1="568" x2="186" y2="586" marker-end="url(#arrow)"/>
+  <line class="edge" x1="470" y1="568" x2="470" y2="586" marker-end="url(#arrow)"/>
+  <line class="edge" x1="754" y1="568" x2="754" y2="586" marker-end="url(#arrow)"/>
+  <rect class="box" x="50" y="588" width="272" height="56" rx="5"/>
+  <text class="t" x="186" y="610" text-anchor="middle">DataGateway.Data.SqlServer</text>
+  <text class="s" x="186" y="628" text-anchor="middle">request → SQL → rows</text>
+  <rect class="box" x="334" y="588" width="272" height="56" rx="5"/>
+  <text class="t" x="470" y="610" text-anchor="middle">DataGateway.Data.PostgreSql</text>
+  <text class="s" x="470" y="628" text-anchor="middle">request → SQL → rows</text>
+  <rect class="box" x="618" y="588" width="272" height="56" rx="5"/>
+  <text class="t" x="754" y="610" text-anchor="middle">SQLite engine</text>
+  <text class="s" x="754" y="628" text-anchor="middle">tests only · not a package</text>
+
+  <!-- Databases -->
+  <polyline class="edge" points="186,644 186,666 754,666"/>
+  <polyline class="edge" points="754,644 754,666"/>
+  <line class="edge" x1="470" y1="644" x2="470" y2="692" marker-end="url(#arrow)"/>
+  <text class="lbl" x="478" y="682">read-only login · each source's query_timeout_seconds</text>
+  <rect class="box" x="50" y="694" width="260" height="48" rx="5"/>
+  <text class="t" x="180" y="714" text-anchor="middle">Catalog database</text>
+  <text class="s" x="180" y="731" text-anchor="middle">sources, columns, row caps, timeouts</text>
+  <rect class="box" x="334" y="694" width="272" height="48" rx="5"/>
+  <text class="t" x="470" y="714" text-anchor="middle">Source views</text>
+  <text class="s" x="470" y="731" text-anchor="middle">the data being served</text>
+  <rect class="box" x="630" y="694" width="260" height="48" rx="5"/>
+  <text class="t" x="760" y="714" text-anchor="middle">Your catalog database</text>
+  <text class="s" x="760" y="731" text-anchor="middle">any store your reader can read</text>
+</svg>
