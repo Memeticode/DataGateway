@@ -183,9 +183,9 @@ public sealed class QueryAnswerTests
     [Fact]
     public void T1_in_filter_reports_unmatched_values_and_hint_is_last_wire_member()
     {
-        var contract = Contract(["ticker"]);
-        var query = QueryBuilding.Validate(contract, """{"filters":[{"col":"ticker","op":"in","value":["AAPL","ZZZZNOPE"]}]}""", QueryLimits.ForRowCap(7)).Value;
-        var answer = QueryAnswer.Map(contract, query, new QueryRows([new Dictionary<string, object?> { ["ticker"] = "AAPL" }], false));
+        var contract = Contract(["region"]);
+        var query = QueryBuilding.Validate(contract, """{"filters":[{"col":"region","op":"in","value":["North","Nowhere"]}]}""", QueryLimits.ForRowCap(7)).Value;
+        var answer = QueryAnswer.Map(contract, query, new QueryRows([new Dictionary<string, object?> { ["region"] = "North" }], false));
         Assert.Equal("All matching rows returned. in values that matched no row are left out: compare the values you asked for with the rows.", QueryResponse.InValuesUnmatched);
         Assert.Equal(QueryResponse.InValuesUnmatched, answer.Hint);
         var wire = JsonSerializer.Serialize(answer, JsonSerializerOptions.Web);
@@ -197,9 +197,9 @@ public sealed class QueryAnswerTests
     [Fact]
     public void T2_in_filter_nested_inside_and_or_groups_reports_unmatched_values()
     {
-        var contract = Contract(["ticker"]);
-        var query = QueryBuilding.Validate(contract, """{"filters":[{"and":[{"or":[{"col":"ticker","op":"eq","value":"MSFT"},{"col":"ticker","op":"in","value":["AAPL","ZZZZNOPE"]}]}]}]}""", QueryLimits.ForRowCap(7)).Value;
-        var answer = QueryAnswer.Map(contract, query, new QueryRows([new Dictionary<string, object?> { ["ticker"] = "AAPL" }], false));
+        var contract = Contract(["region"]);
+        var query = QueryBuilding.Validate(contract, """{"filters":[{"and":[{"or":[{"col":"region","op":"eq","value":"South"},{"col":"region","op":"in","value":["North","Nowhere"]}]}]}]}""", QueryLimits.ForRowCap(7)).Value;
+        var answer = QueryAnswer.Map(contract, query, new QueryRows([new Dictionary<string, object?> { ["region"] = "North" }], false));
         Assert.Equal(QueryResponse.InValuesUnmatched, answer.Hint);
     }
 
@@ -208,12 +208,12 @@ public sealed class QueryAnswerTests
     [InlineData(true)]
     public void T3_in_filter_aggregate_warns_that_unmatched_values_are_hidden(bool grouped)
     {
-        var contract = Contract(["ticker"]);
-        var text = """{"filters":[{"col":"ticker","op":"in","value":["AAPL","ZZZZNOPE"]}],"aggregates":[{"fn":"count","col":"ticker"}]""" + (grouped ? ""","group_by":["ticker"]}""" : "}");
+        var contract = Contract(["region"]);
+        var text = """{"filters":[{"col":"region","op":"in","value":["North","Nowhere"]}],"aggregates":[{"fn":"count","col":"region"}]""" + (grouped ? ""","group_by":["region"]}""" : "}");
         var query = QueryBuilding.Validate(contract, text, QueryLimits.ForRowCap(7)).Value;
         var row = new Dictionary<string, object?>();
-        if (grouped) row["ticker"] = "AAPL";
-        row["count_ticker"] = 1;
+        if (grouped) row["region"] = "North";
+        row["count_region"] = 1;
         var answer = QueryAnswer.Map(contract, query, new QueryRows([row], false));
         Assert.Equal("All matching rows aggregated. in values that matched no row are left out and an aggregate hides them: check the in values first.", QueryResponse.InValuesHiddenByAggregate);
         Assert.Equal(QueryResponse.InValuesHiddenByAggregate, answer.Hint);
@@ -223,17 +223,17 @@ public sealed class QueryAnswerTests
 
     [Theory]
     [InlineData("{}", false, false, false, QueryResponse.CompleteSet)]
-    [InlineData("""{"filters":[{"col":"ticker","op":"not_in","value":["AAPL","ZZZZNOPE"]}]}""", false, false, false, QueryResponse.CompleteSet)]
-    [InlineData("""{"filters":[{"and":[{"or":[{"col":"ticker","op":"not_in","value":["AAPL","ZZZZNOPE"]}]}]}]}""", false, false, false, QueryResponse.CompleteSet)]
-    [InlineData("""{"filters":[{"col":"ticker","op":"in","value":["AAPL","ZZZZNOPE"]}]}""", true, false, false, QueryResponse.NothingFound)]
-    [InlineData("""{"filters":[{"col":"ticker","op":"in","value":["AAPL","ZZZZNOPE"]}],"aggregates":[{"fn":"count","col":"ticker"}]}""", false, true, false, QueryResponse.NothingFound)]
-    [InlineData("""{"filters":[{"col":"ticker","op":"in","value":["AAPL","ZZZZNOPE"]}]}""", false, false, true, "The result set was capped at 1 row. Rows are in no particular order.")]
-    [InlineData("""{"filters":[{"col":"ticker","op":"in","value":["AAPL","ZZZZNOPE"]}],"order_by":[{"col":"ticker"}]}""", false, false, true, "The result set was capped at 1 row.")]
+    [InlineData("""{"filters":[{"col":"region","op":"not_in","value":["North","Nowhere"]}]}""", false, false, false, QueryResponse.CompleteSet)]
+    [InlineData("""{"filters":[{"and":[{"or":[{"col":"region","op":"not_in","value":["North","Nowhere"]}]}]}]}""", false, false, false, QueryResponse.CompleteSet)]
+    [InlineData("""{"filters":[{"col":"region","op":"in","value":["North","Nowhere"]}]}""", true, false, false, QueryResponse.NothingFound)]
+    [InlineData("""{"filters":[{"col":"region","op":"in","value":["North","Nowhere"]}],"aggregates":[{"fn":"count","col":"region"}]}""", false, true, false, QueryResponse.NothingFound)]
+    [InlineData("""{"filters":[{"col":"region","op":"in","value":["North","Nowhere"]}]}""", false, false, true, "The result set was capped at 1 row. Rows are in no particular order.")]
+    [InlineData("""{"filters":[{"col":"region","op":"in","value":["North","Nowhere"]}],"order_by":[{"col":"region"}]}""", false, false, true, "The result set was capped at 1 row.")]
     public void T4_in_filter_preserves_complete_empty_and_capped_precedence(string text, bool empty, bool noMatchingRows, bool more, string hint)
     {
-        var contract = Contract(["ticker"]);
+        var contract = Contract(["region"]);
         var query = QueryBuilding.Validate(contract, text, QueryLimits.ForRowCap(7)).Value;
-        var row = query.Columns.ToDictionary(column => column.Name, column => column.Name == "count_ticker" ? (object?)0 : "AAPL");
+        var row = query.Columns.ToDictionary(column => column.Name, column => column.Name == "count_region" ? (object?)0 : "North");
         var answer = QueryAnswer.Map(contract, query, new QueryRows(empty ? [] : [row], more, noMatchingRows));
         Assert.Equal(hint, answer.Hint);
     }
@@ -241,23 +241,23 @@ public sealed class QueryAnswerTests
     [Fact]
     public void T5_D5_2_no_uncapped_nonempty_in_filter_answer_claims_complete_set()
     {
-        var contract = Contract(["ticker"]);
+        var contract = Contract(["region"]);
         var shapes = new[]
         {
-            ("flat", """{"filters":[{"col":"ticker","op":"in","value":["AAPL","ZZZZNOPE"]}]}""", false),
-            ("nested", """{"filters":[{"and":[{"or":[{"col":"ticker","op":"in","value":["AAPL","ZZZZNOPE"]}]}]}]}""", false),
-            ("grouped", """{"filters":[{"col":"ticker","op":"in","value":["AAPL","ZZZZNOPE"]}],"group_by":["ticker"]}""", false),
-            ("aggregated", """{"filters":[{"col":"ticker","op":"in","value":["AAPL","ZZZZNOPE"]}],"aggregates":[{"fn":"count","col":"ticker"}]}""", true),
-            ("limit", """{"filters":[{"col":"ticker","op":"in","value":["AAPL","ZZZZNOPE"]}],"limit":1}""", false),
-            ("order_by", """{"filters":[{"col":"ticker","op":"in","value":["AAPL","ZZZZNOPE"]}],"order_by":[{"col":"ticker"}]}""", false),
-            ("grouped aggregate", """{"filters":[{"col":"ticker","op":"in","value":["AAPL","ZZZZNOPE"]}],"group_by":["ticker"],"aggregates":[{"fn":"count","col":"ticker"}]}""", true)
+            ("flat", """{"filters":[{"col":"region","op":"in","value":["North","Nowhere"]}]}""", false),
+            ("nested", """{"filters":[{"and":[{"or":[{"col":"region","op":"in","value":["North","Nowhere"]}]}]}]}""", false),
+            ("grouped", """{"filters":[{"col":"region","op":"in","value":["North","Nowhere"]}],"group_by":["region"]}""", false),
+            ("aggregated", """{"filters":[{"col":"region","op":"in","value":["North","Nowhere"]}],"aggregates":[{"fn":"count","col":"region"}]}""", true),
+            ("limit", """{"filters":[{"col":"region","op":"in","value":["North","Nowhere"]}],"limit":1}""", false),
+            ("order_by", """{"filters":[{"col":"region","op":"in","value":["North","Nowhere"]}],"order_by":[{"col":"region"}]}""", false),
+            ("grouped aggregate", """{"filters":[{"col":"region","op":"in","value":["North","Nowhere"]}],"group_by":["region"],"aggregates":[{"fn":"count","col":"region"}]}""", true)
         };
         foreach (var (shape, text, aggregate) in shapes)
         {
             var result = QueryBuilding.Validate(contract, text, QueryLimits.ForRowCap(7));
             Assert.True(result.IsSuccess, shape);
             var query = result.Value;
-            var row = query.Columns.ToDictionary(column => column.Name, column => column.Name == "count_ticker" ? (object?)1 : "AAPL");
+            var row = query.Columns.ToDictionary(column => column.Name, column => column.Name == "count_region" ? (object?)1 : "North");
             var answer = QueryAnswer.Map(contract, query, new QueryRows([row], false));
             Assert.False(answer.More);
             Assert.True(answer.RowCount > 0, shape);
