@@ -2,6 +2,8 @@ using DataGateway.Core.Catalog;
 using DataGateway.Core.Errors;
 using System.Data.Common;
 using System.Text;
+using System.Text.RegularExpressions;
+using DataGateway.Mcp;
 using SqlKata.JsonQuery;
 using DataGateway.Data;
 using DataGateway.Data.Catalog;
@@ -18,6 +20,8 @@ public sealed class DataGatewayBuilder
     private bool frozen;
     private string? mcpTitle;
     private string? mcpAbout;
+    private string? mcpNamePrefix;
+    private string? mcpDescriptionPrefix;
     private GatewayLimits limits = new();
     private GatewayHostPolicy? hostPolicy;
 
@@ -31,6 +35,18 @@ public sealed class DataGatewayBuilder
         CheckMutable();
         mcpTitle = title;
         mcpAbout = about;
+        return this;
+    }
+
+    /// <summary>Sets optional MCP tool name and description prefixes. The last call wins.</summary>
+    /// <remarks>Blank values are unset. Registration validates nonblank values as supplied: names use
+    /// 1-24 lowercase ASCII letters, digits or underscores, start with a letter and never end with an underscore.
+    /// Descriptions are one line of at most 80 UTF-8 bytes ending with a period. Registration freezes this setting.</remarks>
+    public DataGatewayBuilder UseMcpTools(string? namePrefix = null, string? descriptionPrefix = null)
+    {
+        CheckMutable();
+        mcpNamePrefix = namePrefix;
+        mcpDescriptionPrefix = descriptionPrefix;
         return this;
     }
 
@@ -131,9 +147,24 @@ public sealed class DataGatewayBuilder
         var queryLimits = ReadLimits();
         return new GatewayRegistration(name, catalog, CreateRunners(), title, about)
         {
+            McpTools = ReadMcpTools(),
             Limits = queryLimits,
             HostPolicy = ReadHostPolicy()
         };
+    }
+
+    private McpToolSettings ReadMcpTools()
+    {
+        var namePrefix = string.IsNullOrWhiteSpace(mcpNamePrefix) ? null : mcpNamePrefix;
+        if (namePrefix is not null && (!Regex.IsMatch(namePrefix, @"\A[a-z][a-z0-9_]{0,23}\z") || namePrefix.EndsWith('_')))
+            throw Refuse("MCP namePrefix must be 1-24 lowercase ASCII letters, digits or underscores, start with a letter and not end with an underscore.");
+        var descriptionPrefix = string.IsNullOrWhiteSpace(mcpDescriptionPrefix) ? null : mcpDescriptionPrefix;
+        _ = ReadMcpLine(descriptionPrefix, "descriptionPrefix", 80);
+        if (descriptionPrefix is not null && !descriptionPrefix.EndsWith('.'))
+            throw Refuse("MCP descriptionPrefix must end with a period.");
+        var settings = new McpToolSettings(namePrefix, descriptionPrefix);
+        DataGatewayTools.ValidateDescriptions(DataGatewayTools.Definitions(settings), Refuse);
+        return settings;
     }
 
     private JsonQueryLimits ReadLimits()

@@ -8,7 +8,7 @@ using ModelContextProtocol.Server;
 
 namespace DataGateway.Mcp;
 
-internal sealed class DataGatewayTool<T>(Tool definition,
+internal sealed class DataGatewayTool<T>(Tool definition, string operation,
     Func<IServiceProvider, byte[], RequestTrail, CancellationToken, Task<CatalogResult<T>>> run,
     Func<IServiceProvider, FailureLog> getFailures) : McpServerTool where T : class
 {
@@ -29,14 +29,14 @@ internal sealed class DataGatewayTool<T>(Tool definition,
             var json = GatewayJson.Of(services);
             var result = await run(services, body, trail, cancellationToken);
             if (result.Failure is not { } failure) return ToolWire.Answer(JsonSerializer.Serialize(result.Value, json));
-            var incident = failures.Write(caller, cancellationToken.IsCancellationRequested, definition.Name, body, failure, trail);
+            var incident = failures.Write(caller, cancellationToken.IsCancellationRequested, operation, body, failure, trail);
             return ToolWire.Failed(JsonSerializer.Serialize(ErrorEnvelope.From(failure, incident).Body, json));
         }
         catch (Exception error)
         {
             // A caller's cancel never reaches this catch: the data layer returns it as QueryCancelled or CatalogCancelled.
             // Anything caught here, OperationCanceledException included, is an unexpected fault.
-            var incident = failures.WriteUnexpected(caller, cancellationToken.IsCancellationRequested, definition.Name, trail, error);
+            var incident = failures.WriteUnexpected(caller, cancellationToken.IsCancellationRequested, operation, trail, error);
             return ToolWire.Unexpected(incident);
         }
     }

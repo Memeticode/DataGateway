@@ -1,4 +1,5 @@
 using DataGateway.Core.Catalog;
+using DataGateway.Mcp;
 using DataGateway.Data.Queries;
 using SqlKata.JsonQuery;
 
@@ -14,6 +15,7 @@ internal sealed class GatewayRegistration(string name,
     internal string Name { get; } = name;
     internal string? McpTitle { get; } = mcpTitle;
     internal string? McpAbout { get; } = mcpAbout;
+    internal McpToolSettings McpTools { get; init; } = new(null, null);
     internal JsonQueryLimits Limits { get; init; } = JsonQueryLimits.Default with { MaxLimit = null };
     internal GatewayHostPolicy? HostPolicy { get; init; }
     internal GatewayCatalog CreateCatalog(IServiceProvider services) => catalog(services, runners);

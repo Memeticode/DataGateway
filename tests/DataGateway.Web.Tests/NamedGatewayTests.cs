@@ -1395,7 +1395,7 @@ public sealed class NamedGatewayTests
         Signature(methods.Single(method => method.Name == "MapDataGatewayApiPage"), typeof(RouteGroupBuilder), [typeof(IEndpointRouteBuilder), typeof(string), typeof(string)]);
         Assert.All(methods, method => Assert.True(method.IsDefined(typeof(System.Runtime.CompilerServices.ExtensionAttribute))));
         var fluent = builder.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-        Assert.Equal(6, fluent.Length);
+        Assert.Equal(7, fluent.Length);
         var mcp = fluent.Single(method => method.Name == "UseMcpServer");
         Signature(mcp, builder, [typeof(string), typeof(string)]);
         Assert.False(mcp.IsGenericMethod);
@@ -1403,6 +1403,19 @@ public sealed class NamedGatewayTests
         var nullable = new NullabilityInfoContext();
         Assert.All(mcp.GetParameters(), parameter =>
             Assert.Equal(NullabilityState.Nullable, nullable.Create(parameter).ReadState));
+        var tools = fluent.Single(method => method.Name == "UseMcpTools");
+        Assert.Equal(builder, tools.ReturnType);
+        Assert.Equal(new[] { typeof(string), typeof(string) }, tools.GetParameters().Select(parameter => parameter.ParameterType));
+        Assert.False(tools.IsGenericMethod);
+        Assert.False(tools.IsStatic);
+        Assert.Equal(new[] { "namePrefix", "descriptionPrefix" }, tools.GetParameters().Select(parameter => parameter.Name));
+        Assert.All(tools.GetParameters(), parameter =>
+        {
+            Assert.Equal(NullabilityState.Nullable, nullable.Create(parameter).ReadState);
+            Assert.True(parameter.IsOptional);
+            Assert.True(parameter.HasDefaultValue);
+            Assert.Null(parameter.DefaultValue);
+        });
         var boundary = methods.Single(method => method.Name == "UseDataGatewayErrors" && method.GetParameters().Length == 1);
         var hostBoundary = methods.Single(method => method.Name == "UseDataGatewayErrors" && method.GetParameters().Length == 2);
         Signature(hostBoundary, typeof(IApplicationBuilder), [typeof(IApplicationBuilder), typeof(string)]);
@@ -1493,6 +1506,7 @@ public sealed class NamedGatewayTests
         {
             Assert.Same(gateway, gateway.UseCatalog(sp => new NamedGatewayCatalog(state, Guid.Empty)));
             Assert.Same(gateway, gateway.UseMcpServer(null, null));
+            Assert.Same(gateway, gateway.UseMcpTools());
             Assert.Same(gateway, gateway.UseLimits(new GatewayLimits()));
             Assert.Same(gateway, gateway.AddEngine(new NamedGatewayEngine()));
             Assert.Same(gateway, gateway.AddEngine(new NamedGatewayEngine(), " variant "));

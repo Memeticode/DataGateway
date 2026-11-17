@@ -81,9 +81,10 @@ internal static class McpEndpoint
             Title = registration.McpTitle,
             Version = typeof(DataGatewayBuilder).Assembly.GetName().Version!.ToString(3)
         };
+        var instructions = DataGatewayTools.GetInstructions(registration.McpTools);
         options.ServerInstructions = registration.McpAbout is null
-            ? DataGatewayTools.Instructions
-            : registration.McpAbout + " " + DataGatewayTools.Instructions;
+            ? instructions
+            : registration.McpAbout + " " + instructions;
         options.ToolCollection = [.. DataGatewayTools.Create(registration, binding.Failures)];
         return Task.CompletedTask;
     }

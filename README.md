@@ -468,6 +468,12 @@ A request combining the vocabulary:
 
 `/mcp` uses streamable HTTP in stateless mode, with POST only. The app supplies authentication and authorization. The MCP SDK applies its HTTP transport settings to every MCP endpoint in a process, so an app that also configures the SDK's HTTP transport for an MCP server of its own is refused at startup; serve DataGateway from its own app. MCP identity comes from the gateway registration name and the DataGateway assembly version. `UseMcpServer(title, about)` configures optional display text; see [configuration](CONFIGURATION.md).
 
+Some clients do not show server instructions and see only tool names and descriptions. Configure each gateway with `gateway.UseMcpTools(namePrefix: "retail", descriptionPrefix: "Retail sales and inventory.");` to identify its domain in those clients.
+
+This names the tools `retail_list_sources`, `retail_describe_source` and `retail_query_source`. Each description starts with `Retail sales and inventory. ` followed immediately by the existing hook and text. Instructions and argument descriptions refer to the final tool names. JSON routes and failure-log operation names stay canonical. Each gateway may use different prefixes.
+
+Both arguments are optional; null, empty and whitespace-only values unset the corresponding prefix. The last call wins, and registration validates the final settings. A name prefix must match `[a-z][a-z0-9_]{0,23}` with no trailing underscore. A description prefix must be one line, at most 80 UTF-8 bytes, and end with a period. Nonblank values are checked and preserved as supplied, without trimming; CR and LF are refused. Every final tool description must be fewer than 1,000 characters. Omitting the settings preserves the default names and text.
+
 <!-- tool-table -->
 | Tool | Arguments | Route |
 | --- | --- | --- |
