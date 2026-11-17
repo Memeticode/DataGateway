@@ -52,7 +52,7 @@ public sealed class ErrorLogTests
     public async Task T4_T5_T11_every_failure_has_one_complete_record(string operation, string kind, string body, string code, int status)
     {
         using var settings = new ErrorLogSettingsScope();
-        var runner = kind == "connect" ? new QueryRunner(new SqlServerEngine(), 1) : Runner(kind);
+        var runner = kind == "connect" ? new QueryRunner(new SqlServerEngine()) : Runner(kind);
         await using var host = new LoggedHost(Catalog(operation == "query" && kind == "io" ? "ok" : kind, operation == "list"),
             kind == "connect" ? new SqlServerEngine() : Engine(kind));
         await host.Start();
@@ -499,7 +499,7 @@ public sealed class ErrorLogTests
         };
     }));
 
-    internal static QueryRunner Runner(string kind = "ok") =>FakeRows.Runner(new SqlServerEngine(), 1, FakeRows.From((_, _, connected, _) =>
+    internal static QueryRunner Runner(string kind = "ok") =>FakeRows.Runner(new SqlServerEngine(), FakeRows.From((_, _, connected, _) =>
     {
         connected();
         return kind switch
@@ -511,15 +511,15 @@ public sealed class ErrorLogTests
     internal static Dictionary<string, object?>[] Rows(string kind = "ok") => Columns().Select(c => new Dictionary<string, object?>
     {
         ["id"] = 7319, ["object_name"] = kind == "seed" ? "dbo.not a view" : "hidden_schema.synthetic_view", ["connection_string"] = kind == "stored" ? "malformed-secret-connection" : SourceConnection,
-        ["name"] = "synthetic", ["title"] = "Synthetic", ["description"] = "Synthetic", ["grain"] = "One row", ["row_cap"] = 500,
+        ["name"] = "synthetic", ["title"] = "Synthetic", ["description"] = "Synthetic", ["grain"] = "One row", ["row_cap"] = 500, ["query_timeout_seconds"] = 1,
         ["column_name"] = c.ColumnName, ["ordinal"] = c.Ordinal, ["column_title"] = c.Title, ["column_description"] = c.Description,
         ["data_type"] = c.DataType, ["unit"] = null, ["magnitude"] = null, ["display_format"] = null,
         ["can_select"] = kind != "off", ["can_filter"] = kind != "off", ["can_sort"] = kind != "off", ["can_group"] = kind != "off", ["can_aggregate"] = kind != "off"
     }).ToArray();
     private static DataSourceColumnRow[] Columns() => [new("text", 1, "Text", "Synthetic text", "text", null, null, null, true, true, true, true, true),
         new("number", 2, "Number", "Synthetic number", "number", null, null, null, true, true, true, true, true), new("day", 3, "Day", "Synthetic day", "date", null, null, null, true, true, true, true, true)];
-    internal static SourceContract Contract(string kind = "ok") => CatalogMapping.Map(new(new DataSourceRow(kind == "seed" ? "dbo.not a view" : "hidden_schema.synthetic_view", kind == "stored" ? "malformed-secret-connection" : SourceConnection)
-        { Id = 7319, Name = "synthetic", Title = "Synthetic", Description = "Synthetic", Grain = "One row", RowCap = 500, IsActive = true }, Columns())).Value;
+    internal static SourceContract Contract(string kind = "ok", int queryTimeoutSeconds = 1) => CatalogMapping.Map(new(new DataSourceRow(kind == "seed" ? "dbo.not a view" : "hidden_schema.synthetic_view", kind == "stored" ? "malformed-secret-connection" : SourceConnection)
+        { QueryTimeoutSeconds = queryTimeoutSeconds, Id = 7319, Name = "synthetic", Title = "Synthetic", Description = "Synthetic", Grain = "One row", RowCap = 500, IsActive = true }, Columns())).Value;
     [Fact]
     public async Task Catalog_driver_message_is_suppressed()
     {

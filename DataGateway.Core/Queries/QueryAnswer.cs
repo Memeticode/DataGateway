@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DataGateway.Core.Catalog;
+using SqlKata;
 using SqlKata.JsonQuery;
 
 namespace DataGateway.Core.Queries;
@@ -15,19 +16,26 @@ public sealed record QueryResponse(string Source, IReadOnlyList<OutputColumn> Co
 {
     public const string NothingFound = "Nothing found that matched your query.";
     public const string CompleteSet = "Complete result set.";
+    public const string InValuesUnmatched = "All matching rows returned. in values that matched no row are left out: compare the values you asked for with the rows.";
+    public const string InValuesHiddenByAggregate = "All matching rows aggregated. in values that matched no row are left out and an aggregate hides them: check the in values first.";
     public const string NoParticularOrder = "Rows are in no particular order.";
 
     [JsonIgnore]
     public bool NoMatchingRows { get; init; }
     [JsonIgnore]
     public bool Unordered { get; init; }
+    [JsonIgnore]
+    public bool HasInFilter { get; init; }
+    [JsonIgnore]
+    public bool HasAggregate { get; init; }
 
     public static string CappedAt(int rowCount) => "The result set was capped at " + rowCount.ToString(CultureInfo.InvariantCulture) + (rowCount == 1 ? " row." : " rows.");
 
     [JsonPropertyOrder(1)]
     public string Hint => More
         ? CappedAt(RowCount) + (Unordered ? " " + NoParticularOrder : "")
-        : RowCount == 0 || NoMatchingRows ? NothingFound : CompleteSet;
+        : RowCount == 0 || NoMatchingRows ? NothingFound
+        : HasInFilter ? (HasAggregate ? InValuesHiddenByAggregate : InValuesUnmatched) : CompleteSet;
 }
 
 /// <summary>
@@ -85,12 +93,19 @@ public static class QueryAnswer
             foreach (var column in query.Columns)
                 if (row[column.Name] is DateTime date && date.TimeOfDay == TimeSpan.Zero)
                     row[column.Name] = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var tree = query.CloneQuery();
         return new(contract.Source.Name, query.Columns, rows.Rows, rows.RowCount, rows.More)
         {
             NoMatchingRows = rows.NoMatchingRows,
-            Unordered = !query.CloneQuery().HasComponent("order")
+            Unordered = !tree.HasComponent("order"),
+            HasInFilter = HasInFilter(tree),
+            HasAggregate = tree.GetComponents<AbstractColumn>("select").Any(column => column is AggregatedColumn)
         };
     }
+
+    private static bool HasInFilter(Query tree) => tree.GetComponents<AbstractCondition>("where").Any(condition =>
+        condition is InCondition<object> { IsNot: false } ||
+        condition is NestedCondition<Query> nested && HasInFilter(nested.Query));
 
     private static InvalidOperationException MismatchedRow() => new("The query row does not match its output columns.");
 

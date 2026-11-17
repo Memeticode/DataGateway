@@ -24,16 +24,15 @@ public sealed class NamedGatewayLimitsTests
     public async Task T1_defaults_and_partial_assignment()
     {
         var defaults = new GatewayLimits();
-        Values(defaults, 30, 65536, 8, 50, 100);
+        Values(defaults, 65536, 8, 50, 100);
         Assert.Equal(JsonQueryLimits.Default.MaxJsonLength, defaults.MaxJsonLength);
         Assert.Equal(JsonQueryLimits.Default.MaxFilterDepth, defaults.MaxFilterDepth);
         Assert.Equal(JsonQueryLimits.Default.MaxFilterConditions, defaults.MaxFilterConditions);
         Assert.Equal(JsonQueryLimits.Default.MaxInValues, defaults.MaxInValues);
-        Values(new GatewayLimits { CommandTimeoutSeconds = 7 }, 7, 65536, 8, 50, 100);
-        Values(new GatewayLimits { MaxJsonLength = 200 }, 30, 200, 8, 50, 100);
-        Values(new GatewayLimits { MaxFilterDepth = 0 }, 30, 65536, 0, 50, 100);
-        Values(new GatewayLimits { MaxFilterConditions = 2 }, 30, 65536, 8, 2, 100);
-        Values(new GatewayLimits { MaxInValues = 3 }, 30, 65536, 8, 50, 3);
+        Values(new GatewayLimits { MaxJsonLength = 200 }, 200, 8, 50, 100);
+        Values(new GatewayLimits { MaxFilterDepth = 0 }, 65536, 0, 50, 100);
+        Values(new GatewayLimits { MaxFilterConditions = 2 }, 65536, 8, 2, 100);
+        Values(new GatewayLimits { MaxInValues = 3 }, 65536, 8, 50, 3);
         await using var rig = new Rig([null, new GatewayLimits(), null]);
         await rig.Start();
         foreach (var name in new[] { "a", "b" })
@@ -47,9 +46,9 @@ public sealed class NamedGatewayLimitsTests
     [Fact]
     public async Task T2_last_assignment_is_deferred_and_frozen()
     {
-        var first = new GatewayLimits { CommandTimeoutSeconds = 7, MaxJsonLength = 300, MaxFilterDepth = 2, MaxFilterConditions = 4, MaxInValues = 5 };
-        var second = new GatewayLimits { CommandTimeoutSeconds = 11, MaxJsonLength = 400, MaxFilterDepth = 3, MaxFilterConditions = 6, MaxInValues = 7 };
-        var invalid = new GatewayLimits { CommandTimeoutSeconds = 0, MaxJsonLength = 0, MaxFilterDepth = -1, MaxFilterConditions = 0, MaxInValues = 0 };
+        var first = new GatewayLimits { MaxJsonLength = 300, MaxFilterDepth = 2, MaxFilterConditions = 4, MaxInValues = 5 };
+        var second = new GatewayLimits { MaxJsonLength = 400, MaxFilterDepth = 3, MaxFilterConditions = 6, MaxInValues = 7 };
+        var invalid = new GatewayLimits { MaxJsonLength = 0, MaxFilterDepth = -1, MaxFilterConditions = 0, MaxInValues = 0 };
         foreach (var (earlier, final) in new[]
         {
             (invalid, first),
@@ -73,11 +72,11 @@ public sealed class NamedGatewayLimitsTests
             Frozen(captured!, "a");
             await rig.Start();
             await rig.Success("a", OrderedTwo, 2);
-            Assert.All(rig.Engine("a").Executed, receipt => Assert.Equal(final.CommandTimeoutSeconds, receipt.Timeout));
+            Assert.All(rig.Engine("a").Executed, receipt => Assert.Equal(30, receipt.Timeout));
             Frozen(captured!, "a");
             await rig.Success("a", OrderedTwo, 2);
             Projection(rig.Registration("a"), final.MaxJsonLength, final.MaxFilterDepth, final.MaxFilterConditions, final.MaxInValues);
-            Assert.All(rig.Engine("a").Executed, receipt => Assert.Equal(final.CommandTimeoutSeconds, receipt.Timeout));
+            Assert.All(rig.Engine("a").Executed, receipt => Assert.Equal(30, receipt.Timeout));
         }
         using var fixture = new SqliteFixture();
         var state = new NamedGatewayState(fixture);
@@ -104,7 +103,7 @@ public sealed class NamedGatewayLimitsTests
             if (failure == "validation")
             {
                 Assert.True(completed);
-                Assert.Equal("Gateway 'a'. CommandTimeoutSeconds must be an integer from 1 to 2147483647.", Assert.IsType<InvalidOperationException>(error).Message);
+                Assert.Equal("Gateway 'a'. MaxJsonLength must be an integer from 1 to 2147483647.", Assert.IsType<InvalidOperationException>(error).Message);
             }
             else if (failure == "callback")
                 Assert.Same(callbackError, error);
@@ -122,7 +121,7 @@ public sealed class NamedGatewayLimitsTests
         using var fixture = new SqliteFixture();
         var state = new NamedGatewayState(fixture);
         var cases = new List<(string Field, int Value)>();
-        foreach (var field in new[] { "CommandTimeoutSeconds", "MaxJsonLength", "MaxFilterConditions", "MaxInValues" })
+        foreach (var field in new[] { "MaxJsonLength", "MaxFilterConditions", "MaxInValues" })
             foreach (var value in new[] { int.MinValue, -1, 0 })
                 cases.Add((field, value));
         foreach (var value in new[] { int.MinValue, -1, 31, int.MaxValue })
@@ -166,7 +165,7 @@ public sealed class NamedGatewayLimitsTests
         using var fixture = new SqliteFixture();
         var state = new NamedGatewayState(fixture);
         var cases = new List<(string Field, int Value)>();
-        foreach (var field in new[] { "CommandTimeoutSeconds", "MaxJsonLength", "MaxFilterConditions", "MaxInValues" })
+        foreach (var field in new[] { "MaxJsonLength", "MaxFilterConditions", "MaxInValues" })
             foreach (var value in new[] { 1, int.MaxValue })
                 cases.Add((field, value));
         foreach (var value in new[] { 0, 1, JsonQueryLimits.None.MaxFilterDepth })
@@ -320,7 +319,9 @@ public sealed class NamedGatewayLimitsTests
     public async Task T10_timeout_reaches_each_engine()
     {
         var shared = new NamedGatewayEngine();
-        await using var rig = new Rig([new GatewayLimits { CommandTimeoutSeconds = 7 }, new GatewayLimits { CommandTimeoutSeconds = 11 }, null], shared);
+        await using var rig = new Rig([null, null, null], shared);
+        rig.Fixture("a").Change("UPDATE gateway_source SET query_timeout_seconds=7");
+        rig.Fixture("b").Change("UPDATE gateway_source SET query_timeout_seconds=11");
         await rig.Start();
         foreach (var alternate in new[] { false, true })
         {
@@ -399,12 +400,12 @@ public sealed class NamedGatewayLimitsTests
         foreach (var exampleFirst in new[] { true, false })
         {
             using var example = new SqliteFixture();
-            example.Change("UPDATE gateway_source SET name='synthetic_example_only' WHERE name='synthetic_other'; UPDATE proof_items SET id=id+100;");
+            example.Change("UPDATE gateway_source SET query_timeout_seconds=19; UPDATE gateway_source SET name='synthetic_example_only' WHERE name='synthetic_other'; UPDATE proof_items SET id=id+100;");
             var rootState = new NamedGatewayState(example);
             var engine = new NamedGatewayEngine();
-            var runner = new QueryRunner(engine, 19);
+            var runner = new QueryRunner(engine);
             var limits = JsonQueryLimits.Default with { MaxJsonLength = 1024, MaxFilterDepth = 0, MaxFilterConditions = 1, MaxInValues = 1, MaxLimit = 99 };
-            await using var rig = new Rig([new GatewayLimits { CommandTimeoutSeconds = 7, MaxFilterConditions = 2 }, null, null],
+            await using var rig = new Rig([new GatewayLimits { MaxFilterConditions = 2 }, null, null],
                 extra: services =>
                 {
                     services.AddSingleton<CatalogService<SqliteConnection>>(example.Catalog());
@@ -416,7 +417,6 @@ public sealed class NamedGatewayLimitsTests
                         .AddEngine(engine)
                         .UseLimits(new GatewayLimits
                         {
-                            CommandTimeoutSeconds = 19,
                             MaxJsonLength = 1024,
                             MaxFilterDepth = 0,
                             MaxFilterConditions = 1,
@@ -424,6 +424,7 @@ public sealed class NamedGatewayLimitsTests
                         })
                         .UseMcpServer("Synthetic example", "Synthetic proof."));
                 }, extraFirst: exampleFirst);
+            rig.Fixture("a").Change("UPDATE gateway_source SET query_timeout_seconds=7");
             rig.Host.App.MapDataGateway("SyntheticExample", "");
             await rig.Start();
             foreach (var protocol in Protocols)
@@ -469,9 +470,8 @@ public sealed class NamedGatewayLimitsTests
         }
     }
 
-    private static void Values(GatewayLimits limits, int timeout, int length, int depth, int conditions, int values)
+    private static void Values(GatewayLimits limits, int length, int depth, int conditions, int values)
     {
-        Assert.Equal(timeout, limits.CommandTimeoutSeconds);
         Assert.Equal(length, limits.MaxJsonLength);
         Assert.Equal(depth, limits.MaxFilterDepth);
         Assert.Equal(conditions, limits.MaxFilterConditions);
@@ -480,7 +480,6 @@ public sealed class NamedGatewayLimitsTests
 
     private static GatewayLimits One(string field, int value) => field switch
     {
-        "CommandTimeoutSeconds" => new GatewayLimits { CommandTimeoutSeconds = value },
         "MaxJsonLength" => new GatewayLimits { MaxJsonLength = value },
         "MaxFilterDepth" => new GatewayLimits { MaxFilterDepth = value },
         "MaxFilterConditions" => new GatewayLimits { MaxFilterConditions = value },

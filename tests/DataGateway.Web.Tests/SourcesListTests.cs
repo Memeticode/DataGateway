@@ -357,7 +357,7 @@ public sealed class SourcesListTests
             builder.Logging.ClearProviders();
             builder.Logging.AddProvider(logs);
             builder.WebHost.UseSetting("urls", "http://127.0.0.1:0");
-            builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["DataGateway:Limits:CommandTimeoutSeconds"] = "1" });
+            builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { });
             builder.Services.AddSingleton(catalog);
             catalog.Use(builder.Services);
         });

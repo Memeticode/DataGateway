@@ -127,6 +127,7 @@ public sealed class HostCompositionTests
             {
                 var cells = Cells(source);
                 cells["id"] = 1;
+                cells["query_timeout_seconds"] = 30;
                 foreach (var field in new[] { "unit", "magnitude", "display_format" }) cells[field] = null;
                 cells["connection_string"] = "Server=synthetic-sample;Database=synthetic-sample;Integrated Security=true";
                 foreach (var (key, value) in Cells(column))
@@ -190,7 +191,7 @@ public sealed class HostCompositionTests
         state.List = _ => Task.FromResult<IReadOnlyList<SourceListRow>>([HostCatalogState.HealthyList(++calls == 1 ? "first" : "second")]);
         await using var host = Host(state, "Development", new Dictionary<string, string?>
         {
-            ["DataGateway:Limits:CommandTimeoutSeconds"] = "7", ["DataGateway:Limits:MaxJsonLength"] = "4000",
+            ["DataGateway:Limits:MaxJsonLength"] = "4000",
             ["DataGateway:Limits:MaxFilterDepth"] = "0", ["DataGateway:Limits:MaxFilterConditions"] = "3",
             ["DataGateway:Limits:MaxInValues"] = "2", ["DataGateway:Mcp:Title"] = " Display ", ["DataGateway:Mcp:About"] = " About "
         });
@@ -233,7 +234,7 @@ public sealed class HostCompositionTests
         Assert.Equal("DataGateway.Web", mcp.ServerInfo.Name);
         Assert.Equal("1.0.0", mcp.ServerInfo.Version);
         Assert.Equal(typeof(DataGatewayExtensions).Assembly.GetName().Version?.ToString(3), mcp.ServerInfo.Version);
-        Assert.Equal(7, (await HostCatalogState.NamedRunner(host.App.Services)).CommandTimeoutSeconds);
+        Assert.NotNull(await HostCatalogState.NamedRunner(host.App.Services));
     }
 
     [Fact]
@@ -579,7 +580,7 @@ public sealed class HostCompositionTests
         new(objectName ?? row.ObjectName, connection ?? row.ConnectionString)
         {
             Id = row.Id, Name = name ?? row.Name, Title = row.Title, Description = row.Description,
-            Grain = row.Grain, IsActive = row.IsActive, RowCap = cap ?? row.RowCap
+            Grain = row.Grain, IsActive = row.IsActive, QueryTimeoutSeconds = row.QueryTimeoutSeconds, RowCap = cap ?? row.RowCap
         };
 
     private static CatalogDetail? Change(CatalogDetail detail, string kind) => kind switch

@@ -35,12 +35,12 @@ public sealed class QueryRunnerTests
     public async Task T10_stored_text_reaches_the_seam_unchanged(int seconds, bool explicitSettings)
     {
         var stored = explicitSettings ? S : S[..S.IndexOf(";Connect Timeout", StringComparison.Ordinal)];
-        var runner = FakeRows.Runner(new SqlServerEngine(), seconds, FakeRows.From((actual, _, _, _) =>
+        var runner = FakeRows.Runner(new SqlServerEngine(), FakeRows.From((actual, _, _, _) =>
         {
             Assert.True(string.Equals(stored, actual, StringComparison.Ordinal), "Stored text changed.");
             return Task.FromResult<IReadOnlyList<dynamic>>([]);
         }));
-        Assert.True((await runner.RunAsync(Source(stored), Compile(), CancellationToken.None)).IsSuccess);
+        Assert.True((await runner.RunAsync(Source(stored, seconds), Compile(), CancellationToken.None)).IsSuccess);
     }
 
     [Theory]
@@ -53,7 +53,7 @@ public sealed class QueryRunnerTests
     public async Task T11_invalid_connection_fails_before_io(string? stored)
     {
         var calls = 0;
-        var runner = FakeRows.Runner(new SqlServerEngine(), 3, (_, _, _, _) => { calls++; throw new Exception(); });
+        var runner = FakeRows.Runner(new SqlServerEngine(), (_, _, _, _) => { calls++; throw new Exception(); });
         var result = await runner.RunAsync(Source(stored!), Compile(), CancellationToken.None);
         var failure = Failure(result, "InvalidCatalog", "connect", stored ?? "");
         Assert.Equal(InvalidMessage, failure.Message);
@@ -70,7 +70,7 @@ public sealed class QueryRunnerTests
         var calls = 0;
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
-        var runner = FakeRows.Runner(new SqlServerEngine(), 3, (_, _, _, _) => { calls++; throw new Exception(); });
+        var runner = FakeRows.Runner(new SqlServerEngine(), (_, _, _, _) => { calls++; throw new Exception(); });
         var failure = Failure(await runner.RunAsync(Source(stored), Compile(), cancellation.Token),
             "QueryCancelled", null, stored);
         Assert.Null(failure.ExceptionType);
@@ -86,7 +86,7 @@ public sealed class QueryRunnerTests
     {
         using var cancellation = new CancellationTokenSource();
         var calls = 0;
-        var runner = FakeRows.Runner(new SqlServerEngine(), 3, FakeRows.From((_, _, connected, _) =>
+        var runner = FakeRows.Runner(new SqlServerEngine(), FakeRows.From((_, _, connected, _) =>
         {
             calls++;
             if (kind != "cancel") connected();
@@ -111,7 +111,7 @@ public sealed class QueryRunnerTests
         var compiled = new SqlServerEngine().Compile(validated);
         var rows = Rows();
         var calls = 0;
-        var runner = FakeRows.Runner(new SqlServerEngine(), 3, FakeRows.From((connection, query, connected, token) =>
+        var runner = FakeRows.Runner(new SqlServerEngine(), FakeRows.From((connection, query, connected, token) =>
         {
             calls++;
             Prepared(S, connection);
@@ -158,7 +158,7 @@ public sealed class QueryRunnerTests
     {
         var error = Error(kind);
         var calls = 0;
-        var runner = FakeRows.Runner(new SqlServerEngine(), 3, (_, _, mark, _) =>
+        var runner = FakeRows.Runner(new SqlServerEngine(), (_, _, mark, _) =>
         {
             calls++;
             if (connected) mark();
@@ -198,7 +198,7 @@ public sealed class QueryRunnerTests
     {
         using var cancellation = new CancellationTokenSource();
         var error = Error(kind);
-        var runner = FakeRows.Runner(new SqlServerEngine(), 3, (_, _, mark, _) =>
+        var runner = FakeRows.Runner(new SqlServerEngine(), (_, _, mark, _) =>
         {
             if (connected) mark();
             if (cancelled) cancellation.Cancel();
@@ -221,10 +221,10 @@ public sealed class QueryRunnerTests
             var port = ((IPEndPoint)listener.LocalEndpoint).Port;
             var connection = new SqlConnectionStringBuilder(S) { DataSource = $"tcp:127.0.0.1,{port}", ConnectTimeout = cancel ? 30 : 1, ConnectRetryCount = 0 }.ConnectionString;
             using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            var runner = new QueryRunner(new SqlServerEngine(), 30);
+            var runner = new QueryRunner(new SqlServerEngine());
             var accepted = listener.AcceptTcpClientAsync();
             var elapsed = Stopwatch.StartNew();
-            var pending = runner.RunAsync(Source(connection), Compile(), cancellation.Token);
+            var pending = runner.RunAsync(Source(connection, 30), Compile(), cancellation.Token);
             using var client = await accepted.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.False(pending.IsCompleted);
             if (cancel) { cancellation.Cancel(); elapsed.Restart(); }
@@ -240,7 +240,7 @@ public sealed class QueryRunnerTests
     public async Task T16_provider_message_reaches_the_line_unchanged()
     {
         var error = new InvalidOperationException("provider detail for fake-visible-host");
-        var runner = FakeRows.Runner(new SqlServerEngine(), 3, (_, _, _, _) => throw error);
+        var runner = FakeRows.Runner(new SqlServerEngine(), (_, _, _, _) => throw error);
         var failure = Failure(await runner.RunAsync(Source(), Compile(), CancellationToken.None), "SourceUnavailable", "connect");
         Assert.Same(error, failure.DriverException);
         var line = new FailureLine("abc", "synthetic-user", "query", null, failure, null,
@@ -269,9 +269,9 @@ public sealed class QueryRunnerTests
     }
 
     [Theory]
-    [InlineData(false, 30)]
-    [InlineData(true, 41)]
-    public async Task T18_host_registers_one_runner_with_configured_limits(bool configured, int command)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task T18_host_registers_one_runner_with_configured_limits(bool configured)
     {
         var saved = Environment.GetEnvironmentVariable(DataGatewayConfiguration.ConnectionSetting);
         Environment.SetEnvironmentVariable(DataGatewayConfiguration.ConnectionSetting,
@@ -288,12 +288,12 @@ public sealed class QueryRunnerTests
                 new HostCatalogState().Use(builder.Services);
                 if (configured) builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    ["DataGateway:Limits:CommandTimeoutSeconds"] = "41"
+                    ["DataGateway:Limits:MaxInValues"] = "41"
                 });
             });
             var runner = await HostCatalogState.NamedRunner(app.Services);
             Assert.Same(runner, await HostCatalogState.NamedRunner(app.Services));
-            Assert.Equal(command, runner.CommandTimeoutSeconds);
+            Assert.Equal(configured ? 41 : 100, app.Services.GetRequiredService<SqlKata.JsonQuery.JsonQueryLimits>().MaxInValues);
             Assert.Equal("Catalog", Assert.Single(app.Configuration.GetSection("ConnectionStrings").GetChildren()).Key);
         }
         finally { Environment.SetEnvironmentVariable(DataGatewayConfiguration.ConnectionSetting, saved); }
@@ -303,10 +303,9 @@ public sealed class QueryRunnerTests
     public async Task T18_exact_public_surface_and_argument_guards()
     {
         var constructor = Assert.Single(typeof(QueryRunner).GetConstructors());
-        Assert.Equal(new[] { typeof(IDatabaseEngine), typeof(int) }, constructor.GetParameters().Select(p => p.ParameterType));
-        Assert.Equal("engine", Assert.Throws<ArgumentNullException>(() => new QueryRunner(null!, 3)).ParamName);
-        Assert.Throws<ArgumentOutOfRangeException>(() => new QueryRunner(new SqlServerEngine(), 0));
-        var runner = new QueryRunner(new SqlServerEngine(), 3);
+        Assert.Equal(new[] { typeof(IDatabaseEngine) }, constructor.GetParameters().Select(p => p.ParameterType));
+        Assert.Equal("engine", Assert.Throws<ArgumentNullException>(() => new QueryRunner(null!)).ParamName);
+        var runner = new QueryRunner(new SqlServerEngine());
         Assert.Equal("query", Assert.Throws<ArgumentNullException>(() => runner.Compile(null!)).ParamName);
         await Assert.ThrowsAsync<ArgumentNullException>(() => runner.RunAsync(null!, Compile(), CancellationToken.None));
         await Assert.ThrowsAsync<ArgumentNullException>(() => runner.RunAsync(Source(), null!, CancellationToken.None));
@@ -334,7 +333,7 @@ public sealed class QueryRunnerTests
             Assert.IsAssignableFrom<IDictionary<string, object?>>(row);
             if (realRows) Assert.IsType<OrderedDictionary<string, object?>>(row);
         }
-        var runner = FakeRows.Runner(new SqlServerEngine(), 3, FakeRows.From((_, _, connected, _) =>
+        var runner = FakeRows.Runner(new SqlServerEngine(), FakeRows.From((_, _, connected, _) =>
         { connected(); return Task.FromResult<IReadOnlyList<dynamic>>(input); }));
         var result = await runner.RunAsync(Source(), Compile("{\"limit\":3}"), CancellationToken.None);
         Assert.True(result.IsSuccess);
@@ -367,7 +366,7 @@ public sealed class QueryRunnerTests
             }
             finally { disposed = true; }
         }
-        var runner = FakeRows.Runner(new SqlServerEngine(), 3, (_, _, connected, _) => { connected(); return Stream(); });
+        var runner = FakeRows.Runner(new SqlServerEngine(), (_, _, connected, _) => { connected(); return Stream(); });
         var result = await runner.RunAsync(Source(), Compile("{\"limit\":3}"), CancellationToken.None);
         Assert.True(result.IsSuccess);
         Assert.Equal(3, result.Value.RowCount);
@@ -396,7 +395,7 @@ public sealed class QueryRunnerTests
             }
             finally { disposed = true; }
         }
-        var runner = FakeRows.Runner(new SqlServerEngine(), 3, (_, _, connected, token) => { connected(); return Stream(token); });
+        var runner = FakeRows.Runner(new SqlServerEngine(), (_, _, connected, token) => { connected(); return Stream(token); });
         var pending = runner.RunAsync(Source(), Compile(), cancellation.Token);
         await waiting.Task.WaitAsync(TimeSpan.FromSeconds(5));
         if (kind == "cancel") cancellation.Cancel();
@@ -435,9 +434,9 @@ public sealed class QueryRunnerTests
         }
     }
 
-    private static SourceContract Source(string connection = S) => CatalogMapping.Map(new CatalogRows(
+    private static SourceContract Source(string connection = S, int queryTimeoutSeconds = 3) => CatalogMapping.Map(new CatalogRows(
         new DataSourceRow("dbo.synthetic_view", connection)
-        { Id = 7319,
+        { QueryTimeoutSeconds = queryTimeoutSeconds, Id = 7319,
             Name = "synthetic", Title = "Synthetic", Description = "Synthetic source", Grain = "One row", RowCap = 500, IsActive = true
         }, [new("amount", 1, "Amount", "Synthetic amount", "number", null, null, null, true, true, true, false, false),
             new("day", 2, "Day", "Synthetic day", "date", null, null, null, true, true, false, false, false)])).Value;

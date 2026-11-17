@@ -150,6 +150,7 @@ namespace GatewaySample
                     Description = reader.GetString(2),
                     Grain = reader.GetString(3),
                     IsActive = reader.GetBoolean(4),
+                    QueryTimeoutSeconds = 30,
                     RowCap = reader.GetInt32(5)
                 };
                 DataSourceColumnRow[] columns =
@@ -344,6 +345,8 @@ List takes exactly `{}` (surrounding whitespace is allowed). Describe takes exac
 
 `querySchema` describes the source and how to query it: every column with its meaning and flags, then a rule for each query clause. It guides a query; DataGateway's validator decides. Its `limit.maximum` equals the source's `rowCap`, read from catalog `row_cap`. The example shows only `columns` and `limit`; the real answer also has select, filters, group_by, aggregates and order_by.
 
+Each source's catalog `query_timeout_seconds` sets its query deadline and provider command timeout from connection open through the last kept row. This required integer defaults to 30 and accepts 1 through 86400; it is detail-only and absent from wire answers. Existing SQL Server catalogs use [catalog-query-timeout.sql](db/catalog-query-timeout.sql); PostgreSQL catalogs use [catalog-query-timeout.sql](db/postgresql/catalog-query-timeout.sql). Both migrations are idempotent and preserve audit history. The host's sealed `SqlServerCatalog` and `PostgreSqlCatalog` examples accept `(db, int catalogTimeoutSeconds = 15)` for their own reads, independently of each source query deadline. Application-provided catalog readers choose their own read timeout.
+
 ### Query
 
 <!-- example name=query kind=request route=/query -->
@@ -414,7 +417,7 @@ The query vocabulary:
 - `order_by`: `{col, dir}` with dir asc or desc. With grouping, only group_by columns or aggregate outputs, and the aggregated column must be canSort.
 - `limit`: 1 up to the cap.
 
-An answer holds at most `limit` rows, or the cap without one. `more: true` means rows were left out, with or without `limit`; `more: false` means none were. Every answer ends with `hint`: `The result set was capped at 1 row.` when `more` is true and `rowCount` is 1, or `The result set was capped at N rows.` for every other capped count (N is `rowCount`). A capped query without `order_by` appends `Rows are in no particular order.` With `more: false`, the hint is `Nothing found that matched your query.` when no source rows matched, including an ungrouped aggregate that still returns one row with 0 or null; otherwise it is `Complete result set.` Aggregate values are unchanged. Midnight dates come back as `yyyy-MM-dd`, ready to paste into a filter.
+An answer holds at most `limit` rows, or the cap without one. `more: true` means rows were left out, with or without `limit`; `more: false` means none were. Every answer ends with `hint`: `The result set was capped at 1 row.` when `more` is true and `rowCount` is 1, or `The result set was capped at N rows.` for every other capped count (N is `rowCount`). A capped query without `order_by` appends `Rows are in no particular order.` With `more: false`, the hint is `Nothing found that matched your query.` when no source rows matched, including an ungrouped aggregate that still returns one row with 0 or null; otherwise, with an `in` filter (including one inside nested groups), it is `All matching rows returned. in values that matched no row are left out: compare the values you asked for with the rows.` If that query also has an aggregate, grouped or ungrouped, it is `All matching rows aggregated. in values that matched no row are left out and an aggregate hides them: check the in values first.` Without an `in` filter it is `Complete result set.` A `not_in` filter does not count as an `in` filter. Aggregate values are unchanged. Midnight dates come back as `yyyy-MM-dd`, ready to paste into a filter.
 
 A request combining the vocabulary:
 
@@ -474,7 +477,7 @@ A request combining the vocabulary:
 
 A tool's arguments are its route's request body. Its result is one text block holding exactly the route's JSON. A failure sets `isError` and uses the same code, path, message and incident ID. `UnexpectedError` adds a second text block asking the model to tell the user to report the incident ID. Unknown tools and malformed MCP messages use SDK JSON-RPC errors without a gateway failure event. A message over the body limit gets HTTP 400 `StructuralLimitExceeded` before any tool runs.
 
-Stateless calls end with their HTTP request. Ending the connection, a client timeout, or cancelling `CallToolAsync` through `HttpClientTransport` ends that request. Cancellation is forwarded to the reader or provider; interruption need not be immediate. Internal `QueryCancelled` and `CatalogCancelled` describe source and catalog cancellation. A disconnected caller receives no error body. A separate `notifications/cancelled` POST is accepted with HTTP 202 and cannot reach another running request. The call otherwise ends by itself or at the source `GatewayLimits.CommandTimeoutSeconds` (30 seconds by default); the app reader controls its catalog command timeout. Failure logging requires a failure value, so departure need not produce an event.
+Stateless calls end with their HTTP request. Ending the connection, a client timeout, or cancelling `CallToolAsync` through `HttpClientTransport` ends that request. Cancellation is forwarded to the reader or provider; interruption need not be immediate. Internal `QueryCancelled` and `CatalogCancelled` describe source and catalog cancellation. A disconnected caller receives no error body. A separate `notifications/cancelled` POST is accepted with HTTP 202 and cannot reach another running request. The call otherwise ends by itself or at the source catalog `query_timeout_seconds` value (30 seconds by default); the deadline uses the source's catalog value; the app reader controls its catalog command timeout. Failure logging requires a failure value, so departure need not produce an event.
 
 The [example host](DataGateway.Web/README.md#mcp) documents Windows sign-in, its local stdio proxy and client registration. Those are host choices.
 

@@ -12,6 +12,7 @@ public sealed class DataSourceRow(string objectName, string connectionString)
     public required string Grain { get; init; }
     public required bool IsActive { get; init; }
     public required int RowCap { get; init; }
+    public required int QueryTimeoutSeconds { get; init; }
     [JsonIgnore] public string ObjectName { get; } = objectName;
     [JsonIgnore] public string ConnectionString { get; } = connectionString;
 }

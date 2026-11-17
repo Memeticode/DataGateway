@@ -187,11 +187,11 @@ public sealed class EngineBoundaryTests
     public async Task T5_outside_adapter_executes_and_recognizes_its_own_failure(int? number)
     {
         var source = CatalogMapping.Map(new(new DataSourceRow("dbo.synthetic_view", "portable:source")
-        {
+        { QueryTimeoutSeconds = 41,
             Id = 7319, Name = "synthetic", Title = "Synthetic", Description = "Synthetic", Grain = "One row", RowCap = 500, IsActive = true
         }, [new("label", 1, "Label", "Synthetic", "text", null, null, null, true, true, true, true, true)])).Value;
         var engine = new ExecutingProbeEngine(number);
-        var runner = new QueryRunner(engine, 41);
+        var runner = new QueryRunner(engine);
         var compiled = runner.Compile(Validate("""{"select":["label"],"limit":2}"""));
         var success = await runner.RunAsync(source, compiled, CancellationToken.None);
         Assert.True(success.IsSuccess);
@@ -261,7 +261,7 @@ public sealed class EngineBoundaryTests
     private static ValidatedQuery Validate(string json)
     {
         var source = new DataSourceRow("dbo.synthetic_view", "fixture-connection-removed")
-        {
+        { QueryTimeoutSeconds = 41,
             Id = 7319, Name = "synthetic", Title = "Synthetic", Description = "Synthetic",
             Grain = "One row", RowCap = 500, IsActive = true
         };

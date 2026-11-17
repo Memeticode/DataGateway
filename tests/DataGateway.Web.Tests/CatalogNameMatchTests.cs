@@ -28,7 +28,7 @@ public sealed class CatalogNameMatchTests
     public void T2_a_row_for_another_name_is_an_unknown_source(string requested, string stored, bool kept)
     {
         var detail = new CatalogDetail("sqlserver", new CatalogRows(new DataSourceRow("dbo.vSales", "Server=synthetic")
-        {
+        { QueryTimeoutSeconds = 30,
             Name = stored, Title = "t", Description = "d", Grain = "g", IsActive = true, RowCap = 500
         }, []));
         Assert.Equal(kept, CatalogTableReader.Matching(detail, requested) is not null);

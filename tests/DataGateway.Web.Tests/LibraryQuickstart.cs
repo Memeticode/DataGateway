@@ -108,6 +108,7 @@ namespace GatewaySample
                     Description = reader.GetString(2),
                     Grain = reader.GetString(3),
                     IsActive = reader.GetBoolean(4),
+                    QueryTimeoutSeconds = 30,
                     RowCap = reader.GetInt32(5)
                 };
                 DataSourceColumnRow[] columns =

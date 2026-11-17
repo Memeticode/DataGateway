@@ -156,13 +156,13 @@ public sealed class HardeningTests
         Assert.NotEqual(true, result.IsError);
     }
 
-    // CommandTimeoutSeconds is one deadline for the whole query, even when every single read is fast.
+    // The source timeout is one deadline for the whole query, even when every single read is fast.
     [Fact]
     public async Task T4_slow_rows_that_each_beat_the_timeout_still_end_in_QueryTimeout()
     {
         var engine = new PacedEngine(beforeOpen: TimeSpan.Zero, perRow: TimeSpan.FromMilliseconds(300), rows: 100);
         var watch = Stopwatch.StartNew();
-        var result = await new QueryRunner(engine, 1).RunAsync(ErrorLogTests.Contract(), Query(keep: 50), CancellationToken.None);
+        var result = await new QueryRunner(engine).RunAsync(ErrorLogTests.Contract(queryTimeoutSeconds: 1), Query(keep: 50), CancellationToken.None);
         Assert.Equal("QueryTimeout", result.Failure?.Code);
         Assert.Equal("command", result.Failure!.Step);
         Assert.Equal("The query ran longer than the 1-second command timeout and was stopped. Narrow the filters, aggregate, or request fewer rows.", result.Failure.Message);
@@ -174,7 +174,7 @@ public sealed class HardeningTests
     public async Task T5_connecting_is_governed_by_the_connection_string_not_the_query_deadline()
     {
         var engine = new PacedEngine(beforeOpen: TimeSpan.FromMilliseconds(1500), perRow: TimeSpan.Zero, rows: 2);
-        var result = await new QueryRunner(engine, 1).RunAsync(ErrorLogTests.Contract(), Query(keep: 3), CancellationToken.None);
+        var result = await new QueryRunner(engine).RunAsync(ErrorLogTests.Contract(queryTimeoutSeconds: 1), Query(keep: 3), CancellationToken.None);
         Assert.True(result.IsSuccess);
         Assert.Equal(2, result.Value.RowCount);
     }
@@ -185,7 +185,7 @@ public sealed class HardeningTests
         var engine = new PacedEngine(beforeOpen: TimeSpan.Zero, perRow: TimeSpan.FromMilliseconds(200), rows: 100);
         using var caller = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
         var watch = Stopwatch.StartNew();
-        var result = await new QueryRunner(engine, 30).RunAsync(ErrorLogTests.Contract(), Query(keep: 50), caller.Token);
+        var result = await new QueryRunner(engine).RunAsync(ErrorLogTests.Contract(queryTimeoutSeconds: 30), Query(keep: 50), caller.Token);
         Assert.Equal("QueryCancelled", result.Failure?.Code);
         Assert.InRange(watch.Elapsed, TimeSpan.Zero, TimeSpan.FromSeconds(4));
         Assert.InRange(engine.RowsServed, 0, 5);
@@ -197,14 +197,14 @@ public sealed class HardeningTests
     public async Task T6b_rows_finished_after_the_deadline_by_a_provider_that_ignores_cancel_are_refused(int rows, int keep, int perRowMs)
     {
         var engine = new PacedEngine(beforeOpen: TimeSpan.Zero, perRow: TimeSpan.FromMilliseconds(perRowMs), rows: rows, honoursCancel: false);
-        var result = await new QueryRunner(engine, 1).RunAsync(ErrorLogTests.Contract(), Query(keep: keep), CancellationToken.None);
+        var result = await new QueryRunner(engine).RunAsync(ErrorLogTests.Contract(queryTimeoutSeconds: 1), Query(keep: keep), CancellationToken.None);
         Assert.Equal("QueryTimeout", result.Failure?.Code);
     }
 
     [Fact]
     public async Task T6c_a_cancel_the_engine_reports_as_an_io_error_after_the_deadline_is_QueryTimeout()
     {
-        var result = await new QueryRunner(new CancelAsIoEngine(), 1).RunAsync(ErrorLogTests.Contract(), Query(keep: 3), CancellationToken.None);
+        var result = await new QueryRunner(new CancelAsIoEngine()).RunAsync(ErrorLogTests.Contract(queryTimeoutSeconds: 1), Query(keep: 3), CancellationToken.None);
         Assert.Equal("QueryTimeout", result.Failure?.Code);
         Assert.IsType<IOException>(result.Failure!.DriverException);
     }
@@ -244,7 +244,7 @@ public sealed class HardeningTests
     public void T9_detail_rows_get_the_same_null_checks_as_list_rows()
     {
         var source = new DataSourceRow("dbo.synthetic_view", "Server=synthetic")
-        {
+        { QueryTimeoutSeconds = 30,
             Name = "synthetic", Title = null!, Description = null!, Grain = null!, IsActive = true, RowCap = 500
         };
         var failures = CatalogValidator.ValidateDetail("synthetic", new CatalogDetail("sqlserver", new CatalogRows(source, [])));

@@ -40,16 +40,16 @@ internal static class HostCatalogs
         }
     }
 
-    internal static void Configure(IServiceCollection services, bool postgreSql, int timeout)
+    internal static void Configure(IServiceCollection services, bool postgreSql)
     {
         if (postgreSql)
             services.TryAddTransient<CatalogService<NpgsqlConnection>>(provider =>
                 new PostgreSqlCatalog(DbContext<NpgsqlConnection>.FromFactory(() =>
-                    new NpgsqlConnection(Connection(provider))), timeout));
+                    new NpgsqlConnection(Connection(provider)))));
         else
             services.TryAddTransient<CatalogService<SqlConnection>>(provider =>
                 new SqlServerCatalog(DbContext<SqlConnection>.FromFactory(() =>
-                    new SqlConnection(Connection(provider))), timeout));
+                    new SqlConnection(Connection(provider)))));
     }
 
     internal static void Use(DataGatewayBuilder gateway, bool postgreSql)

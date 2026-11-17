@@ -360,6 +360,7 @@ internal sealed class ReadmeWire : IAsyncDisposable
         var row = Fields(source);
         row.Remove("rowCap");
         row["row_cap"] = source.GetProperty("rowCap").GetInt32();
+        row["query_timeout_seconds"] = 1;
         return row;
     }
 

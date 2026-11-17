@@ -61,7 +61,7 @@ public sealed class SourceDescriptionTests
         var rows = new CatalogRows(new DataSourceRow("hidden_schema.fake_object_x",
             "Server=fake-describe-host;User ID=fake-describe-user;Password=fake-describe-password")
         { Id = 7319,
-            Name = "synthetic", Title = "Synthetic", Description = "Measurements", Grain = "One row", RowCap = 500, IsActive = true
+            Name = "synthetic", Title = "Synthetic", Description = "Measurements", Grain = "One row", QueryTimeoutSeconds = 30, RowCap = 500, IsActive = true
         }, [Column("measure", 1)]);
         var result = CatalogMapping.Map(rows);
         Assert.True(result.IsSuccess, result.Failure?.Message);
@@ -400,8 +400,8 @@ public sealed class SourceDescriptionTests
     private static SourceContract Contract(IReadOnlyList<DataSourceColumnRow> columns)
     {
         var result = CatalogMapping.Map(new(new DataSourceRow("hidden.synthetic", "fixture-connection-removed")
-        { Id = 7319,
-            Name = "synthetic", Title = "Synthetic", Description = "Measurements", Grain = "One row", RowCap = 500, IsActive = true
+        { QueryTimeoutSeconds = 30, Id = 7319,
+            Name = "synthetic", Title = "Synthetic", Description = "Measurements", Grain = "One row",  RowCap = 500, IsActive = true
         }, columns));
         Assert.True(result.IsSuccess, result.Failure?.Message);
         return result.Value;

@@ -53,3 +53,5 @@ Await one consumer scope with single enumeration. Return detached ordered row di
 | [SqliteEngine](DataGateway.Data.Sqlite/SqliteEngine.cs) | `sqlite` | Tests-only. Requires a file data source, ReadOnly and pooling disabled. See the [finite proof boundary](DataGateway.Data.Sqlite/README.md#proof-boundary). |
 
 Register distinct aliases to select variants per source. No new public error-code design or runtime discovery is needed.
+
+`QueryRunner(engine)` uses each source contract's `QueryTimeoutSeconds`, read from catalog `query_timeout_seconds` (required integer, default 30, range 1 through 86400), for its deadline, command timeout and timeout correction. Existing catalogs use `db/catalog-query-timeout.sql` or `db/postgresql/catalog-query-timeout.sql`. The example catalog constructors accept `(db, int catalogTimeoutSeconds = 15)` and use it only for catalog reads.

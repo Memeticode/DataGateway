@@ -71,10 +71,10 @@ public sealed class DatabaseEngineTests
         Assert.True(sourceText.IndexOf(".FromFactory(", StringComparison.Ordinal) < sourceText.IndexOf(".BatchAsync(", StringComparison.Ordinal));
         Assert.DoesNotContain(type.GetFields(flags), field => field.FieldType.Name.StartsWith("DbContext", StringComparison.Ordinal));
         using var fixture = new SqliteFixture();
-        var source = await fixture.Source();
+        var source = await fixture.Source(7);
         var history = new History();
         var engine = new HidingEngine(text => new HistoryConnection(text, history));
-        var runner = new QueryRunner(engine, 7);
+        var runner = new QueryRunner(engine);
         var compiled = runner.Compile(Validate(source));
         var result = await runner.RunAsync(source, compiled, default);
         Assert.True(result.IsSuccess, result.Failure?.Message);
@@ -90,7 +90,7 @@ public sealed class DatabaseEngineTests
     public async Task T2_compilation_clones_prepares_before_compiler_and_execution_order()
     {
         using var fixture = new SqliteFixture();
-        var source = await fixture.Source();
+        var source = await fixture.Source(7);
         var history = new History();
         var engine = new TestEngine(text => { history.Hit("factory"); return new HistoryConnection(text, history); }) { Trace = history.Hit };
         var validated = Validate(source, """{"select":["id"],"filters":[{"or":[{"col":"label","op":"like","value":"%_%"},{"col":"id","op":"gte","value":2}]}],"limit":3}""");
@@ -129,7 +129,7 @@ public sealed class DatabaseEngineTests
     public async Task T2_serial_and_overlapping_calls_have_independent_resources_tokens_and_timeouts()
     {
         using var fixture = new SqliteFixture();
-        var source = await fixture.Source();
+        var source = await fixture.Source(41);
         var histories = new List<History>();
         var engine = new TestEngine(text =>
         {
@@ -152,7 +152,7 @@ public sealed class DatabaseEngineTests
         try
         {
             await entered.Task.WaitAsync(Bound);
-            var two = await new QueryRunner(engine, 41).RunAsync(source, Raw("SELECT 41 AS n"), second.Token);
+            var two = await new QueryRunner(engine).RunAsync(source, Raw("SELECT 41 AS n"), second.Token);
             Assert.True(two.IsSuccess);
             Assert.Equal(41L, two.Value.Rows[0]["n"]);
             Assert.False(one.IsCompleted);
@@ -180,10 +180,10 @@ public sealed class DatabaseEngineTests
     public async Task T3_cap_and_eof_read_counts(bool leaf, int keep, int available)
     {
         using var fixture = new SqliteFixture();
-        var source = await fixture.Source();
+        var source = await fixture.Source(7);
         var probe = new SqliteProbe();
         IDatabaseEngine engine = leaf ? new SqliteEngine(probe.Create) : new TestEngine(probe.Create);
-        var runner = new QueryRunner(engine, 7);
+        var runner = new QueryRunner(engine);
         var validated = Validate(source, $$"""{"select":["id"],"filters":[{"col":"id","op":"lte","value":{{available}}}],"limit":{{keep}}}""");
         var query = runner.Compile(validated);
         Assert.Equal(keep + 1, Assert.IsType<int>(query.Parameters.Last().Value));
@@ -204,10 +204,10 @@ public sealed class DatabaseEngineTests
     public async Task T3_raw_callback_is_uncapped_and_detached_rows_survive(bool leaf)
     {
         using var fixture = new SqliteFixture();
-        var source = await fixture.Source();
+        var source = await fixture.Source(7);
         var engine = leaf ? (IDatabaseEngine)new SqliteEngine() : new TestEngine(text => new SqliteConnection(text));
         var query = Raw();
-        var capped = await new QueryRunner(engine, 7).RunAsync(source, query, default);
+        var capped = await new QueryRunner(engine).RunAsync(source, query, default);
         Assert.True(capped.IsSuccess);
         Assert.Equal(3, capped.Value.RowCount);
         Assert.True(capped.Value.More);
@@ -246,14 +246,14 @@ public sealed class DatabaseEngineTests
     public async Task T4_timeout_and_protected_int32_binding(int timeout)
     {
         using var fixture = new SqliteFixture();
-        var source = await fixture.Source();
+        var source = await fixture.Source(timeout);
         var history = new History();
         var observed = new List<object?>();
         var engine = new TestEngine(text => new HistoryConnection(text, history))
         {
             Parameter = value => { observed.Add(value); return value is int ? (999L, DbType.Int64) : value is bool flag ? (flag ? 1L : 0L, DbType.Int64) : (value, null); }
         };
-        var runner = new QueryRunner(engine, timeout);
+        var runner = new QueryRunner(engine);
         var query = runner.Compile(Validate(source, """{"select":["id"],"filters":[{"col":"id","op":"gte","value":2},{"col":"label","op":"like","value":"%_%"},{"col":"flag","op":"in","value":[true,false]}],"limit":3}"""));
         Assert.True((await runner.RunAsync(source, query, default)).IsSuccess);
         Assert.Equal(timeout, history.Timeout);
@@ -281,11 +281,11 @@ public sealed class DatabaseEngineTests
     public async Task T4_timeout_identity_and_phase(string stage, string code, string path, string step)
     {
         using var fixture = new SqliteFixture();
-        var source = await fixture.Source();
+        var source = await fixture.Source(41);
         var error = new TimeoutException("synthetic timeout");
         var history = new History();
         history.Failures.Add(stage, error);
-        var result = await new QueryRunner(new TestEngine(text => new HistoryConnection(text, history)), 41).RunAsync(source, Raw(), default);
+        var result = await new QueryRunner(new TestEngine(text => new HistoryConnection(text, history))).RunAsync(source, Raw(), default);
         Assert.False(result.IsSuccess);
         Assert.Equal(code, result.Failure!.Code);
         Assert.Equal(path, result.Failure!.Path);
@@ -299,7 +299,7 @@ public sealed class DatabaseEngineTests
     public async Task T5_lazy_factory_and_argument_refusals()
     {
         using var fixture = new SqliteFixture();
-        var source = await fixture.Source();
+        var source = await fixture.Source(7);
         var count = 0;
         var engine = new TestEngine(text => { count++; return new SqliteConnection(text); });
         Assert.Equal(0, count);
@@ -331,11 +331,11 @@ public sealed class DatabaseEngineTests
     public async Task T5_factory_failures_preserve_identity(string kind, string? code)
     {
         using var fixture = new SqliteFixture();
-        var source = await fixture.Source();
+        var source = await fixture.Source(7);
         Exception error = kind switch { "argument" => new ArgumentException("synthetic"), "format" => new FormatException("synthetic"), "io" => new IOException("synthetic"), "operation" => new InvalidOperationException("synthetic"), _ => new SentinelException() };
         var calls = 0;
         var engine = new TestEngine(text => { Assert.Equal(fixture.Connection, text); calls++; ThrowNamedFrame(error); return null!; });
-        var runner = new QueryRunner(engine, 7);
+        var runner = new QueryRunner(engine);
         if (code is null) Assert.Same(error, await Assert.ThrowsAsync<SentinelException>(() => runner.RunAsync(source, Raw(), default)));
         else
         {
@@ -355,7 +355,7 @@ public sealed class DatabaseEngineTests
     public async Task T5_null_and_open_results_are_rejected_without_taking_ownership(bool open)
     {
         using var fixture = new SqliteFixture();
-        var source = await fixture.Source();
+        var source = await fixture.Source(7);
         var history = new History();
         var connection = new HistoryConnection(fixture.Connection, history);
         if (open) connection.Open();
@@ -363,7 +363,7 @@ public sealed class DatabaseEngineTests
         {
             var calls = 0;
             var engine = new TestEngine(text => { Assert.Equal(fixture.Connection, text); calls++; return open ? connection : null!; });
-            var result = await new QueryRunner(engine, 7).RunAsync(source, Raw(), default);
+            var result = await new QueryRunner(engine).RunAsync(source, Raw(), default);
             Assert.Equal(1, calls);
             Assert.Equal("SourceUnavailable", result.Failure!.Code);
             Assert.Equal("connect", result.Failure!.Step);
@@ -387,7 +387,7 @@ public sealed class DatabaseEngineTests
     public async Task T6_kept_match_evidence_is_validated_and_private(string expression, bool int32, bool? noMatches)
     {
         using var fixture = new SqliteFixture();
-        var source = await fixture.Source();
+        var source = await fixture.Source(7);
         var history = new History();
         var engine = new TestEngine(text => new HistoryConnection(text, history))
         { Cell = (value, column) => int32 && value is long number ? (object)(int)number : value };
@@ -396,12 +396,12 @@ public sealed class DatabaseEngineTests
         {
             // Bad evidence is DataGateway's own broken assumption: an unexpected error, never a source outage.
             var error = await Assert.ThrowsAsync<DataGateway.Data.GatewayInvariantException>(() =>
-                new QueryRunner(engine, 7).RunAsync(source, Raw(sql, matched: true), default));
+                new QueryRunner(engine).RunAsync(source, Raw(sql, matched: true), default));
             Assert.Equal("The query row is missing its matched-row count.", error.Message);
             Clean(history);
             return;
         }
-        var result = await new QueryRunner(engine, 7).RunAsync(source, Raw(sql, matched: true), default);
+        var result = await new QueryRunner(engine).RunAsync(source, Raw(sql, matched: true), default);
         if (noMatches is { } expected)
         {
             Assert.True(result.IsSuccess);
@@ -425,11 +425,11 @@ public sealed class DatabaseEngineTests
     public async Task T6_probe_evidence_is_not_examined_and_raw_callback_keeps_it()
     {
         using var fixture = new SqliteFixture();
-        var source = await fixture.Source();
+        var source = await fixture.Source(7);
         var history = new History();
         var engine = new TestEngine(text => new HistoryConnection(text, history));
         var query = Raw("SELECT 1 AS __dg_matched_rows UNION ALL SELECT NULL UNION ALL SELECT -1", 1, true);
-        var result = await new QueryRunner(engine, 7).RunAsync(source, query, default);
+        var result = await new QueryRunner(engine).RunAsync(source, query, default);
         Assert.True(result.IsSuccess);
         Assert.True(result.Value.More);
         Assert.False(result.Value.NoMatchingRows);
@@ -454,7 +454,7 @@ public sealed class DatabaseEngineTests
     public async Task T7_primary_failure_survives_all_cleanup_failures(bool capped, string stage)
     {
         using var fixture = new SqliteFixture();
-        var source = await fixture.Source();
+        var source = await fixture.Source(7);
         var inner = new SentinelException();
         var primary = new IOException("primary " + stage, inner);
         var history = new History();
@@ -464,7 +464,7 @@ public sealed class DatabaseEngineTests
         Exception? actual;
         if (capped)
         {
-            var result = await new QueryRunner(engine, 7).RunAsync(source,
+            var result = await new QueryRunner(engine).RunAsync(source,
                 new CompiledQuery("SELECT @p AS n", new Dictionary<string, object> { ["@p"] = "value" }, 3, false, []), default);
             Assert.False(result.IsSuccess);
             actual = result.Failure!.DriverException;
@@ -490,7 +490,7 @@ public sealed class DatabaseEngineTests
     public async Task T7_success_cleanup_first_failure_and_awaited_gates(bool capped, string resource)
     {
         using var fixture = new SqliteFixture();
-        var source = await fixture.Source();
+        var source = await fixture.Source(7);
         var history = new History { Gate = resource == "all" ? "reader" : resource };
         foreach (var name in new[] { "reader", "command", "connection" })
             if (resource == "all" || name == resource) history.Failures[name + "-disposed"] = new IOException(name);
@@ -501,7 +501,7 @@ public sealed class DatabaseEngineTests
             : InspectRaw();
         async Task<Exception> InspectCapped()
         {
-            var result = await new QueryRunner(engine, 7).RunAsync(source, Raw(), default);
+            var result = await new QueryRunner(engine).RunAsync(source, Raw(), default);
             Assert.Equal("SourceUnavailable", result.Failure!.Code);
             return result.Failure!.DriverException!;
         }
@@ -527,14 +527,14 @@ public sealed class DatabaseEngineTests
     public async Task T8_cancellation_phases_and_post_success_check(string stage, string? step, bool driver)
     {
         using var fixture = new SqliteFixture();
-        var source = await fixture.Source();
+        var source = await fixture.Source(7);
         using var caller = new CancellationTokenSource();
         var history = new History { OpenWait = stage == "open" };
         history.OnEvent = name => { if (name == stage && stage != "open") caller.Cancel(); };
         var factoryCalls = 0;
         var engine = new TestEngine(text => { factoryCalls++; return new HistoryConnection(text, history); });
         if (stage == "pre") caller.Cancel();
-        var run = new QueryRunner(engine, 7).RunAsync(source, Raw("SELECT id FROM proof_items WHERE id <= 2"), caller.Token);
+        var run = new QueryRunner(engine).RunAsync(source, Raw("SELECT id FROM proof_items WHERE id <= 2"), caller.Token);
         if (stage == "open")
         {
             try { await history.Entered.Task.WaitAsync(Bound); caller.Cancel(); }
@@ -593,13 +593,13 @@ public sealed class DatabaseEngineTests
     public async Task T8_live_token_oce_and_unexpected_faults_propagate(bool unexpected)
     {
         using var fixture = new SqliteFixture();
-        var source = await fixture.Source();
+        var source = await fixture.Source(7);
         using var caller = new CancellationTokenSource();
         Exception primary = unexpected ? new SentinelException() : new OperationCanceledException("independent", caller.Token);
         var history = new History();
         history.Failures["execute"] = primary;
         if (unexpected) history.OnEvent = stage => { if (stage == "execute") caller.Cancel(); };
-        var runner = new QueryRunner(new TestEngine(text => new HistoryConnection(text, history)), 7);
+        var runner = new QueryRunner(new TestEngine(text => new HistoryConnection(text, history)));
         var thrown = await Record.ExceptionAsync(() => runner.RunAsync(source, Raw(), caller.Token));
         Assert.Same(primary, thrown);
         Clean(history, 1, 0);

@@ -30,7 +30,7 @@ try
     var transport = new HttpClientTransport(
         new HttpClientTransportOptions { Endpoint = endpoint, TransportMode = HttpTransportMode.StreamableHttp },
         // No client-side timeout: HttpClient's default (100 s) would cut off a query the gateway still allows; the gateway
-        // enforces its own CommandTimeoutSeconds, and the client cancels through the call's token.
+        // enforces each source's query_timeout_seconds from the catalog, and the client cancels through the call's token.
         new HttpClient(new HttpClientHandler { UseDefaultCredentials = true }) { Timeout = Timeout.InfiniteTimeSpan }, loggers, ownsHttpClient: true);
     // Start-up keeps a limit: a gateway that takes the connection but never answers ends the proxy with exit 1.
     using var startup = new CancellationTokenSource(TimeSpan.FromSeconds(100));

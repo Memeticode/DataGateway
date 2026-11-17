@@ -38,7 +38,7 @@ internal static class PublicGatewayProbe
             builder.Services.AddDataGateway("probe", gateway => gateway
                 .UseCatalog(_ => catalog.Create())
                 .AddEngine(engine ?? new SqlServerEngine())
-                .UseLimits(new GatewayLimits { CommandTimeoutSeconds = 1 }));
+                );
         });
         host.App.MapDataGateway("probe", "");
         var endpoint = Assert.Single(host.Endpoints, candidate =>

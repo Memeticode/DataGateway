@@ -525,7 +525,7 @@ public sealed class QueryRouteTests
     private static Task<(IReadOnlyList<dynamic> Rows,IReadOnlyList<dynamic> Available)> Batch(IReadOnlyList<dynamic> rows) => Task.FromResult<(IReadOnlyList<dynamic>,IReadOnlyList<dynamic>)>((rows,[]));
     private static Dictionary<string,object?>[] Rows(string objectName="hidden_schema.order_lines",string connection=SourceConnection) => Columns().Select(c => new Dictionary<string,object?>
     {
-        ["id"] = 7319, ["object_name"] = objectName, ["connection_string"] = connection, ["name"] = "synthetic_sales", ["title"] = "Synthetic sales", ["description"] = "Invented lines", ["grain"] = "One line", ["row_cap"] = 7,
+        ["id"] = 7319, ["object_name"] = objectName, ["connection_string"] = connection, ["name"] = "synthetic_sales", ["title"] = "Synthetic sales", ["description"] = "Invented lines", ["grain"] = "One line", ["row_cap"] = 7, ["query_timeout_seconds"] = 1,
         ["column_name"] = c.ColumnName, ["ordinal"] = c.Ordinal, ["column_title"] = c.Title, ["column_description"] = c.Description, ["data_type"] = c.DataType,
         ["unit"] = null, ["magnitude"] = null, ["display_format"] = null,
         ["can_select"] = c.CanSelect, ["can_filter"] = c.CanFilter, ["can_sort"] = c.CanSort, ["can_group"] = c.CanGroup, ["can_aggregate"] = c.CanAggregate
@@ -538,7 +538,7 @@ public sealed class QueryRouteTests
         new("note",5,"Note","Invented note","text",null,null,null,true,false,false,false,false),
         new("internal_code",6,"Internal","Invented internal","text",null,null,null,false,false,false,false,false) ];
     private static SourceContract Contract() => CatalogMapping.Map(new(new DataSourceRow("hidden_schema.order_lines",SourceConnection)
-        { Id = 7319, Name="synthetic_sales",Title="Synthetic sales",Description="Invented lines",Grain="One line",RowCap = 7, IsActive =true },Columns())).Value;
+        { QueryTimeoutSeconds = 30, Id = 7319, Name="synthetic_sales",Title="Synthetic sales",Description="Invented lines",Grain="One line",RowCap = 7, IsActive =true },Columns())).Value;
 
     private static WebApplication Host(RecordedLogs logs, HostCatalogState? catalog, IDatabaseEngine? engine, IDictionary<string,string?>? settings = null)
     {
@@ -556,7 +556,7 @@ public sealed class QueryRouteTests
             builder.Logging.ClearProviders();
             builder.Logging.AddProvider(logs);
             builder.WebHost.UseSetting("urls","http://127.0.0.1:0");
-            builder.Configuration.AddInMemoryCollection(new Dictionary<string,string?> { ["DataGateway:Limits:CommandTimeoutSeconds"]="1" });
+            builder.Configuration.AddInMemoryCollection(new Dictionary<string,string?> { });
             if (settings is not null) builder.Configuration.AddInMemoryCollection(settings);
             builder.Services.AddSingleton(catalog);
             catalog.Use(builder.Services);

@@ -129,7 +129,7 @@ public sealed class DataGatewayBuilder
         var title = ReadMcpLine(mcpTitle, "title", 80);
         var about = ReadMcpLine(mcpAbout, "about", 120);
         var queryLimits = ReadLimits();
-        return new GatewayRegistration(name, catalog, CreateRunners(limits.CommandTimeoutSeconds), title, about)
+        return new GatewayRegistration(name, catalog, CreateRunners(), title, about)
         {
             Limits = queryLimits,
             HostPolicy = ReadHostPolicy()
@@ -138,7 +138,6 @@ public sealed class DataGatewayBuilder
 
     private JsonQueryLimits ReadLimits()
     {
-        CheckLimit(limits.CommandTimeoutSeconds, nameof(GatewayLimits.CommandTimeoutSeconds), 1, int.MaxValue);
         CheckLimit(limits.MaxJsonLength, nameof(GatewayLimits.MaxJsonLength), 1, int.MaxValue);
         CheckLimit(limits.MaxFilterDepth, nameof(GatewayLimits.MaxFilterDepth), 0, JsonQueryLimits.None.MaxFilterDepth);
         CheckLimit(limits.MaxFilterConditions, nameof(GatewayLimits.MaxFilterConditions), 1, int.MaxValue);
@@ -167,9 +166,9 @@ public sealed class DataGatewayBuilder
         return value.Trim();
     }
 
-    private IReadOnlyDictionary<string, QueryRunner> CreateRunners(int commandTimeoutSeconds) =>
+    private IReadOnlyDictionary<string, QueryRunner> CreateRunners() =>
         new System.Collections.ObjectModel.ReadOnlyDictionary<string, QueryRunner>(
-            engines.ToDictionary(pair => pair.Key, pair => new QueryRunner(pair.Value, commandTimeoutSeconds), StringComparer.OrdinalIgnoreCase));
+            engines.ToDictionary(pair => pair.Key, pair => new QueryRunner(pair.Value), StringComparer.OrdinalIgnoreCase));
 
     private void CheckMutable()
     {

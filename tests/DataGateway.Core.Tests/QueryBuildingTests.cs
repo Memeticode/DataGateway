@@ -16,7 +16,7 @@ public sealed class QueryBuildingTests
     private static SourceContract Contract(string objectName = "sales.order_lines", bool reserved = false)
     {
         var source = new DataSourceRow(objectName, "fixture-connection-removed")
-        { Id = 7319,
+        { QueryTimeoutSeconds = 30, Id = 7319,
             Name = "synthetic_sales", Title = "Synthetic sales", Description = "Synthetic sales by line.",
             Grain = "one line", RowCap = 500, IsActive = true
         };

@@ -99,6 +99,7 @@ public sealed class CatalogEngineTests
         var constructions = 0;
         var listRow = ListRow();
         var sourceRow = SourceRow();
+        sourceRow["query_timeout_seconds"] = 1;
         var applicationCatalog = HostCatalogState.Raw(
             _ => Task.FromResult<IReadOnlyList<dynamic>>([listRow]),
             (_, _) => Task.FromResult<(IReadOnlyList<dynamic>, IReadOnlyList<dynamic>)>(([sourceRow], [])));
@@ -331,7 +332,7 @@ public sealed class CatalogEngineTests
     internal static Dictionary<string, object?> SourceRow() => new()
     {
         ["id"] = 7319, ["name"] = "synthetic", ["title"] = "Synthetic", ["description"] = "Synthetic measurements", ["grain"] = "One measurement",
-        ["row_cap"] = 500, ["object_name"] = "dbo.synthetic", ["connection_string"] = ErrorLogTests.SourceConnection,
+        ["row_cap"] = 500, ["query_timeout_seconds"] = 30, ["object_name"] = "dbo.synthetic", ["connection_string"] = ErrorLogTests.SourceConnection,
         ["column_name"] = "measure", ["ordinal"] = 1, ["column_title"] = "Measure", ["column_description"] = "Meaning", ["data_type"] = "number",
         ["unit"] = null, ["magnitude"] = null, ["display_format"] = null,
         ["can_select"] = true, ["can_filter"] = true, ["can_sort"] = true, ["can_group"] = true, ["can_aggregate"] = true

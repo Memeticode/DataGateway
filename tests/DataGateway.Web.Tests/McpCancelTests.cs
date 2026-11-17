@@ -23,7 +23,7 @@ public sealed class McpCancelTests(ITestOutputHelper output)
         Assert.True(start >= 0);
         var end = readme.IndexOf("\n## ", start + 1, StringComparison.Ordinal);
         var section = end < 0 ? readme[start..] : readme[start..end];
-        foreach (var text in new[] { "notifications/cancelled", "QueryCancelled", "CatalogCancelled", "CommandTimeoutSeconds" })
+        foreach (var text in new[] { "notifications/cancelled", "QueryCancelled", "CatalogCancelled", "query_timeout_seconds", "source's catalog" })
             Assert.Contains(text, section);
         Assert.Contains("rethrowing the abort", File.ReadAllText(TestFiles.InRepo("DataGateway.Web/CONFIGURATION.md")));
     }

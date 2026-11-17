@@ -110,6 +110,8 @@ internal sealed class GatewayCatalog(
         catch (Exception error)
         {
             var cancelled = error is OperationCanceledException || token.IsCancellationRequested;
+            if (!cancelled && sourceName is not null && error is InvalidQueryTimeoutException)
+                return (default, InvalidQueryTimeoutException.Failure(sourceName) with { Step = "catalog" });
             return (default, new CatalogFailure(
                 cancelled ? DataGatewayError.CatalogCancelled.Code : DataGatewayError.CatalogUnavailable.Code, path,
                 cancelled ? "The catalog read was cancelled. Submit a new request if still needed." :

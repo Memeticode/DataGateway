@@ -126,6 +126,19 @@ public sealed class DemoTests
     }
 
 
+    [Fact]
+    public void T6_in_filter_rows_accept_unmatched_hint_and_reject_complete_set()
+    {
+        DemoColumn[] columns = [new("token", "text", true, false, false, false, false)];
+        const string body = """{"source":"synthetic","columns":[{"name":"token","dataType":"text"}],"rows":[{"token":"a"}],"rowCount":1,"more":false,"hint":"All matching rows returned. in values that matched no row are left out: compare the values you asked for with the rows."}""";
+        var answer = new DemoAnswer(200, "application/json; charset=utf-8", null, body);
+        Assert.Empty(DemoChecks.Rows(answer, "synthetic", columns, 7, null, hasInFilter: true));
+        var changed = JsonNode.Parse(body)!.AsObject();
+        changed["hint"] = "Complete result set.";
+        var problems = DemoChecks.Rows(answer with { Body = changed.ToJsonString() }, "synthetic", columns, 7, null, hasInFilter: true);
+        Assert.StartsWith("hint must be '", Assert.Single(problems));
+    }
+
     private sealed class RenameMember : DelegatingHandler
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)

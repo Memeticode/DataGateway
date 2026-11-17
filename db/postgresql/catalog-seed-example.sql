@@ -1,4 +1,5 @@
 \set ON_ERROR_STOP on
+-- query_timeout_seconds is omitted to use the catalog default of 30 seconds.
 -- Prerequisite: synthetic.items already exposes id/label/amount/day/flag.
 -- SourceConnection is a password-free localhost connection supplied as a psql value.
 BEGIN;

@@ -23,7 +23,7 @@ public sealed class CatalogValidatorTests
         string? objectName = ObjectSentinel, int cap = 7, bool active = true) => new(objectName!, connection!)
         {
             Name = name!, Title = "Widgets", Description = "Synthetic measurements", Grain = "One measurement",
-            IsActive = active, RowCap = cap
+            IsActive = active, RowCap = cap, QueryTimeoutSeconds = 30
         };
     private static DataSourceColumnRow Column() => new("amount", 2, "Amount", "Measurement", "number", "units", "one", "0.00",
         true, true, true, true, true);

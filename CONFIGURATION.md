@@ -27,7 +27,6 @@ The final host-policy failure must map to its own client-visible 401 code. Both 
 
 | Property | Default | Inclusive range |
 | --- | --- | --- |
-| CommandTimeoutSeconds | 30 seconds | 1..2147483647 |
 | MaxJsonLength | 65536 characters | 1..2147483647 |
 | MaxFilterDepth | 8 | 0..30 |
 | MaxFilterConditions | 50 | 1..2147483647 |
@@ -89,3 +88,5 @@ Catalog invocation exceptions map to `CatalogUnavailable`. Cancellation is inter
 ## Check registration, mapping and startup
 
 Registration checks names, the final builder settings, a catalog and at least one engine. Mapping separately checks registration, route patterns and one mapping of each kind. Await host startup; it validates the list and every active detail's shape, mapped columns and registered provider, even for unmapped gateways. Missing or inactive required detail prevents startup. Startup does not check source connectivity. Source connection validation and execution happen on the query path. `HostCatalogs` supplies additional catalog connection checks for the example host.
+
+Each source's catalog `query_timeout_seconds` controls its query deadline and provider command timeout, from connection open to the last kept row. This required integer defaults to 30 and accepts 1 through 86400. It is detail-only and absent from wire answers. The host refuses the retired `DataGateway:Limits:CommandTimeoutSeconds` setting; remove it and set the source column. For existing catalogs run `db/catalog-query-timeout.sql` or `db/postgresql/catalog-query-timeout.sql`. The example catalog constructors accept `(db, int catalogTimeoutSeconds = 15)` for their own reads, independently of source deadlines.

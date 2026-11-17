@@ -6,7 +6,7 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 CREATE OR ALTER VIEW [dbo].[vDataSource] AS
-SELECT [id], [name], [connection_string], [object_name], [title], [description], [grain], [is_active], [row_cap]
+SELECT [id], [name], [connection_string], [object_name], [title], [description], [grain], [is_active], [row_cap], [query_timeout_seconds]
 FROM [dbo].[DataSource];
 GO
 CREATE OR ALTER VIEW [dbo].[vDataSourceColumn] AS

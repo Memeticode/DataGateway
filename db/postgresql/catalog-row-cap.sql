@@ -16,5 +16,6 @@ BEGIN
 END
 $migration$;
 -- Refresh the common trigger definitions and explicit read projections.
-\ir catalog-ddl.sql
+-- Install the detail-only timeout before the current views project it.
+\ir catalog-query-timeout.sql
 \ir catalog-views.sql

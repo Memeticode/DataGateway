@@ -83,7 +83,7 @@ public sealed class ExampleCatalogTests
         const string sqlServerList = "SELECT [name], [title], [description], [grain], [row_cap]\r\n" +
             "FROM [dbo].[vDataSource]\r\n" +
             "WHERE [is_active] = 1;";
-        const string sqlServerRead = "SELECT s.[id], s.[name], s.[title], s.[description], s.[grain], s.[row_cap], s.[object_name], s.[connection_string],\r\n" +
+        const string sqlServerRead = "SELECT s.[id], s.[name], s.[title], s.[description], s.[grain], s.[row_cap], s.[query_timeout_seconds], s.[object_name], s.[connection_string],\r\n" +
             "       c.[column_name], c.[ordinal], c.[title] AS [column_title],\r\n" +
             "       c.[description] AS [column_description], c.[data_type], c.[unit],\r\n" +
             "       c.[magnitude], c.[display_format], c.[can_select], c.[can_filter],\r\n" +
@@ -96,7 +96,7 @@ public sealed class ExampleCatalogTests
         const string postgreSqlList = "SELECT name, title, description, grain, row_cap\n" +
             "FROM datagateway.vdatasource\n" +
             "WHERE is_active = TRUE;";
-        const string postgreSqlRead = "SELECT s.id, s.name, s.title, s.description, s.grain, s.row_cap, s.object_name, s.connection_string,\n" +
+        const string postgreSqlRead = "SELECT s.id, s.name, s.title, s.description, s.grain, s.row_cap, s.query_timeout_seconds, s.object_name, s.connection_string,\n" +
             "       c.column_name, c.ordinal, c.title AS column_title,\n" +
             "       c.description AS column_description, c.data_type, c.unit,\n" +
             "       c.magnitude, c.display_format, c.can_select, c.can_filter,\n" +
@@ -108,10 +108,10 @@ public sealed class ExampleCatalogTests
         const string postgreSqlAvailable = "SELECT name FROM datagateway.vdatasource WHERE is_active = TRUE;";
 
         Check(SqlServerCatalog.ListSql, sqlServerList, 107, "737473e34e126a126a944b4a05e0315b6c22500376e81f655c4d53981208d6e2");
-        Check(SqlServerCatalog.ReadSql, sqlServerRead, 611, "231684642aaaa73868942dc445e12243ab03e6ef38ccc8eb52784e0a8617ce7f");
+        Check(SqlServerCatalog.ReadSql, sqlServerRead, 638, "ca59273874a34e52a016b680ded14a2fb02d1478cff1550cc65a940e203ed1a8");
         Check(SqlServerCatalog.AvailableSql, sqlServerAvailable, 61, "c6e1899d47c7e3029b812bb39945f2e473dcaf8de92820af3546d9051c42483b");
         Check(PostgreSqlCatalog.ListSql, postgreSqlList, 100, "885362ba68d78d4675b0fa37e568d369ff696735a319eb2d10d153429f1cfaf8");
-        Check(PostgreSqlCatalog.ReadSql, postgreSqlRead, 573, "d1fd39152cf9f0df7f4f9624545a18d5d3890a42f4902b7c9235f19a28a7061f");
+        Check(PostgreSqlCatalog.ReadSql, postgreSqlRead, 598, "8c9a096e6dca416a39766a667b370effcc594a54eea64ba30506fcf64054c1a1");
         Check(PostgreSqlCatalog.AvailableSql, postgreSqlAvailable, 64, "28a6dbc9483d677e527001f2d9f85fc5e92939aca5f086876ea5136d1ed1d6a4");
 
         static void Check(string actual, string expected, int size, string hash)
@@ -697,7 +697,13 @@ public sealed class ExampleCatalogTests
         Assert.Equal(2, parameters.Length);
         Assert.Equal(typeof(DbContext<>).MakeGenericType(connection), parameters[0].ParameterType);
         Assert.Equal(typeof(int), parameters[1].ParameterType);
-        Assert.All(parameters, parameter => Assert.False(parameter.IsOptional));
+        Assert.Equal("db", parameters[0].Name);
+        Assert.False(parameters[0].IsOptional);
+        Assert.False(parameters[0].HasDefaultValue);
+        Assert.Equal("catalogTimeoutSeconds", parameters[1].Name);
+        Assert.True(parameters[1].IsOptional);
+        Assert.True(parameters[1].HasDefaultValue);
+        Assert.Equal(15, parameters[1].DefaultValue);
         var methods = service.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
         Assert.Equal(2, methods.Length);
         Assert.All(methods, method => Assert.NotEqual(method, method.GetBaseDefinition()));
@@ -775,7 +781,7 @@ public sealed class ExampleCatalogTests
 
     private static CatalogDetail ExpectedDetail(Dictionary<string, object?> first, Dictionary<string, object?> second, string provider) =>
         new(provider, new CatalogRows(new DataSourceRow((string)first["object_name"]!, (string)first["connection_string"]!)
-        {
+        { QueryTimeoutSeconds = 30,
             Id = 7319,
             Name = " Mixed \u03a9 ",
             Title = " Source \u03b2 ",

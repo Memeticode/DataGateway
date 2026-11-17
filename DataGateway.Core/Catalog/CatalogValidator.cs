@@ -79,6 +79,8 @@ public static class CatalogValidator
                 failures.Add(Failure("$.detail.rows.source.objectName",
                     "Set objectName to a non-blank value.", requestedName));
             CheckRowCap(failures, "$.detail.rows.source.rowCap", source.RowCap, requestedName);
+            if (source.QueryTimeoutSeconds is < 1 or > 86400)
+                failures.Add(InvalidQueryTimeoutException.Failure(requestedName));
             // The same non-null checks as ValidateList, so list and describe agree about one source.
             if (source.Title is null)
                 failures.Add(Failure("$.detail.rows.source.title", "Set title to a non-null value.", requestedName));

@@ -80,6 +80,7 @@ Create your view first. Copy [db/catalog-seed-example.sql](../db/catalog-seed-ex
 
 - `name`: the stable key callers use; `object_name`: `schema.view`; `title`.
 - `description`: what it is for, when to use it, and how it differs from similar sources; `grain`: what one row is.
+- `query_timeout_seconds` sets the source query deadline and command timeout. This required integer defaults to 30 and accepts 1 through 86400. It is detail-only and absent from wire answers. Existing catalogs use the idempotent `db/catalog-query-timeout.sql` or `db/postgresql/catalog-query-timeout.sql` migration; audit history is preserved.
 - `row_cap` sets the maximum rows per query for this source. It is required, defaults to 500 in the database, and accepts integers from 1 to 2147483646.
 - One entry per column: `column_name` as in the view, `ordinal`, `title`, `description`, `data_type` (text, number, date or bool), `unit`, `magnitude` (none, thousands, millions, billions or NULL), `display_format`, and the five flags (`can_select`, `can_filter`, `can_sort`, `can_group`, `can_aggregate`).
 
@@ -334,7 +335,7 @@ The query vocabulary:
 - `order_by`: `{col, dir}` with dir asc or desc. With grouping, only group_by columns or aggregate outputs, and the aggregated column must be canSort.
 - `limit`: 1 up to the cap.
 
-An answer holds at most `limit` rows, or the cap without one. `more: true` means rows were left out, with or without `limit`; `more: false` means none were. Every answer ends with `hint`: `The result set was capped at 1 row.` when `more` is true and `rowCount` is 1, or `The result set was capped at N rows.` for every other capped count (N is `rowCount`). A capped query without `order_by` appends `Rows are in no particular order.` With `more: false`, the hint is `Nothing found that matched your query.` when no source rows matched, including an ungrouped aggregate that still returns one row with 0 or null; otherwise it is `Complete result set.` Aggregate values are unchanged. Midnight dates come back as `yyyy-MM-dd`, ready to paste into a filter.
+An answer holds at most `limit` rows, or the cap without one. `more: true` means rows were left out, with or without `limit`; `more: false` means none were. Every answer ends with `hint`: `The result set was capped at 1 row.` when `more` is true and `rowCount` is 1, or `The result set was capped at N rows.` for every other capped count (N is `rowCount`). A capped query without `order_by` appends `Rows are in no particular order.` With `more: false`, the hint is `Nothing found that matched your query.` when no source rows matched, including an ungrouped aggregate that still returns one row with 0 or null; otherwise, with an `in` filter (including one inside nested groups), it is `All matching rows returned. in values that matched no row are left out: compare the values you asked for with the rows.` If that query also has an aggregate, grouped or ungrouped, it is `All matching rows aggregated. in values that matched no row are left out and an aggregate hides them: check the in values first.` Without an `in` filter it is `Complete result set.` A `not_in` filter does not count as an `in` filter. Aggregate values are unchanged. Midnight dates come back as `yyyy-MM-dd`, ready to paste into a filter.
 
 A request combining the vocabulary:
 
@@ -406,7 +407,7 @@ exactly the JSON the route answers, including the examples above. A failure sets
 `isError`, and the text is the route's error body with the same code, path, message
 and incident ID. For `UnexpectedError`, a second text block asks the model to tell the user, who reports the incident ID to the operator.
 
-**Cancelling a call.** The endpoint is stateless, so a tool call is cancelled by ending its HTTP request: closing the connection, a client-side timeout, or, with the MCP SDK's `HttpClientTransport`, cancelling the token passed to `CallToolAsync`, which ends the request. DataGateway forwards cancellation to the catalog reader or source command. Provider interruption need not be immediate. A disconnected caller receives no error body. If a failure exists after departure, its one failure event is Warning and can carry `QueryCancelled` (source query) or `CatalogCancelled` (catalog read); departure before a failure exists need not log an event. A `notifications/cancelled` message cannot reach a running call: each POST is served on its own, so the message is accepted with HTTP 202 and changes nothing, and the call ends by itself or at the command timeout (`DataGateway:Limits:CommandTimeoutSeconds`, 30 seconds by default).
+**Cancelling a call.** The endpoint is stateless, so a tool call is cancelled by ending its HTTP request: closing the connection, a client-side timeout, or, with the MCP SDK's `HttpClientTransport`, cancelling the token passed to `CallToolAsync`, which ends the request. DataGateway forwards cancellation to the catalog reader or source command. Provider interruption need not be immediate. A disconnected caller receives no error body. If a failure exists after departure, its one failure event is Warning and can carry `QueryCancelled` (source query) or `CatalogCancelled` (catalog read); departure before a failure exists need not log an event. A `notifications/cancelled` message cannot reach a running call: each POST is served on its own, so the message is accepted with HTTP 202 and changes nothing, and the call ends by itself or at the deadline using the source's catalog `query_timeout_seconds` value (30 seconds by default).
 
 A message over the server's body limit gets HTTP 400 `StructuralLimitExceeded` before
 any tool runs. Unknown tool names and malformed MCP messages are answered by the
@@ -573,3 +574,5 @@ It reads no connection string and no environment variable. It prints only the UR
 Apache License 2.0: [LICENSE](../LICENSE), [NOTICE](../NOTICE).
 
 Designed and directed by Maxim Konstantinovski. Built with AI models (Anthropic's Claude and OpenAI's GPT) under his direction and review.
+
+The sealed example catalog readers accept `(db, int catalogTimeoutSeconds = 15)` for their own reads; the host uses 15 seconds independently of each source query timeout.

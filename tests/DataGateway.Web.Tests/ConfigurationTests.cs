@@ -172,7 +172,7 @@ public sealed class ConfigurationTests
         settings.Set(DataGatewayConfiguration.ConnectionSetting, FakeConnection);
         await using var app = CreateApplication(new RecordedLogs());
         var limits = app.Services.GetRequiredService<IOptions<DataGatewayLimits>>().Value;
-        Assert.Equal(30, limits.CommandTimeoutSeconds);
+        Assert.Null(typeof(DataGatewayLimits).GetProperty("CommandTimeoutSeconds"));
         
         Assert.Null(typeof(DataGatewayLimits).GetProperty("RowCap"));
         Assert.Equal(JsonQueryLimits.Default with { MaxLimit = null }, app.Services.GetRequiredService<JsonQueryLimits>());
@@ -188,7 +188,6 @@ public sealed class ConfigurationTests
             FakeConnection.Replace("Connect Timeout=5", "Connect Timeout=99"));
         var overrides = new Dictionary<string, string?>
         {
-            ["DataGateway:Limits:CommandTimeoutSeconds"] = "41",
             ["DataGateway:Limits:MaxJsonLength"] = "2048",
             ["DataGateway:Limits:MaxFilterDepth"] = "3",
             ["DataGateway:Limits:MaxFilterConditions"] = "11",
@@ -210,7 +209,7 @@ public sealed class ConfigurationTests
             }
         });
         var limits = app.Services.GetRequiredService<IOptions<DataGatewayLimits>>().Value;
-        Assert.Equal(41, limits.CommandTimeoutSeconds);
+        Assert.Null(typeof(DataGatewayLimits).GetProperty("CommandTimeoutSeconds"));
         
         var shared = app.Services.GetRequiredService<JsonQueryLimits>();
         Assert.Equal(JsonQueryLimits.Default with { MaxLimit = null, MaxJsonLength = 2048, MaxFilterDepth = 3,
@@ -221,8 +220,6 @@ public sealed class ConfigurationTests
     }
 
     [Theory]
-    [InlineData("CommandTimeoutSeconds", "0")]
-    [InlineData("CommandTimeoutSeconds", "-1")]
     [InlineData("MaxJsonLength", "")]
     [InlineData("MaxJsonLength", "   ")]
     [InlineData("MaxJsonLength", "abc")]

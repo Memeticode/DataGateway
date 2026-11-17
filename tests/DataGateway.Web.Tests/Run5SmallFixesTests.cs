@@ -96,7 +96,7 @@ public sealed class Run5SmallFixesTests
     [Fact]
     public async Task T1_missing_or_invalid_evidence_uses_existing_runner_failure()
     {
-        var contract = Contract(Catalog());
+        var contract = Contract(Catalog(timeout: 1));
         var compiled = new SqlServerEngine().Compile(Validate(contract, """{"aggregates":[{"fn":"count","col":"amount"}]}"""));
         foreach (var bad in new object?[] { null, -1L, 0, 0m, "0", DBNull.Value })
             await Check(new Dictionary<string, object?> { ["count_amount"] = 0, [CompiledQuery.MatchedRowCountColumn] = bad });
@@ -114,7 +114,7 @@ public sealed class Run5SmallFixesTests
     [Fact]
     public async Task T1_ordinary_private_spelling_and_empty_group_controls()
     {
-        var contract = Contract(Catalog());
+        var contract = Contract(Catalog(timeout: 1));
         var ordinary = Validate(contract, """{"select":["__dg_matched_rows"]}""");
         var compiled = new SqlServerEngine().Compile(ordinary);
         Assert.False(compiled.HasMatchedRowCount);
@@ -337,7 +337,7 @@ public sealed class Run5SmallFixesTests
     [Fact]
     public async Task T8_compilation_metadata_is_private_and_repeatable()
     {
-        var contract = Contract(Catalog());
+        var contract = Contract(Catalog(timeout: 1));
         var query = Validate(contract, """{"aggregates":[{"fn":"count","col":"amount"}],"limit":1}""");
         var originalColumns = query.Columns.ToArray();
         var compiled = new SqlServerEngine().Compile(query);
@@ -427,10 +427,10 @@ public sealed class Run5SmallFixesTests
         return result.Value;
     }
 
-    private static CatalogRows Catalog(int context = 2, string profile = "all")
+    private static CatalogRows Catalog(int context = 2, string profile = "all", int timeout = 30)
     {
         var source = new DataSourceRow("synthetic.measurements", ErrorLogTests.SourceConnection)
-        { Id = 7319, Name = "synthetic", Title = "Synthetic", Description = "Synthetic measurements", Grain = "One measurement", RowCap = 2, IsActive = true };
+        { QueryTimeoutSeconds = timeout, Id = 7319, Name = "synthetic", Title = "Synthetic", Description = "Synthetic measurements", Grain = "One measurement", RowCap = 2, IsActive = true };
         var columns = new List<DataSourceColumnRow>();
         Add("amount", "number");
         Add("label", "text");
@@ -448,7 +448,7 @@ public sealed class Run5SmallFixesTests
         {
             ["id"] = catalog.Source.Id, ["object_name"] = catalog.Source.ObjectName, ["connection_string"] = catalog.Source.ConnectionString,
             ["name"] = catalog.Source.Name, ["title"] = catalog.Source.Title, ["description"] = catalog.Source.Description,
-            ["grain"] = catalog.Source.Grain, ["row_cap"] = catalog.Source.RowCap, ["column_name"] = c.ColumnName,
+            ["grain"] = catalog.Source.Grain, ["row_cap"] = catalog.Source.RowCap, ["query_timeout_seconds"] = catalog.Source.QueryTimeoutSeconds, ["column_name"] = c.ColumnName,
             ["ordinal"] = c.Ordinal, ["column_title"] = c.Title, ["column_description"] = c.Description, ["data_type"] = c.DataType,
             ["unit"] = c.Unit, ["magnitude"] = c.Magnitude, ["display_format"] = c.DisplayFormat,
             ["can_select"] = c.CanSelect, ["can_filter"] = c.CanFilter, ["can_sort"] = c.CanSort,
@@ -464,7 +464,7 @@ public sealed class Run5SmallFixesTests
         }));
 
     private static QueryRunner Runner(Func<IReadOnlyList<IDictionary<string, object?>>> rows, Action<CompiledQuery>? inspect = null) =>
-        FakeRows.Runner(new SqlServerEngine(), 1, FakeRows.From((_, query, connected, _) =>
+        FakeRows.Runner(new SqlServerEngine(), FakeRows.From((_, query, connected, _) =>
         {
             connected();
             inspect?.Invoke(query);

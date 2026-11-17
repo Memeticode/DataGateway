@@ -12,12 +12,10 @@ public sealed class QueryRunner
     internal static readonly TimeSpan LongestDeadline = TimeSpan.FromMilliseconds(uint.MaxValue - 1);
     private readonly IDatabaseEngine engine;
 
-    public QueryRunner(IDatabaseEngine engine, int commandTimeoutSeconds)
+    public QueryRunner(IDatabaseEngine engine)
     {
         ArgumentNullException.ThrowIfNull(engine);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(commandTimeoutSeconds);
         this.engine = engine;
-        CommandTimeoutSeconds = commandTimeoutSeconds;
     }
 
     public CompiledQuery Compile(ValidatedQuery query)
@@ -26,9 +24,7 @@ public sealed class QueryRunner
         return engine is ICappedQueryEngine capped ? capped.Compile(query) : engine.Compile(query);
     }
 
-    internal int CommandTimeoutSeconds { get; }
-
-    /// <summary>Runs the query within one deadline of CommandTimeoutSeconds, from the open connection to the last row
+    /// <summary>Runs the query within one deadline of the source's QueryTimeoutSeconds, from the open connection to the last row
     /// kept; the driver's per-command timeout alone would restart for every row read. Connecting is governed by the
     /// source's connection string.</summary>
     public async Task<CatalogResult<QueryRows>> RunAsync(
@@ -50,7 +46,7 @@ public sealed class QueryRunner
         void Opened()
         {
             connected = true;
-            deadline.CancelAfter(Deadline(CommandTimeoutSeconds));
+            deadline.CancelAfter(Deadline(source.QueryTimeoutSeconds));
         }
         bool Expired() => TimedOut(deadline, cancellationToken);
 
@@ -59,16 +55,16 @@ public sealed class QueryRunner
         try
         {
             if (engine is ICappedQueryEngine capped)
-                rows = await capped.ReadQueryAsync(source.ConnectionString, query, CommandTimeoutSeconds,
+                rows = await capped.ReadQueryAsync(source.ConnectionString, query, source.QueryTimeoutSeconds,
                     Opened, Expired, token).ConfigureAwait(false);
             else
-                rows = await engine.ReadSourceAsync(source.ConnectionString, query, CommandTimeoutSeconds,
+                rows = await engine.ReadSourceAsync(source.ConnectionString, query, source.QueryTimeoutSeconds,
                     Opened,
                     sourceRows => KeptRows.KeepAsync(sourceRows, query, token, Expired), token)
                     .ConfigureAwait(false);
         }
         catch (Exception e) when (Classify(e, connected, Snapshot(deadline, cancellationToken, out var timedOut), timedOut,
-            CommandTimeoutSeconds, provider = engine.RecognizeFailure(e)) is { } f)
+            source.QueryTimeoutSeconds, provider = engine.RecognizeFailure(e)) is { } f)
         {
             return Reject(source, f with
             {

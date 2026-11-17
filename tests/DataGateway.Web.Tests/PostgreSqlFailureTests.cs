@@ -19,7 +19,7 @@ public sealed class PostgreSqlFailureTests
 {
     internal static Dictionary<string,object?> Joined() => new(StringComparer.Ordinal)
     {
-        ["id"]=7L,["name"]="synthetic_items",["title"]="Items",["description"]="Rows.",["grain"]="One item.",["row_cap"]=5L,
+        ["id"]=7L,["name"]="synthetic_items",["title"]="Items",["description"]="Rows.",["grain"]="One item.",["row_cap"]=5L, ["query_timeout_seconds"] = 1,
         ["object_name"]="synthetic.items",["connection_string"]=PostgreSqlCompilationTests.Connection,
         ["column_name"]="id",["ordinal"]=1L,["column_title"]="Id",["column_description"]="Column id.",["data_type"]="number",
         ["unit"]=DBNull.Value,["magnitude"]=null,["display_format"]=null,
@@ -94,7 +94,7 @@ public sealed class PostgreSqlFailureTests
     {
         var error=new PostgresException("controlled","ERROR","ERROR",state);
         var engine=new PostgreSqlSourceTests.Engine {SourceError=error,SourceOpened=opened};
-        var result=await new QueryRunner(engine,7).RunAsync(PostgreSqlCompilationTests.Source(),SqliteEngineTests.Raw("SELECT id"),default);
+        var result=await new QueryRunner(engine).RunAsync(PostgreSqlCompilationTests.Source(queryTimeoutSeconds: 7),SqliteEngineTests.Raw("SELECT id"),default);
         Assert.Equal(code,result.Failure?.Code);Assert.Equal(step,result.Failure?.Step);Assert.Null(result.Failure?.SqlNumber);
         Assert.Same(error,result.Failure!.DriverException);
         Assert.Equal(code=="QueryTimeout"?"$.query":"$.source",result.Failure.Path);
@@ -103,10 +103,10 @@ public sealed class PostgreSqlFailureTests
     public async Task Source_and_catalog_cancellation_policies()
     {
         using var probe=new PostgreSqlProbe {OpenError=new OperationCanceledException()};
-        var runner=new QueryRunner(new PostgreSqlSourceTests.Engine {SourceError=probe.OpenError},7);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>runner.RunAsync(PostgreSqlCompilationTests.Source(),SqliteEngineTests.Raw("SELECT id"),default));
+        var runner=new QueryRunner(new PostgreSqlSourceTests.Engine {SourceError=probe.OpenError});
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>runner.RunAsync(PostgreSqlCompilationTests.Source(queryTimeoutSeconds: 7),SqliteEngineTests.Raw("SELECT id"),default));
         using var caller=new CancellationTokenSource();caller.Cancel();
-        Assert.Equal("QueryCancelled",(await runner.RunAsync(PostgreSqlCompilationTests.Source(),SqliteEngineTests.Raw("SELECT id"),caller.Token)).Failure?.Code);
+        Assert.Equal("QueryCancelled",(await runner.RunAsync(PostgreSqlCompilationTests.Source(queryTimeoutSeconds: 7),SqliteEngineTests.Raw("SELECT id"),caller.Token)).Failure?.Code);
     }
     private sealed class HostEngine(string mode) : IDatabaseEngine
     {

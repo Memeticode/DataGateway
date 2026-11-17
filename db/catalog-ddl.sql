@@ -23,6 +23,7 @@ CREATE TABLE [dbo].[DataSource](
 	[grain] [nvarchar](400) NOT NULL,              -- what one row is
 	[is_active] [bit] NOT NULL,
 	[row_cap] [int] NOT NULL,
+	[query_timeout_seconds] [int] NOT NULL,
  CONSTRAINT [PK_DataSource] PRIMARY KEY CLUSTERED ([id] ASC),
  CONSTRAINT [UQ_DataSource_name] UNIQUE NONCLUSTERED ([name] ASC)
 )
@@ -30,6 +31,10 @@ GO
 ALTER TABLE [dbo].[DataSource] ADD CONSTRAINT [DF_DataSource_is_active] DEFAULT ((1)) FOR [is_active]
 GO
 ALTER TABLE [dbo].[DataSource] ADD CONSTRAINT [DF_DataSource_row_cap] DEFAULT ((500)) FOR [row_cap]
+GO
+ALTER TABLE [dbo].[DataSource] ADD CONSTRAINT [DF_DataSource_query_timeout_seconds] DEFAULT ((30)) FOR [query_timeout_seconds]
+GO
+ALTER TABLE [dbo].[DataSource] WITH CHECK ADD CONSTRAINT [CK_DataSource_query_timeout_seconds] CHECK (([query_timeout_seconds] BETWEEN 1 AND 86400))
 GO
 ALTER TABLE [dbo].[DataSource] WITH CHECK ADD CONSTRAINT [CK_DataSource_row_cap] CHECK (([row_cap] >= 1 AND [row_cap] <= 2147483646))
 GO
@@ -88,6 +93,7 @@ CREATE TABLE [dbo].[DataSourceAudit](
 	[grain] [nvarchar](400) NOT NULL,
 	[is_active] [bit] NOT NULL,
 	[row_cap] [int] NULL,
+	[query_timeout_seconds] [int] NULL,
  CONSTRAINT [PK_DataSourceAudit] PRIMARY KEY CLUSTERED ([id] ASC)
 )
 GO
@@ -150,6 +156,7 @@ BEGIN
 		, [grain]
 		, [is_active]
 		, [row_cap]
+		, [query_timeout_seconds]
 	)
 	SELECT
 		CASE WHEN d.[id] IS NULL THEN 'I' ELSE 'U' END
@@ -162,6 +169,7 @@ BEGIN
 		, i.[grain]
 		, i.[is_active]
 		, i.[row_cap]
+		, i.[query_timeout_seconds]
 	FROM inserted AS i
 	LEFT JOIN deleted AS d ON d.[id] = i.[id];
 	-- delete: the row as it was
@@ -176,6 +184,7 @@ BEGIN
 		, [grain]
 		, [is_active]
 		, [row_cap]
+		, [query_timeout_seconds]
 	)
 	SELECT
 		'D'
@@ -188,6 +197,7 @@ BEGIN
 		, d.[grain]
 		, d.[is_active]
 		, d.[row_cap]
+		, d.[query_timeout_seconds]
 	FROM deleted AS d
 	WHERE NOT EXISTS (SELECT 1 FROM inserted AS i WHERE i.[id] = d.[id]);
 END

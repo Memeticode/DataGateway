@@ -95,7 +95,7 @@ public sealed class SqliteOperationsTests(ITestOutputHelper output)
         {
             (SqliteTestCatalog.ListSql, 102, "0c5fea588ae543a3832a744308e3b5b46d47c338ebc90a00f214fd5392505892"),
             (SqliteTestCatalog.AvailableSql, 58, "8c09d606be7d35b876961707ed9a3ea1131234a257992d77f3be48078fbbfd6d"),
-            (SqliteTestCatalog.ReadSql, 573, "d5f1bb0129bb97ffae3132a3ae685275ec10e0b965dc5e8495673fe9050d9bac")
+            (SqliteTestCatalog.ReadSql, 600, "5ede61532567d22c090a82f6e1c083ffb4373ec8833adb00efdf6bd920a00dd5")
         })
         {
             var bytes = Encoding.UTF8.GetBytes(sql);
@@ -258,6 +258,7 @@ public sealed class SqliteOperationsTests(ITestOutputHelper output)
     public async Task T7_detail_wire_types_and_keep_plus_one()
     {
         using var fixture = new SqliteFixture();
+        fixture.Change("UPDATE gateway_source SET query_timeout_seconds=1");
         using var settings = fixture.Settings();
         var probe = new SqliteProbe();
         var engine = new SqliteEngine(probe.Create);
@@ -328,8 +329,8 @@ public sealed class SqliteOperationsTests(ITestOutputHelper output)
             var compiled = await fixture.Compile(engine, query);
             var probe = new SqliteProbe();
             var local = new SqliteEngine(probe.Create);
-            var source = await fixture.Source();
-            var result = await new QueryRunner(local, 7).RunAsync(source, compiled, default);
+            var source = await fixture.Source(7);
+            var result = await new QueryRunner(local).RunAsync(source, compiled, default);
             Assert.True(result.IsSuccess);
             Assert.Equal(ids, string.Join(",", result.Value.Rows.Select(row => row["id"])));
             Assert.Equal(more, result.Value.More);
@@ -366,7 +367,7 @@ public sealed class SqliteOperationsTests(ITestOutputHelper output)
         Assert.Equal(count, Assert.IsType<long>(raw["count_flag"]));
         Assert.Equal(matched, Assert.IsType<long>(raw[CompiledQuery.MatchedRowCountColumn]));
         Assert.True(matched >= 0);
-        var runner = await new QueryRunner(engine, 7).RunAsync(await fixture.Source(), compiled, default);
+        var runner = await new QueryRunner(engine).RunAsync(await fixture.Source(7), compiled, default);
         Assert.True(runner.IsSuccess);
         Assert.Equal(new[] { "count_flag" }, Assert.Single(runner.Value.Rows).Keys);
         Assert.False(runner.Value.More);
@@ -410,9 +411,9 @@ public sealed class SqliteOperationsTests(ITestOutputHelper output)
         using var settings = fixture.Settings();
         var probe = new SqliteProbe();
         var engine = new SqliteEngine(probe.Create);
-        var contract = await fixture.Source();
+        var contract = await fixture.Source(7);
         var compiled = await fixture.Compile(new SqliteEngine(), SqliteFixture.Detail);
-        var result = await new QueryRunner(engine, 7).RunAsync(contract, compiled, default);
+        var result = await new QueryRunner(engine).RunAsync(contract, compiled, default);
         var failure = result.Failure!;
         Assert.Equal("SourceUnavailable", failure.Code);
         Assert.Equal("$.source", failure.Path);

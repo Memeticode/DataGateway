@@ -18,9 +18,10 @@ public sealed class RowCapCatalogTests
             Assert.Contains("[CK_DataSource_row_cap]", script);
             Assert.Contains("[row_cap] >= 1 AND [row_cap] <= 2147483646", script);
             Assert.Contains("[row_cap] [int] NULL", script);
-            Assert.Equal(2, script.Split(", [row_cap]\n\t)").Length - 1);
-            Assert.Contains(", i.[row_cap]\n\tFROM inserted AS i", script);
-            Assert.Contains(", d.[row_cap]\n\tFROM deleted AS d", script);
+            var imageEnd = ReferenceEquals(script, ddl) ? ", [row_cap]\n\t\t, [query_timeout_seconds]\n\t)" : ", [row_cap]\n\t)";
+            Assert.Equal(2, script.Split(imageEnd).Length - 1);
+            Assert.Contains(ReferenceEquals(script, ddl) ? ", i.[row_cap]\n\t\t, i.[query_timeout_seconds]\n\tFROM inserted AS i" : ", i.[row_cap]\n\tFROM inserted AS i", script);
+            Assert.Contains(ReferenceEquals(script, ddl) ? ", d.[row_cap]\n\t\t, d.[query_timeout_seconds]\n\tFROM deleted AS d" : ", d.[row_cap]\n\tFROM deleted AS d", script);
         }
         foreach (var script in new[] { view, migration })
             Assert.Contains("[grain], [is_active], [row_cap]", script);

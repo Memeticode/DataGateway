@@ -78,7 +78,7 @@ public sealed class SourcesDescribeTests
         var schema = body.GetProperty("querySchema");
         var source = rows[0];
         var mapped = CatalogMapping.Map(new(new DataSourceRow((string)source["object_name"]!, (string)source["connection_string"]!)
-        { Id = 7319,
+        { QueryTimeoutSeconds = 30, Id = 7319,
             Name = (string)source["name"]!, Title = (string)source["title"]!, Description = (string)source["description"]!,
             Grain = (string)source["grain"]!, RowCap = 7, IsActive = true
         }, rows.Select(c => new DataSourceColumnRow((string)c["column_name"]!, (int)c["ordinal"]!, (string)c["column_title"]!,
@@ -445,7 +445,7 @@ public sealed class SourcesDescribeTests
     private static Dictionary<string, object?> Row(string column, int ordinal, bool enabled) => new()
     {
         ["id"] = 7319, ["object_name"] = "hidden_schema.synthetic", ["connection_string"] = "fixture-connection-removed",
-        ["name"] = "synthetic", ["title"] = "Synthetic", ["description"] = "Synthetic measurements", ["grain"] = "One measurement", ["row_cap"] = 7,
+        ["name"] = "synthetic", ["title"] = "Synthetic", ["description"] = "Synthetic measurements", ["grain"] = "One measurement", ["row_cap"] = 7, ["query_timeout_seconds"] = 30,
         ["column_name"] = column, ["ordinal"] = ordinal, ["column_title"] = "Title " + column, ["column_description"] = "Meaning " + column,
         ["data_type"] = "number", ["unit"] = null, ["magnitude"] = null, ["display_format"] = null,
         ["can_select"] = enabled, ["can_filter"] = enabled, ["can_sort"] = enabled, ["can_group"] = enabled, ["can_aggregate"] = enabled
@@ -454,7 +454,7 @@ public sealed class SourcesDescribeTests
     {
         var source = rows[0];
         var mapped = CatalogMapping.Map(new(new DataSourceRow((string)source["object_name"]!, (string)source["connection_string"]!)
-        { Id = 7319,
+        { QueryTimeoutSeconds = 30, Id = 7319,
             Name = (string)source["name"]!, Title = (string)source["title"]!, Description = (string)source["description"]!,
             Grain = (string)source["grain"]!, RowCap = 7, IsActive = true
         }, rows.Select(c => new DataSourceColumnRow((string)c["column_name"]!, (int)c["ordinal"]!, (string)c["column_title"]!,
@@ -496,8 +496,7 @@ public sealed class SourcesDescribeTests
             builder.WebHost.UseSetting("urls", "http://127.0.0.1:0");
             builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["DataGateway:Limits:CommandTimeoutSeconds"] = "1"
-            });
+                });
             if (settings is not null) builder.Configuration.AddInMemoryCollection(settings);
             builder.Services.AddSingleton(reader);
             reader.Use(builder.Services);

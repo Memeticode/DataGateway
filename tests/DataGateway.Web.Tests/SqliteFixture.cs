@@ -42,7 +42,7 @@ internal sealed class SqliteFixture : IDisposable
             command.ExecuteNonQuery();
         }
         Execute("""
-            CREATE TABLE gateway_source(id INTEGER, name TEXT, title TEXT, description TEXT, grain TEXT, row_cap INTEGER,
+            CREATE TABLE gateway_source(id INTEGER, name TEXT, title TEXT, description TEXT, grain TEXT, row_cap INTEGER, query_timeout_seconds INTEGER NOT NULL DEFAULT 30,
                 object_name TEXT, connection_string TEXT, is_active INTEGER);
             CREATE TABLE gateway_column(datasource_fk INTEGER, column_name TEXT, ordinal INTEGER, title TEXT,
                 description TEXT, data_type TEXT, unit TEXT, magnitude TEXT, display_format TEXT,
@@ -51,7 +51,7 @@ internal sealed class SqliteFixture : IDisposable
             """);
         foreach (var (id, name, active) in new[] { (102, "synthetic_other", 1), (103, "synthetic_hidden", 0), (101, "synthetic_items", 1) })
         {
-            Execute("INSERT INTO gateway_source VALUES(@v0,@v1,@v2,@v3,@v4,@v5,@v6,@v7,@v8)",
+            Execute("INSERT INTO gateway_source(id,name,title,description,grain,row_cap,object_name,connection_string,is_active) VALUES(@v0,@v1,@v2,@v3,@v4,@v5,@v6,@v7,@v8)",
                 id, name, "Synthetic", "Invented SQLite proof data.", "One item", 3, "proof_items", Connection, active);
             foreach (var (column, ordinal, type) in new[] { ("amount", 4, "number"), ("flag", 3, "bool"), ("id", 1, "number"), ("label", 2, "text") })
                 Execute("INSERT INTO gateway_column VALUES(@v0,@v1,@v2,@v3,@v4,@v5,NULL,NULL,NULL,1,1,1,1,1)",
@@ -77,11 +77,17 @@ internal sealed class SqliteFixture : IDisposable
 
     internal SqliteTestCatalog Catalog(int timeout = 7, Func<string, SqliteConnection>? createConnection = null, string provider = "sqlite") =>
         new(DbContext<SqliteConnection>.FromFactory(() => createConnection is null ? new SqliteConnection(Connection) : createConnection(Connection)), timeout, provider);
-    internal async Task<SourceContract> Source()
+    internal async Task<SourceContract> Source(int queryTimeoutSeconds = 30)
     {
         var detail = await Catalog().QueryCatalogDetailAsync("synthetic_items", default);
         Assert.NotNull(detail);
-        var result = CatalogMapping.Map(detail.Rows);
+        var row = detail.Rows.Source;
+        var source = new DataSourceRow(row.ObjectName, row.ConnectionString)
+        {
+            Id = row.Id, Name = row.Name, Title = row.Title, Description = row.Description,
+            Grain = row.Grain, IsActive = row.IsActive, RowCap = row.RowCap, QueryTimeoutSeconds = queryTimeoutSeconds
+        };
+        var result = CatalogMapping.Map(new CatalogRows(source, detail.Rows.Columns));
         Assert.True(result.IsSuccess, result.Failure?.Message);
         return result.Value;
     }
@@ -90,17 +96,14 @@ internal sealed class SqliteFixture : IDisposable
     internal SqliteSettings Settings() => new(DirectoryPath, ErrorLogSettingsScope.Catalog);
     internal LoggedHost Host(IDatabaseEngine engine, IDictionary<string, string?>? settings = null,
         Action<Microsoft.AspNetCore.Builder.WebApplicationBuilder>? configure = null,
-        Func<string, SqliteConnection>? catalogConnection = null)
+        Func<string, SqliteConnection>? catalogConnection = null, int catalogTimeoutSeconds = 15)
     {
-        LoggedHost? host = null;
-        int Timeout() => (host ?? throw new InvalidOperationException("The fixture host has not been composed.")).App.Services
-            .GetRequiredService<Microsoft.Extensions.Options.IOptions<DataGatewayLimits>>().Value.CommandTimeoutSeconds;
         Task<IReadOnlyList<SourceListRow>> List(CancellationToken token) =>
-            Catalog(Timeout(), catalogConnection, "sqlserver").QueryCatalogAsync(token);
+            Catalog(catalogTimeoutSeconds, catalogConnection, "sqlserver").QueryCatalogAsync(token);
         Task<CatalogDetail?> Detail(string name, CancellationToken token) =>
-            Catalog(Timeout(), catalogConnection, "sqlserver").QueryCatalogDetailAsync(name, token);
+            Catalog(catalogTimeoutSeconds, catalogConnection, "sqlserver").QueryCatalogDetailAsync(name, token);
         var catalog = new HostCatalogState { StartupList = List, StartupDetail = Detail, List = List, Detail = Detail };
-        host = new LoggedHost(catalog, engine, settings, configure: configure);
+        var host = new LoggedHost(catalog, engine, settings, configure: configure);
         return host;
     }
 

@@ -416,7 +416,7 @@ public sealed class UnexpectedErrorTests
     internal static DataGateway.Data.IDatabaseEngine FaultEngine(Exception? failure = null) => FakeRows.Engine(new SqlServerEngine(), (_, _, connected, _) =>
     { connected(); throw failure ?? new SyntheticFault("synthetic query fault"); });
 
-    internal static QueryRunner FaultRunner(Exception? failure = null) =>FakeRows.Runner(new SqlServerEngine(), 1, (_, _, connected, _) =>
+    internal static QueryRunner FaultRunner(Exception? failure = null) =>FakeRows.Runner(new SqlServerEngine(), (_, _, connected, _) =>
     { connected(); throw failure ?? new SyntheticFault("synthetic query fault"); });
 
     internal static async Task<JsonElement> Exact(HttpResponseMessage response)

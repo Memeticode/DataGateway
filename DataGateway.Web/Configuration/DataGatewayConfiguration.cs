@@ -34,10 +34,11 @@ public static class DataGatewayConfiguration
             throw new OptionsValidationException(Options.DefaultName, typeof(DataGatewayLimits),
                 ["InvalidConfiguration: DataGateway:Limits:RowCap is no longer read, because each source's row_cap in the catalog governs its cap. Remove it (DataGateway__Limits__RowCap in the environment), and set row_cap in the catalog."]);
 
-        var limits = new DataGatewayLimits
-        {
-            CommandTimeoutSeconds = ReadLimit(configuration, nameof(DataGatewayLimits.CommandTimeoutSeconds), 30, 1, int.MaxValue)
-        };
+        if (configuration.GetSection("DataGateway:Limits:CommandTimeoutSeconds").Exists())
+            throw new OptionsValidationException(Options.DefaultName, typeof(DataGatewayLimits),
+                ["InvalidConfiguration: DataGateway:Limits:CommandTimeoutSeconds is no longer read, because each source's query_timeout_seconds in the catalog governs its timeout. Remove it (DataGateway__Limits__CommandTimeoutSeconds in the environment), and set query_timeout_seconds in the catalog."]);
+
+        var limits = new DataGatewayLimits();
 
         var maxJsonLength = ReadLimit(configuration, nameof(JsonQueryLimits.MaxJsonLength),
             JsonQueryLimits.Default.MaxJsonLength, 1, int.MaxValue);
@@ -60,7 +61,6 @@ public static class DataGatewayConfiguration
         services.TryAddSingleton(queryLimits);
         return new GatewayLimits
         {
-            CommandTimeoutSeconds = limits.CommandTimeoutSeconds,
             MaxJsonLength = maxJsonLength,
             MaxFilterDepth = maxFilterDepth,
             MaxFilterConditions = maxFilterConditions,

@@ -78,7 +78,7 @@ public static class DemoChecks
 
     public static IReadOnlyList<string> Rows(DemoAnswer answer, string source, IReadOnlyList<DemoColumn> expected,
         int cap, int? limit, DemoColumn? filter = null, JsonElement? value = null, bool descendingCounts = false,
-        bool ordered = true) => Check(answer, 200, (body, problems) =>
+        bool ordered = true, bool hasInFilter = false) => Check(answer, 200, (body, problems) =>
     {
         Members(body, ["source", "columns", "rows", "rowCount", "more", "hint"], problems);
         Require(body.GetProperty("source").GetString() == source, "source differs from request", problems);
@@ -93,7 +93,8 @@ public static class DemoChecks
         var rows = body.GetProperty("rows");
         var count = body.GetProperty("rowCount").GetInt32();
         var more = body.GetProperty("more").GetBoolean();
-        var hint = more ? "The result set was capped at " + count + (count == 1 ? " row." : " rows.") : count == 0 ? "Nothing found that matched your query." : "Complete result set.";
+        var hint = more ? "The result set was capped at " + count + (count == 1 ? " row." : " rows.") : count == 0 ? "Nothing found that matched your query."
+            : hasInFilter ? "All matching rows returned. in values that matched no row are left out: compare the values you asked for with the rows." : "Complete result set.";
         if (more && !ordered) hint += " Rows are in no particular order.";
         Require(body.GetProperty("hint").ValueKind == JsonValueKind.String && body.GetProperty("hint").GetString() == hint, "hint must be '" + hint + "'", problems);
         Require(rows.GetArrayLength() == count, "rowCount differs from rows length", problems);

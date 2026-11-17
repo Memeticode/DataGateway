@@ -937,8 +937,7 @@ public sealed class NamedGatewayMcpTests
         {
             ["DataGateway:Mcp:Title"] = "Composition example",
             ["DataGateway:Mcp:About"] = "Composition about.",
-            ["DataGateway:Limits:CommandTimeoutSeconds"] = "30"
-        }, configure: builder =>
+            }, configure: builder =>
         {
             builder.Services.AddSingleton(cleanup);
             builder.Services.AddScoped<NamedGatewayDependency>();
@@ -1164,7 +1163,7 @@ public sealed class NamedGatewayMcpTests
             Description = row.Description,
             Grain = row.Grain,
             IsActive = active ?? row.IsActive,
-            RowCap = cap ?? row.RowCap
+            QueryTimeoutSeconds = row.QueryTimeoutSeconds, RowCap = cap ?? row.RowCap
         };
         return new(detail.Provider, new(source, detail.Rows.Columns));
     }

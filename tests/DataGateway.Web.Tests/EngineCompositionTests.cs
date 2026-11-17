@@ -46,7 +46,7 @@ public sealed class EngineCompositionTests
         Assert.Equal(1, engine.Reads);
         Assert.Same(compiled, engine.ReadQuery);
         Assert.Equal(source.ConnectionString, engine.Connection);
-        Assert.Equal(runner.CommandTimeoutSeconds, engine.Timeout);
+        Assert.Equal(source.QueryTimeoutSeconds, engine.Timeout);
         DeadlineToken.Passed(caller.Token, engine.Token);
     }
 
@@ -56,7 +56,7 @@ public sealed class EngineCompositionTests
         using var settings = new ErrorLogSettingsScope();
         var engine = new RecordingEngine();
         CompiledQuery? received = null;
-        var runner = FakeRows.Runner(engine, 1, (_, compiled, connected, _) =>
+        var runner = FakeRows.Runner(engine, (_, compiled, connected, _) =>
         {
             received = compiled;
             connected();

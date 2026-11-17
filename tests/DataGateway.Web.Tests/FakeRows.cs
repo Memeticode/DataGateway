@@ -11,10 +11,10 @@ internal static class FakeRows
         Func<string, CompiledQuery, Action, CancellationToken,
             IAsyncEnumerable<IDictionary<string, object?>>> read) => new RowsEngine(engine, read);
 
-    internal static QueryRunner Runner(IDatabaseEngine engine, int commandTimeoutSeconds,
+    internal static QueryRunner Runner(IDatabaseEngine engine,
         Func<string, CompiledQuery, Action, CancellationToken,
             IAsyncEnumerable<IDictionary<string, object?>>> read) =>
-        new(new RowsEngine(engine, read), commandTimeoutSeconds);
+        new(new RowsEngine(engine, read));
 
     internal static Func<string, CompiledQuery, Action, CancellationToken,
         IAsyncEnumerable<IDictionary<string, object?>>> From(

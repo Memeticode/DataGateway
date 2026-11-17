@@ -134,7 +134,7 @@ public sealed class McpEndpointTests
         var example = description.Split("e.g. ", 2)[1].Split(". {}", 2)[0];
         using var parsed = JsonDocument.Parse(example);
         var source = new DataGateway.Core.Catalog.DataSourceRow("dbo.synthetic", "fixture-connection-removed")
-            { Name = "synthetic", Title = "Synthetic", Description = "Synthetic", Grain = "One row", RowCap = 500, IsActive = true };
+            { Name = "synthetic", Title = "Synthetic", Description = "Synthetic", Grain = "One row", QueryTimeoutSeconds = 30, RowCap = 500, IsActive = true };
         DataGateway.Core.Catalog.DataSourceColumnRow[] columns =
         [new("a", 1, "A", "Synthetic", "text", null, null, null, true, false, false, false, false),
          new("b", 2, "B", "Synthetic", "text", null, null, null, false, true, false, false, false)];

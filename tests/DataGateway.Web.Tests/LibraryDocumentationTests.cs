@@ -89,7 +89,7 @@ public sealed class LibraryDocumentationTests
         Assert.True(mcpStart >= 0);
         var mcpEnd = library.IndexOf("\n## ", mcpStart + 1, StringComparison.Ordinal);
         var mcp = mcpEnd < 0 ? library[mcpStart..] : library[mcpStart..mcpEnd];
-        foreach (var term in new[] { "notifications/cancelled", "QueryCancelled", "CatalogCancelled", "CommandTimeoutSeconds" })
+        foreach (var term in new[] { "notifications/cancelled", "QueryCancelled", "CatalogCancelled", "query_timeout_seconds", "source's catalog value" })
             Assert.Contains(term, mcp);
         Assert.Contains("Apache License 2.0: [LICENSE](LICENSE), [NOTICE](NOTICE).", library);
         Assert.Contains(ReadmeTests.Attribution, library);

@@ -197,7 +197,7 @@ public sealed class CatalogMappingTests
     private static DataSourceRow Source(bool active = true) => new("dbo.synthetic_observations", "fake-password")
     {
         Id = 7319, Name = "synthetic_observations", Title = "Synthetic observations", Description = "Test measurements.",
-        Grain = "One synthetic measurement per day.", RowCap = 500, IsActive = active
+        QueryTimeoutSeconds = 30, Grain = "One synthetic measurement per day.", RowCap = 500, IsActive = active
     };
 
     private static DataSourceColumnRow Column(string type, int flags) => new(

@@ -280,7 +280,7 @@ public sealed class ConnectionsAndErrorsTests
             var accept = listener.AcceptTcpClientAsync(timeout.Token).AsTask();
             var watch = Stopwatch.StartNew();
             var source = Source(connection);
-            var runner = new QueryRunner(new SqlServerEngine(), 30);
+            var runner = new QueryRunner(new SqlServerEngine());
             var pending = Read();
             async Task<CatalogFailure?> Read() => (await runner.RunAsync(source, Compile(source), timeout.Token)).Failure;
             using var client = await accept.WaitAsync(TimeSpan.FromSeconds(5));
@@ -386,7 +386,7 @@ public sealed class ConnectionsAndErrorsTests
         using var scope = new ErrorLogSettingsScope();
         var error = new IOException("driver detail on visible-host for visible-user\nsecond line", new Exception("inner driver detail"));
         var source = ErrorLogTests.Contract();
-        var runner = FakeRows.Runner(new SqlServerEngine(), 1, (_, _, connected, _) => { connected(); throw error; });
+        var runner = FakeRows.Runner(new SqlServerEngine(), (_, _, connected, _) => { connected(); throw error; });
         var failure = (await runner.RunAsync(source, Compile(source), CancellationToken.None)).Failure!;
         Assert.Same(error, failure.DriverException);
         Assert.Equal(source.Id, failure.SourceId);
@@ -428,8 +428,8 @@ public sealed class ConnectionsAndErrorsTests
     public async Task T18_source_blank_checks_preserve_existing_outcomes(string? text, bool reachesIo)
     {
         var calls = 0;
-        var runner = FakeRows.Runner(new SqlServerEngine(), 1, (_, _, _, _) => { calls++; throw new IOException("source refused"); });
-        var source = Source(text!);
+        var runner = FakeRows.Runner(new SqlServerEngine(), (_, _, _, _) => { calls++; throw new IOException("source refused"); });
+        var source = Source(text!, timeout: 1);
         var result = await runner.RunAsync(source, Compile(source), CancellationToken.None);
         Assert.Equal(reachesIo ? "SourceUnavailable" : "InvalidCatalog", result.Failure!.Code);
         Assert.Equal(reachesIo ? 1 : 0, calls);
@@ -487,8 +487,8 @@ public sealed class ConnectionsAndErrorsTests
     }
 
     private sealed class TextFault : Exception { public override string ToString() => throw new NotSupportedException("text unavailable"); }
-    private static SourceContract Source(string text) => CatalogMapping.Map(new(new DataSourceRow("dbo.synthetic", text)
-    { Id = 7319, Name = "synthetic", Title = "Synthetic", Description = "Synthetic", Grain = "One row", RowCap = 500, IsActive = true },
+    private static SourceContract Source(string text, int timeout = 30) => CatalogMapping.Map(new(new DataSourceRow("dbo.synthetic", text)
+    { QueryTimeoutSeconds = timeout, Id = 7319, Name = "synthetic", Title = "Synthetic", Description = "Synthetic", Grain = "One row", RowCap = 500, IsActive = true },
     [new("text", 1, "Text", "Synthetic", "text", null, null, null, true, true, true, true, true)])).Value;
     private static CompiledQuery Compile(SourceContract source) => new SqlServerEngine().Compile(QueryBuilding.Validate(source, "{}", QueryLimits.ForRowCap(500)).Value);
 }

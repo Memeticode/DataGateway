@@ -275,7 +275,7 @@ public sealed class CatalogServiceContractTests
             var source = JsonSerializer.SerializeToElement(detail.Rows.Source, option);
             Assert.DoesNotContain(source.EnumerateObject(), p => p.Name.Equals("Id", StringComparison.OrdinalIgnoreCase) || p.Name.Equals("ObjectName", StringComparison.OrdinalIgnoreCase));
         }
-        Members(detail.Rows.Source, "name", "title", "description", "grain", "isActive", "rowCap");
+        Members(detail.Rows.Source, "name", "title", "description", "grain", "isActive", "rowCap", "queryTimeoutSeconds");
         Members(contract, "source", "columns");
         Members(listing, "sources");
         Members(Assert.Single(listing.Sources), "name", "title", "description", "grain", "rowCap");
@@ -363,7 +363,7 @@ public sealed class CatalogServiceContractTests
     private static DataSourceRow InvalidSource(string name, string connection, int cap) => new("main.measurements", connection)
     {
         Id = 7319, Name = name, Title = "Widgets", Description = "Synthetic measurements",
-        Grain = "One measurement", IsActive = true, RowCap = cap
+        Grain = "One measurement", IsActive = true, QueryTimeoutSeconds = 30, RowCap = cap
     };
 
     private sealed class RawCatalog(IReadOnlyList<SourceListRow> list, CatalogDetail? detail) : CatalogService<SqliteConnection>(NewDb())
@@ -399,7 +399,7 @@ public sealed class CatalogServiceContractTests
 
     private static CatalogRows FixtureRows(string name) => new(
         new DataSourceRow("main.measurements", ConnectionSentinel)
-        {
+        { QueryTimeoutSeconds = 30,
             Id = 7319, Name = name, Title = "Widgets", Description = "Synthetic measurements",
             Grain = "One measurement", IsActive = true, RowCap = 7
         },

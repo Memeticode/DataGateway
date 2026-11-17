@@ -14,8 +14,8 @@ namespace DataGateway.Web.Tests;
 public sealed class PostgreSqlCompilationTests
 {
     internal const string Connection = "Host=localhost;Database=dg_r5_test;Username=dg_r5_reader";
-    internal static SourceContract Source(int cap = 5) => CatalogMapping.Map(new CatalogRows(
-        new DataSourceRow("synthetic.items", Connection) { Id=1, Name="synthetic_items", Title="Items",
+    internal static SourceContract Source(int cap = 5, int queryTimeoutSeconds = 30) => CatalogMapping.Map(new CatalogRows(
+        new DataSourceRow("synthetic.items", Connection) { QueryTimeoutSeconds = queryTimeoutSeconds, Id=1, Name="synthetic_items", Title="Items",
             Description="Synthetic rows.", Grain="One item.", IsActive=true, RowCap=cap },
         new[] {("id","number"),("label","text"),("MixedCase","text"),("day","date"),("flag","bool"),("amount","number")}
             .Select((c,i) => new DataSourceColumnRow(c.Item1,i+1,c.Item1,"Column.",c.Item2,null,null,null,

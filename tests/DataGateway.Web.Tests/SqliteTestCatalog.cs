@@ -72,7 +72,7 @@ internal sealed class SqliteTestCatalog : CatalogService<SqliteConnection>
         "SELECT \"name\" FROM \"gateway_source\" WHERE \"is_active\" = 1;";
 
     internal const string ReadSql =
-        "SELECT s.\"id\", s.\"name\", s.\"title\", s.\"description\", s.\"grain\", s.\"row_cap\", s.\"object_name\", s.\"connection_string\",\n" +
+        "SELECT s.\"id\", s.\"name\", s.\"title\", s.\"description\", s.\"grain\", s.\"row_cap\", s.\"query_timeout_seconds\", s.\"object_name\", s.\"connection_string\",\n" +
         "       c.\"column_name\", c.\"ordinal\", c.\"title\" AS \"column_title\",\n" +
         "       c.\"description\" AS \"column_description\", c.\"data_type\", c.\"unit\",\n" +
         "       c.\"magnitude\", c.\"display_format\", c.\"can_select\", c.\"can_filter\",\n" +

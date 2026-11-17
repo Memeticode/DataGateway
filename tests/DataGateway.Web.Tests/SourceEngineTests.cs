@@ -264,7 +264,7 @@ public sealed class SourceEngineTests
                 new LifecycleEngine().ReadSourceAsync(connection, query, seconds, opened,
                     rows => consume(RecordRows(rows, materialized)), token)
         };
-        var result = await new QueryRunner(engine, 41).RunAsync(ErrorLogTests.Contract(), Query(), CancellationToken.None);
+        var result = await new QueryRunner(engine).RunAsync(ErrorLogTests.Contract(queryTimeoutSeconds: 41), Query(), CancellationToken.None);
         Assert.True(result.IsSuccess);
         Assert.Equal(kept, result.Value.RowCount); Assert.Equal(more, result.Value.More);
         Assert.Equal(attempts, probe.Reads); Assert.Equal(Math.Min(input, 4), probe.SuccessfulReads);
@@ -430,7 +430,7 @@ public sealed class SourceEngineTests
     {
         using var caller = new CancellationTokenSource(); caller.Cancel(); using var probe = new SourceProbe();
         var engine = new NeutralEngine();
-        var result = await new QueryRunner(engine, 41).RunAsync(ErrorLogTests.Contract(), Query(), caller.Token);
+        var result = await new QueryRunner(engine).RunAsync(ErrorLogTests.Contract(queryTimeoutSeconds: 41), Query(), caller.Token);
         Assert.Equal("QueryCancelled", result.Failure?.Code);
         Assert.Null(result.Failure?.Step); Assert.Null(result.Failure?.DriverException); Assert.Null(result.Failure?.ExceptionType); Assert.Null(result.Failure?.SqlNumber);
         Assert.Equal(0, engine.Validations + engine.Reads + engine.Recognitions);
@@ -446,11 +446,11 @@ public sealed class SourceEngineTests
         {
             opened(); var rows = await consume(Sequence()); caller.Cancel(); return rows;
         } };
-        var result = await new QueryRunner(engine, 41).RunAsync(ErrorLogTests.Contract(), Query(), caller.Token);
+        var result = await new QueryRunner(engine).RunAsync(ErrorLogTests.Contract(queryTimeoutSeconds: 41), Query(), caller.Token);
         Assert.Equal("QueryCancelled", result.Failure?.Code); Assert.Equal("command", result.Failure?.Step);
         Assert.Null(result.Failure?.DriverException); Assert.Equal(0, engine.Recognitions);
         using var late = new CancellationTokenSource();
-        var success = await new QueryRunner(new NeutralEngine(), 41).RunAsync(ErrorLogTests.Contract(), Query(), late.Token);
+        var success = await new QueryRunner(new NeutralEngine()).RunAsync(ErrorLogTests.Contract(queryTimeoutSeconds: 41), Query(), late.Token);
         late.Cancel(); Assert.True(success.IsSuccess);
     }
 
@@ -489,15 +489,15 @@ public sealed class SourceEngineTests
         var eligible = kind.StartsWith("provider", StringComparison.Ordinal) || kind is "io" or "invalid" or "disposed" or "timeout" or "cancel" or "task-cancel" ||
             (connected ? kind == "overflow" : kind is "argument" or "format");
         var propagates = !eligible || (!cancelled && kind is "cancel" or "task-cancel");
-        var source = ErrorLogTests.Contract();
+        var source = ErrorLogTests.Contract(queryTimeoutSeconds: 41);
         if (propagates)
         {
-            var caught = await Record.ExceptionAsync(() => new QueryRunner(engine, 41).RunAsync(source, Query(), caller.Token));
+            var caught = await Record.ExceptionAsync(() => new QueryRunner(engine).RunAsync(source, Query(), caller.Token));
             Assert.Same(error, caught); Assert.Same(error.InnerException, caught!.InnerException); Assert.Contains(nameof(ThrowSourceFailure), caught.StackTrace);
         }
         else
         {
-            var result = await new QueryRunner(engine, 41).RunAsync(source, Query(), caller.Token);
+            var result = await new QueryRunner(engine).RunAsync(source, Query(), caller.Token);
             var failure = Assert.IsType<CatalogFailure>(result.Failure);
             var code = cancelled ? "QueryCancelled" : !connected && kind is "argument" or "format" ? "InvalidCatalog" :
                 connected && (kind == "timeout" || kind.StartsWith("provider-timeout", StringComparison.Ordinal)) ? "QueryTimeout" : "SourceUnavailable";
@@ -539,10 +539,10 @@ public sealed class SourceEngineTests
         var cleanup = new IOException("dispose", new Exception("cleanup-inner"));
         var rows = new FaultSequence(kind, original, cleanup);
         var engine = new NeutralEngine { Execute = (_, _, _, opened, consume, _) => { opened(); return consume(rows); } };
-        var runner = new QueryRunner(engine, 41);
+        var runner = new QueryRunner(engine);
         var caught = await Record.ExceptionAsync(async () =>
         {
-            var result = await runner.RunAsync(ErrorLogTests.Contract(), Query(1, kind == "match"), CancellationToken.None);
+            var result = await runner.RunAsync(ErrorLogTests.Contract(queryTimeoutSeconds: 41), Query(1, kind == "match"), CancellationToken.None);
             if (kind is "normal" or "early") { Assert.True(result.IsSuccess); Assert.Equal(kind == "early", result.Value.More); return; }
             var failure = Assert.IsType<CatalogFailure>(result.Failure); Assert.Equal("SourceUnavailable", failure.Code);
             var expected = kind == "dispose" ? cleanup : original;
@@ -573,7 +573,7 @@ public sealed class SourceEngineTests
         var observed = new List<IDictionary<string, object?>>();
         var engine = new NeutralEngine { Execute = (connection, query, seconds, opened, consume, token) =>
             new LifecycleEngine().ReadSourceAsync(connection, query, seconds, opened, rows => consume(RecordRows(rows, observed)), token) };
-        var result = await new QueryRunner(engine, 41).RunAsync(ErrorLogTests.Contract(), Query(1, true), CancellationToken.None);
+        var result = await new QueryRunner(engine).RunAsync(ErrorLogTests.Contract(queryTimeoutSeconds: 41), Query(1, true), CancellationToken.None);
         Assert.True(result.IsSuccess); Assert.True(result.Value.More); Assert.False(result.Value.NoMatchingRows);
         Assert.Same(observed[0], Assert.Single(result.Value.Rows));
         Assert.False(observed[0].ContainsKey(CompiledQuery.MatchedRowCountColumn));
@@ -598,9 +598,9 @@ public sealed class SourceEngineTests
         Assert.DoesNotContain("planted-password-fragment", error.Message);
         Assert.Empty(probe.Connections);
         var source = CatalogMapping.Map(new(new DataSourceRow("dbo.synthetic", connection!)
-        { Id = 72, Name = "synthetic", Title = "Synthetic", Description = "Synthetic", Grain = "One row", RowCap = 500, IsActive = true },
+        { QueryTimeoutSeconds = 41, Id = 72, Name = "synthetic", Title = "Synthetic", Description = "Synthetic", Grain = "One row", RowCap = 500, IsActive = true },
         [new("amount", 1, "Amount", "Synthetic", "number", null, null, null, true, true, true, true, true)])).Value;
-        var result = await new QueryRunner(engine, 41).RunAsync(source, Query(), CancellationToken.None);
+        var result = await new QueryRunner(engine).RunAsync(source, Query(), CancellationToken.None);
         Assert.Equal("InvalidCatalog", result.Failure?.Code); Assert.Equal(0, engine.Reads);
         var direct = await Assert.ThrowsAsync<ArgumentException>(() =>
             new LifecycleEngine().ReadSourceAsync(connection!, Query(), 41,

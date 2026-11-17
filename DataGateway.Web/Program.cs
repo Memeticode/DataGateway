@@ -62,7 +62,7 @@ public partial class Program
                 ["InvalidConfiguration: DataGateway:DatabaseEngine must be SqlServer or PostgreSql."]);
         }
         var forwarding = new HostDatabaseEngine(postgreSql ? PostgreSqlEngine.ProviderName : SqlServerEngine.ProviderName);
-        HostCatalogs.Configure(builder.Services, postgreSql, limits.CommandTimeoutSeconds);
+        HostCatalogs.Configure(builder.Services, postgreSql);
         var mcp = McpConfiguration.Read(builder.Configuration);
         builder.Services.AddDataGateway("DataGateway.Web", gateway =>
         {

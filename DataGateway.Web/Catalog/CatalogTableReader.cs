@@ -112,7 +112,8 @@ internal static class CatalogTableReader
             Description = Text(row, "description"),
             Grain = Text(row, "grain"),
             IsActive = true,
-            RowCap = RowCap(row)
+            RowCap = RowCap(row),
+            QueryTimeoutSeconds = QueryTimeoutSeconds(row)
         };
 
     private static IDictionary<string, object?> Row(object? raw) =>
@@ -142,6 +143,18 @@ internal static class CatalogTableReader
         if (cap < 1 || cap > QueryLimits.MaxRowCap)
             throw BadCell();
         return cap;
+    }
+
+    private static int QueryTimeoutSeconds(IDictionary<string, object?> row)
+    {
+        if (!row.TryGetValue("query_timeout_seconds", out var value))
+            throw new InvalidQueryTimeoutException();
+        int seconds;
+        try { seconds = Integer(value); }
+        catch (InvalidCastException) { throw new InvalidQueryTimeoutException(); }
+        if (seconds is < 1 or > 86400)
+            throw new InvalidQueryTimeoutException();
+        return seconds;
     }
 
     private static bool Flag(IDictionary<string, object?> row, string field, bool allowIntegralFlags)

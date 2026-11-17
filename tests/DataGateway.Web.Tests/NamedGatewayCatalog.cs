@@ -101,7 +101,7 @@ internal sealed class NamedGatewayCatalog : CatalogService<SqliteConnection>
             var row = (IDictionary<string, object?>)rows[0];
             var id = Number(row, "id");
             var columns = await Db.QueryAsync("SELECT * FROM gateway_column WHERE datasource_fk = @id ORDER BY ordinal LIMIT 100;", new { id }, cancellationToken: token);
-            result = new CatalogDetail(state.Provider(name), new CatalogRows(new DataSourceRow(Text(row, "object_name"), Text(row, "connection_string")) { Id = id, Name = Text(row, "name"), Title = Text(row, "title"), Description = Text(row, "description"), Grain = Text(row, "grain"), IsActive = Number(row, "is_active") != 0, RowCap = Number(row, "row_cap") }, columns.Select(raw =>
+            result = new CatalogDetail(state.Provider(name), new CatalogRows(new DataSourceRow(Text(row, "object_name"), Text(row, "connection_string")) { QueryTimeoutSeconds = Number(row, "query_timeout_seconds"), Id = id, Name = Text(row, "name"), Title = Text(row, "title"), Description = Text(row, "description"), Grain = Text(row, "grain"), IsActive = Number(row, "is_active") != 0, RowCap = Number(row, "row_cap") }, columns.Select(raw =>
             {
                 var col = (IDictionary<string, object?>)raw;
                 return new DataSourceColumnRow(Text(col, "column_name"), Number(col, "ordinal"), Text(col, "title"), Text(col, "description"), Text(col, "data_type"), col["unit"] as string, col["magnitude"] as string, col["display_format"] as string, Number(col, "can_select") != 0, Number(col, "can_filter") != 0, Number(col, "can_sort") != 0, Number(col, "can_group") != 0, Number(col, "can_aggregate") != 0);

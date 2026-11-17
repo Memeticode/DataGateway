@@ -17,6 +17,7 @@ public sealed class SourceContract
     internal SourceContract(DataSourceRow source, QueryColumns queryColumns, ColumnMetadata[] columns)
     {
         Id = source.Id;
+        QueryTimeoutSeconds = source.QueryTimeoutSeconds;
         Source = new(source.Name, source.Title, source.Description, source.Grain, source.RowCap);
         ObjectName = source.ObjectName;
         ConnectionString = source.ConnectionString;
@@ -25,6 +26,7 @@ public sealed class SourceContract
     }
 
     [JsonIgnore] public int Id { get; }
+    [JsonIgnore] public int QueryTimeoutSeconds { get; }
     public SourceMetadata Source { get; }
     public IReadOnlyList<ColumnMetadata> Columns { get; }
     [JsonIgnore] public string ObjectName { get; }

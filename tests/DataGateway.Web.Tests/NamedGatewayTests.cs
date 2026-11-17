@@ -146,7 +146,7 @@ public sealed class NamedGatewayTests
         var state = new NamedGatewayState(fixture);
         await using var named = Host(state);
         await named.Start();
-        await using var example = fixture.Host(new SqliteEngine(), new Dictionary<string, string?> { ["DataGateway:Limits:CommandTimeoutSeconds"] = "30" });
+        await using var example = fixture.Host(new SqliteEngine(), new Dictionary<string, string?> { });
         await example.Start();
         foreach (var operation in Operations)
         {
@@ -1447,7 +1447,7 @@ public sealed class NamedGatewayTests
         Assert.Equal(typeof(object), limitsType.BaseType);
         Assert.Empty(Assert.Single(limitsType.GetConstructors()).GetParameters());
         var properties = limitsType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly);
-        Assert.Equal(new[] { "CommandTimeoutSeconds", "MaxFilterConditions", "MaxFilterDepth", "MaxInValues", "MaxJsonLength" },
+        Assert.Equal(new[] { "MaxFilterConditions", "MaxFilterDepth", "MaxInValues", "MaxJsonLength" },
             properties.Select(property => property.Name).Order(StringComparer.Ordinal));
         foreach (var member in properties)
         {
@@ -1692,7 +1692,7 @@ public sealed class NamedGatewayTests
     private static CatalogDetail WithSource(CatalogDetail detail, string? name = null, string? connection = null, int? cap = null, bool? active = null)
     {
         var row = detail.Rows.Source;
-        return new(detail.Provider, new CatalogRows(new DataSourceRow(row.ObjectName, connection ?? row.ConnectionString) { Id = row.Id, Name = name ?? row.Name, Title = row.Title, Description = row.Description, Grain = row.Grain, IsActive = active ?? row.IsActive, RowCap = cap ?? row.RowCap }, detail.Rows.Columns));
+        return new(detail.Provider, new CatalogRows(new DataSourceRow(row.ObjectName, connection ?? row.ConnectionString) { QueryTimeoutSeconds = row.QueryTimeoutSeconds, Id = row.Id, Name = name ?? row.Name, Title = row.Title, Description = row.Description, Grain = row.Grain, IsActive = active ?? row.IsActive, RowCap = cap ?? row.RowCap }, detail.Rows.Columns));
     }
 
     private static CatalogFailure DetailFailure(CatalogDetail detail)

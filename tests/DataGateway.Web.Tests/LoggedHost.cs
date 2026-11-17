@@ -37,7 +37,6 @@ internal sealed class LoggedHost : IAsyncDisposable
             builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Serilog:WriteTo:File:Args:path"] = Path.Combine(DirectoryPath, "datagateway-.jsonl"),
-                ["DataGateway:Limits:CommandTimeoutSeconds"] = "1",
                 ["DataGateway:Mcp:Title"] = "", ["DataGateway:Mcp:About"] = ""
             });
             if (settings is not null) builder.Configuration.AddInMemoryCollection(settings);

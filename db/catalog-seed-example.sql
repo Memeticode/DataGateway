@@ -1,3 +1,4 @@
+-- query_timeout_seconds is omitted to use the catalog default of 30 seconds.
 -- Example catalog registration: edit the source name, view, metadata and column rows for your view.
 -- Create the view first; this script creates no object and inserts no view data.
 -- Run from the public root as in README, Get started, step 4:

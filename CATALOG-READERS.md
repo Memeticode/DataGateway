@@ -15,7 +15,7 @@ Use Dapper.Data 3.1.2 `DbContext<TConnection>.FromFactory` with a factory that s
 
 The reader receives `sourceName` verbatim. The app chooses comparison rules. The sample's SQLite NOCASE lookup covers its invented ASCII names; it does not promise Unicode equivalence.
 
-A null detail or an inactive mapped detail is an unknown source in normal requests. List exposes active names. Catalog invocation exceptions are sanitized to `CatalogUnavailable`, retaining exception type internally. Cancellation maps internally to `CatalogCancelled`, subject to the public envelope's `InternalError` redaction while connected. A disconnected caller receives no error body.
+A null detail or an inactive mapped detail is an unknown source in normal requests. List exposes active names. The example readers throw `InvalidQueryTimeoutException` for missing, null, wrong-type, overflowing or out-of-range `query_timeout_seconds` cells. The gateway turns only that exception into the safe InvalidCatalog timeout correction, discarding the exception and bad cell. Other catalog invocation exceptions are sanitized to `CatalogUnavailable`, retaining exception type internally. Cancellation maps internally to `CatalogCancelled`, subject to the public envelope's `InternalError` redaction while connected. A disconnected caller receives no error body.
 
 The factory runs lazily at most once per HTTP invocation needing catalog data, with scoped services. Awaited startup uses a separate scope for each registration, including unmapped ones. Apps own catalogs, supplied contexts and engines; DI owns scoped dependencies. Shared instances require safe concurrency and stable result objects. See [configuration](CONFIGURATION.md#register-a-gateway).
 
@@ -26,7 +26,7 @@ The factory runs lazily at most once per HTTP invocation needing catalog data, w
 | `SourceListRow` | `(string Name, string Title, string Description, string Grain, bool IsActive, int RowCap)` |
 | `CatalogDetail` | `(string provider, CatalogRows rows)`; `Provider`, `Rows` |
 | `CatalogRows` | `(DataSourceRow source, IReadOnlyList<DataSourceColumnRow> columns)`; `Source`, `Columns`; copies the columns |
-| `DataSourceRow` | `(string objectName, string connectionString)`; required `Name`, `Title`, `Description`, `Grain`, `IsActive`, `RowCap`; optional diagnostic `Id` |
+| `DataSourceRow` | `(string objectName, string connectionString)`; required `Name`, `Title`, `Description`, `Grain`, `IsActive`, `RowCap`, `QueryTimeoutSeconds`; optional diagnostic `Id` |
 
 `DataSourceRow.Id`, `ObjectName` and `ConnectionString` are excluded from JSON. `DataSourceColumnRow` has these thirteen constructor parameters in order:
 
@@ -50,7 +50,7 @@ The factory runs lazily at most once per HTTP invocation needing catalog data, w
 
 `CatalogValidator.ValidateList` checks a non-null list and entries, nonblank names without surrounding whitespace, uniqueness ignoring case, `RowCap` from 1 to `QueryLimits.MaxRowCap` (2147483646), and non-null Title/Description/Grain. Inactive rows are checked too. Those display strings may be empty.
 
-`CatalogValidator.ValidateDetail` refuses null `requestedName`, accepts null detail, and otherwise checks a nonblank Provider, non-null Rows/Source, source name equal to the request ignoring case, nonblank ConnectionString/ObjectName, the same cap range, and non-null column entries and ColumnName. CatalogRows construction needs a usable columns sequence. Detail validation does not apply every list display/name rule.
+`CatalogValidator.ValidateDetail` refuses null `requestedName`, accepts null detail, and otherwise checks a nonblank Provider, non-null Rows/Source, source name equal to the request ignoring case, nonblank ConnectionString/ObjectName, the same cap range, detail-only `QueryTimeoutSeconds` from 1 through 86400 immediately after RowCap, and non-null column entries and ColumnName. CatalogRows construction needs a usable columns sequence. An invalid timeout returns `InvalidCatalog` at `$.detail.rows.source.queryTimeoutSeconds` with "Source '{requestedName}'. Set query_timeout_seconds to an integer from 1 through 86400." The host adds catalog step and requested source context. List rows do not carry this setting. Detail validation does not apply every list display/name rule.
 
 `CatalogMapping` treats an inactive source as unknown. An active source needs columns. Column names match ASCII `[A-Za-z_][A-Za-z0-9_]*` and are unique ignoring case. DataType is exactly text/number/date/bool. Columns sort by Ordinal, then ordinal ColumnName. Flags independently enable operations. All-false columns remain descriptive, but at least one column must enable a capability.
 
@@ -123,6 +123,7 @@ namespace GatewaySample
                     Description = reader.GetString(2),
                     Grain = reader.GetString(3),
                     IsActive = reader.GetBoolean(4),
+                    QueryTimeoutSeconds = 30,
                     RowCap = reader.GetInt32(5)
                 };
                 DataSourceColumnRow[] columns =
@@ -138,3 +139,5 @@ namespace GatewaySample
 }
 ```
 
+
+The host examples `SqlServerCatalog(db, int catalogTimeoutSeconds = 15)` and `PostgreSqlCatalog(db, int catalogTimeoutSeconds = 15)` use that positive input only for catalog reads. Each source query uses its own required `query_timeout_seconds` integer, default 30, range 1 through 86400. Run `db/catalog-query-timeout.sql` or `db/postgresql/catalog-query-timeout.sql` on existing catalogs; these idempotent migrations preserve audit history and refresh projections. The setting is absent from wire answers.

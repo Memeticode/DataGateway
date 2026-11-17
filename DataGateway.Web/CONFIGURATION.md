@@ -17,7 +17,6 @@ configuration in Development, environment variables, or command arguments:
 
 | Configuration key | Environment variable | Default | Range |
 | --- | --- | --- | --- |
-| `DataGateway:Limits:CommandTimeoutSeconds` | `DataGateway__Limits__CommandTimeoutSeconds` | 30 | 1 to 2147483647 |
 | `DataGateway:Limits:MaxJsonLength` | `DataGateway__Limits__MaxJsonLength` | 65536 | 1 to 2147483647 |
 | `DataGateway:Limits:MaxFilterDepth` | `DataGateway__Limits__MaxFilterDepth` | 8 | 0 to 30 |
 | `DataGateway:Limits:MaxFilterConditions` | `DataGateway__Limits__MaxFilterConditions` | 50 | 1 to 2147483647 |
@@ -25,7 +24,6 @@ configuration in Development, environment variables, or command arguments:
 
 Every supplied limit must be an integer in its listed range; blank values are refused.
 Absent settings keep their defaults. The retired `DataGateway:Limits:ConnectTimeoutSeconds` setting is refused at startup whenever present, even blank; remove it (including `DataGateway__Limits__ConnectTimeoutSeconds` in the environment).
-Server code obtains the command timeout from `IOptions<DataGatewayLimits>`.
 A shared `JsonQueryLimits` holds the structural limits configured at startup.
 The structural limits are SqlKata.JsonQuery's, with its defaults. `MaxJsonLength`
 counts the characters of the query text. `MaxFilterDepth` 0 allows flat filters only.
@@ -35,9 +33,8 @@ Remove it, including `DataGateway__Limits__RowCap` in the environment.
 
 ## Connection behaviour
 
-`CommandTimeoutSeconds` also bounds every source query as one deadline, from the open connection
-to the last row kept, not each read separately. A query past it fails with `QueryTimeout`. The deadline
-is at most 4,294,967 seconds (about 49.7 days, the longest .NET timer); a larger setting acts as that.
+Each source's catalog `query_timeout_seconds` bounds its query as one deadline from the open connection to the last row kept. It is an integer from 1 through 86400, default 30. A query past it fails with `QueryTimeout`. The retired `DataGateway:Limits:CommandTimeoutSeconds` setting is refused whenever present; remove it, including `DataGateway__Limits__CommandTimeoutSeconds` in the environment, and set query_timeout_seconds in the catalog.
+The sealed example catalogs accept `(db, int catalogTimeoutSeconds = 15)` for catalog reads only; the host uses the default. Existing catalogs require the idempotent `db/catalog-query-timeout.sql` or `db/postgresql/catalog-query-timeout.sql` migration, preserving audit history. The timeout is detail-only and absent from all wire answers.
 Each connection string governs its own connect behaviour: DataGateway uses every source's stored string and the catalog connection exactly as written and sets no connect timeout or retry count. For SQL Server, set `Connect Timeout` and `ConnectRetryCount` in the string to choose your own; otherwise the SQL Server driver's defaults apply (15 seconds and one retry). PostgreSQL uses Npgsql's connection options and defaults; `ConnectRetryCount` is SQL Server-specific. DataGateway itself never retries. A stored string the driver refuses, or one missing a required connection field, is logged as `InvalidCatalog`. Nothing about a source is cached; each query opens its own context.
 
 The source's `row_cap` shapes an answer through `limit` and `more`. See Query in the [README](README.md#query).
@@ -56,7 +53,7 @@ and start/stop the returned application with cancellation tokens.
 
 SQL Server and PostgreSQL are supported. Set `DataGateway:DatabaseEngine` (environment variable `DataGateway__DatabaseEngine`) to `SqlServer` or `PostgreSql`, case-insensitively, and restart. Absence selects SQL Server; blank and unknown values fail startup with `InvalidConfiguration: DataGateway:DatabaseEngine must be SqlServer or PostgreSql.` There is no runtime DLL discovery.
 
-PostgreSQL catalog and source connections must explicitly name nonblank Host, Database and Username; the gateway does not use implicit database or login defaults. Accepted connection text is preserved. PostgreSQL 15 catalog setup uses [catalog-ddl.sql](../db/postgresql/catalog-ddl.sql), [catalog-views.sql](../db/postgresql/catalog-views.sql), [catalog-row-cap.sql](../db/postgresql/catalog-row-cap.sql), [gateway-reader.sql](../db/postgresql/gateway-reader.sql) and the [seed example](../db/postgresql/catalog-seed-example.sql), in that order. Run them as a trusted schema owner with psql `ON_ERROR_STOP`; supply the existing role as `ReaderRole` and a password-free source connection as `SourceConnection`. Create source views and grant their SELECT separately. The generic scripts need no extension. The seed prerequisite is `synthetic.items` with id, label, amount, day and flag.
+PostgreSQL catalog and source connections must explicitly name nonblank Host, Database and Username; the gateway does not use implicit database or login defaults. Accepted connection text is preserved. PostgreSQL 15 catalog setup uses [catalog-ddl.sql](../db/postgresql/catalog-ddl.sql), [catalog-views.sql](../db/postgresql/catalog-views.sql), [catalog-row-cap.sql](../db/postgresql/catalog-row-cap.sql), [catalog-query-timeout.sql](../db/postgresql/catalog-query-timeout.sql), [gateway-reader.sql](../db/postgresql/gateway-reader.sql) and the [seed example](../db/postgresql/catalog-seed-example.sql), in that order. Run them as a trusted schema owner with psql `ON_ERROR_STOP`; supply the existing role as `ReaderRole` and a password-free source connection as `SourceConnection`. Create source views and grant their SELECT separately. The generic scripts need no extension. The seed prerequisite is `synthetic.items` with id, label, amount, day and flag.
 
 The composition is in [Program.cs](Program.cs). The selector chooses the host-owned SQL Server or PostgreSQL catalog reader and a forwarding engine alias. The library permits each source detail to select its own registered engine. Catalog storage is an app choice; this host's SQL schema is not a library requirement.
 
