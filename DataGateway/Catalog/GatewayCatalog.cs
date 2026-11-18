@@ -2,6 +2,7 @@ using DataGateway.Core.Catalog;
 using DataGateway.Core.Errors;
 using DataGateway.Data.Queries;
 using DataGateway.Operations;
+using DataGateway.Mcp;
 
 namespace DataGateway;
 
@@ -9,9 +10,44 @@ namespace DataGateway;
 internal sealed class GatewayCatalog(
     Func<CancellationToken, Task<IReadOnlyList<SourceListRow>>> list,
     Func<string, CancellationToken, Task<CatalogDetail?>> detail,
-    IReadOnlyDictionary<string, QueryRunner> runners)
+    IReadOnlyDictionary<string, QueryRunner> runners,
+    Func<CancellationToken, Task<McpMetadata>> metadata)
 {
+    internal const string UnavailableMessage = "Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user. Do not retry.";
+    private CatalogFailure? metadataFailure;
+
+    internal async Task<CatalogResult<McpMetadata>> MetadataAsync(string gateway, McpToolSettings settings, CancellationToken token)
+    {
+        var read = await ReadAsync(() => metadata(token), "$", null, token);
+        if (read.Failure is { } unavailable)
+        {
+            metadataFailure = unavailable.Code == DataGatewayError.CatalogUnavailable.Code
+                ? unavailable with { Message = UnavailableMessage }
+                : unavailable;
+            return CatalogResult<McpMetadata>.Reject(unavailable);
+        }
+        try
+        {
+            McpMetadataValidation.Validate(read.Value, settings, reason => new InvalidOperationException($"Gateway '{gateway}'. {reason}"));
+        }
+        catch (InvalidOperationException error)
+        {
+            metadataFailure = new(DataGatewayError.CatalogUnavailable.Code, "$", UnavailableMessage) { Step = "catalog" };
+            return CatalogResult<McpMetadata>.Reject(metadataFailure with { Message = error.Message });
+        }
+        ArgumentNullException.ThrowIfNull(read.Value);
+        return CatalogResult<McpMetadata>.Success(read.Value);
+    }
+
     internal async Task<CatalogResult<IReadOnlyList<SourceListRow>>> ListAsync(CancellationToken token)
+    {
+        var sources = await ReadSourcesAsync(token);
+        if (sources.IsSuccess && metadataFailure is { } invalidMetadata)
+            return CatalogResult<IReadOnlyList<SourceListRow>>.Reject(invalidMetadata);
+        return sources;
+    }
+
+    private async Task<CatalogResult<IReadOnlyList<SourceListRow>>> ReadSourcesAsync(CancellationToken token)
     {
         var read = await ReadAsync(() => list(token), "$", null, token);
         if (read.Failure is { } unavailable) return CatalogResult<IReadOnlyList<SourceListRow>>.Reject(unavailable);
@@ -63,6 +99,8 @@ internal sealed class GatewayCatalog(
             {
                 SourceName = sourceName, SourceId = mapped.Value.Id, Step = "catalog"
             });
+        if (metadataFailure is { } invalidMetadata)
+            return CatalogResult<QuerySourceContext>.Reject(invalidMetadata with { Path = "$.source", SourceName = sourceName });
         return CatalogResult<QuerySourceContext>.Success(new(mapped.Value, runner));
     }
 
@@ -72,14 +110,16 @@ internal sealed class GatewayCatalog(
             return CatalogResult<QuerySourceContext>.Reject(new("InvalidCatalog", "$.detail",
                 $"Source '{sourceName}'. Return an active detail for every active source in the list.")
             { SourceName = sourceName, SourceId = sourceId, Step = "catalog" });
-        var sources = await ListAsync(token);
+        var sources = await ReadSourcesAsync(token);
         return CatalogResult<QuerySourceContext>.Reject(sources.Failure ??
             SourceListing.UnknownSource(sources.Value.Where(row => row.IsActive).Select(row => row.Name)) with
             { SourceName = sourceName, SourceId = sourceId, Step = "catalog" });
     }
 
-    internal async Task ValidateAsync(string gatewayName, CancellationToken token)
+    internal async Task ValidateAsync(string gatewayName, McpToolSettings settings, CancellationToken token)
     {
+        var presentation = await MetadataAsync(gatewayName, settings, token);
+        if (presentation.Failure is { } unavailable) throw StartupFailure(gatewayName, unavailable);
         var sources = await ListAsync(token);
         if (sources.Failure is { } unread) throw StartupFailure(gatewayName, unread);
         foreach (var source in sources.Value.Where(row => row.IsActive))
@@ -110,12 +150,15 @@ internal sealed class GatewayCatalog(
         catch (Exception error)
         {
             var cancelled = error is OperationCanceledException || token.IsCancellationRequested;
+            if (!cancelled && error is DataGateway.Data.Catalog.InvalidMcpMetadataException cell)
+                return (default, new CatalogFailure(DataGatewayError.CatalogUnavailable.Code, "$", cell.Field + ": return the required MCP catalog projection.")
+                { Step = "catalog", ExceptionType = error.GetType().Name });
             if (!cancelled && sourceName is not null && error is InvalidQueryTimeoutException)
                 return (default, InvalidQueryTimeoutException.Failure(sourceName) with { Step = "catalog" });
             return (default, new CatalogFailure(
                 cancelled ? DataGatewayError.CatalogCancelled.Code : DataGatewayError.CatalogUnavailable.Code, path,
                 cancelled ? "The catalog read was cancelled. Submit a new request if still needed." :
-                    "Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user. Do not retry.")
+                    UnavailableMessage)
             { Step = "catalog", SourceName = sourceName, ExceptionType = error.GetType().Name });
         }
     }

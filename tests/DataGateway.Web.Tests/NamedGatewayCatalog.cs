@@ -16,7 +16,15 @@ internal sealed class NamedGatewayState(SqliteFixture fixture)
     internal readonly ConcurrentQueue<(NamedGatewayCatalog Catalog, string Operation, string? Source)> Reads = new();
     internal readonly ConcurrentQueue<string> Names = new();
     internal readonly ConcurrentQueue<CancellationToken> Tokens = new();
-    private int factories, lists, details;
+    private int factories, lists, details, metadataReads;
+    internal int MetadataReads => Volatile.Read(ref metadataReads);
+    internal McpMetadata Metadata { get; set; } = McpMetadataFixture.Seed;
+    internal Func<CancellationToken, Task<McpMetadata>>? ReadMetadata { get; set; }
+    internal void MetadataCall(NamedGatewayCatalog catalog)
+    {
+        Interlocked.Increment(ref metadataReads);
+        Reads.Enqueue((catalog, "metadata", null));
+    }
     internal int Factories => Volatile.Read(ref factories);
     internal int Lists => Volatile.Read(ref lists);
     internal int Details => Volatile.Read(ref details);
@@ -54,6 +62,13 @@ internal sealed class NamedGatewayState(SqliteFixture fixture)
 
 internal sealed class NamedGatewayCatalog : CatalogService<SqliteConnection>
 {
+    public override Task<global::DataGateway.Core.Catalog.McpMetadata> QueryMcpMetadataAsync(CancellationToken cancellationToken)
+    {
+        state.MetadataCall(this);
+        cancellationToken.ThrowIfCancellationRequested();
+        return state.ReadMetadata is { } read ? read(cancellationToken) : Task.FromResult(state.Metadata);
+    }
+
     private readonly NamedGatewayState state;
     internal Guid Id { get; } = Guid.NewGuid();
 

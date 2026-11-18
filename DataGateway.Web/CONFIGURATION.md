@@ -71,14 +71,7 @@ A refused or broken handshake adds `incidentId` as the fourth body member, equal
 
 The path `/mcp` and stateless mode are fixed in code. The existing `DataGateway:Limits` apply.
 
-Two optional settings tell a client more about the server. Set them in appsettings; both are empty by default.
 
-| Configuration key | Effect | Limit |
-| --- | --- | --- |
-| `DataGateway:Mcp:Title` | `serverInfo.title` (the display name; `name` and `version` do not change) | one line, at most 80 bytes (UTF-8) |
-| `DataGateway:Mcp:About` | placed, with one space, before the fixed server instructions | one line, at most 120 bytes (UTF-8) |
-
-Empty or blank means off: no `title`, and the instructions are exactly the fixed text. A blank value (empty or only whitespace, line breaks included) counts as unset. A non-blank value is checked as written, before trimming: over its limit, or holding a line break, it stops start-up with exit 2 and a message naming the key; otherwise it is trimmed. Leading and trailing spaces are dropped.
 
 Only POST is mapped: a signed-in GET or DELETE
 gets the framework's empty 405. Sign-in works as for the routes; a refusal line on
@@ -224,3 +217,34 @@ reach the Warning file. Successful calls write no DataGateway success line. A ca
 who leaves while sending a body has no failure value and leaves no line.
 
 On `/mcp`, when a caller ends a tool call's request, the MCP SDK cancels the call, waits for it to return, then ends the request by rethrowing the abort. The call's own line, if it failed, is the only one; the rethrown abort writes none. A `notifications/cancelled` message is accepted and writes no line.
+
+## Catalog MCP metadata
+
+MCP presentation text comes from two catalog tables: SQL Server `dbo.McpServer` and `dbo.McpTool`, or PostgreSQL `datagateway.mcpserver` and `datagateway.mcptool`.
+The readers select their projection views `vMcpServer` / `vMcpTool` or `vmcpserver` / `vmcptool`, with the catalog command timeout.
+The server table contains exactly one row, `id = 1`, with nonblank `title` (1-80 characters, no CR/LF) and `about` (1-1,000 characters).
+The tool table contains exactly the keys `list_sources`, `describe_source`, and `query_source`; each has nonblank `title` (1-80 characters, no CR/LF) and `description` (1-1,000 characters).
+Titles and text are preserved as stored, including surrounding spaces.
+Lengths count UTF-16 code units, as .NET strings do, in both catalog CHECKs and runtime validation.
+The seeded server title is `DataGateway` and its exact About is `Read-only access to cataloged data sources.`
+The seeded tools are:
+
+| tool_name | title | description |
+| --- | --- | --- |
+| `list_sources` | List sources | No source named? See all data sources and what each holds. Takes no arguments and returns {"sources":[...]}: each active source's name, title, description, grain (what one row represents) and rowCap (maximum rows per query). Pick the source whose description and grain fit the question, then call describe_source with its name. |
+| `describe_source` | Describe a source | Named source not yet described? Get schema and query rules. Returns one source (name, title, description, grain, rowCap) with querySchema: every column with its meaning, type, unit, magnitude, display format and can* flags, then the rules of each query clause. Use only listed columns, as their flags allow. Before stating a number, read its unit and magnitude: "millions" means 523.06 is 523.06 million, for sum_, avg_, min_ and max_ outputs too; a count_ output is a plain count. |
+| `query_source` | Query a source | Source already described? Run a read-only query, get rows. Build query from that source's querySchema (describe_source). Returns {source, columns, rows, rowCount, more, hint}. Prefer filters and aggregates over pulling raw rows. With or without limit, more is true exactly when rows were left out: never report that answer as complete. Narrow or aggregate; there is no way to ask for the rest. Empty rows, or an aggregate's 0 or null, can mean no row matched or a misspelled value. |
+
+Fresh catalogs use `catalog-ddl.sql`, `catalog-views.sql` and `catalog-seed-example.sql` under `db/` or `db/postgresql/`.
+Upgrade existing catalogs with `db/catalog-mcp-metadata.sql` or `db/postgresql/catalog-mcp-metadata.sql`; both scripts are idempotent, create the tables, views and audit triggers, seed missing rows, and preserve edited rows.
+PostgreSQL readers receive grants through `db/postgresql/gateway-reader.sql`; SQL Server uses the existing reader role.
+Startup validates all metadata and the final prefixed descriptions; an invalid row refuses startup with its table and field.
+Every stateless POST reads metadata again through the asynchronous `ConfigureSessionOptions` hook, sharing its request catalog with any source reads.
+There is no cache or server-held snapshot across initialize and tools/list; initialize and a later tools/list are separate reads.
+Clients normally read the tool list when they connect, so an edit reaches a client on its next connection.
+An explicit tools/list can refresh tool titles and descriptions sooner on an existing connection; text already received by the client remains unchanged.
+The About precedes the fixed protocol rules with one space; the library still generates schemas and annotations.
+`UseMcpTools` applies name prefixes to names and every tool reference in table text, and prepends the description prefix to each table description.
+Each final description must be at most 1,000 characters, inclusive, after renaming and prefixing: 1,000 is accepted and 1,001 is refused.
+Initialize and tools/list can fail with HTTP 503 CatalogUnavailable; tools/call retains its tool-result errors and existing argument paths and failure logging.
+Scalar page titles and OpenAPI `info.title` always use the gateway registration name (`DataGateway.Web` in the packaged host), without reading MCP metadata; About appears in neither surface.

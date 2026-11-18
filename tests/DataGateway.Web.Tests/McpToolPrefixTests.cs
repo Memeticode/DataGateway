@@ -41,7 +41,7 @@ public sealed class McpToolPrefixTests
         });
         await fixture.Start();
         await using var client = await fixture.Connect("a");
-        EqualUtf8(Instructions, client.ServerInstructions!);
+        EqualUtf8(McpMetadataFixture.Seed.About + " " + Instructions, client.ServerInstructions!);
         var tools = await client.ListToolsAsync(cancellationToken: fixture.Token);
         Assert.Equal(Golden.Keys.Order(), tools.Select(tool => tool.Name).Order());
         foreach (var tool in tools)
@@ -52,7 +52,7 @@ public sealed class McpToolPrefixTests
             Assert.False(tool.ProtocolTool.Annotations.DestructiveHint);
             Assert.False(tool.ProtocolTool.Annotations.OpenWorldHint);
             Assert.Null(tool.ProtocolTool.OutputSchema);
-            Assert.Null(tool.ProtocolTool.Title);
+            Assert.Equal(McpMetadataFixture.Seed.Tools.Single(row => row.ToolName == tool.Name).Title, tool.ProtocolTool.Title);
         }
         Assert.Empty(fixture.Host.Logs.Failures);
     }
@@ -84,7 +84,7 @@ public sealed class McpToolPrefixTests
         await using var fixture = new PrefixHost(gateway => gateway.UseMcpTools(descriptionPrefix: Domain));
         await fixture.Start();
         await using var client = await fixture.Connect("a");
-        EqualUtf8(Instructions, client.ServerInstructions!);
+        EqualUtf8(McpMetadataFixture.Seed.About + " " + Instructions, client.ServerInstructions!);
         foreach (var tool in await client.ListToolsAsync(cancellationToken: fixture.Token))
         {
             EqualUtf8(Domain + " " + Golden[tool.Name].Description, tool.Description!);
@@ -115,11 +115,11 @@ public sealed class McpToolPrefixTests
     [InlineData("describe_source")]
     public async Task T4_all_tool_references_follow_final_names(string prefix)
     {
-        await using var fixture = new PrefixHost(gateway => gateway.UseMcpServer("Retail", "Retail service.").UseMcpTools(prefix, Domain));
+        await using var fixture = new PrefixHost(gateway => gateway.UseMcpTools(prefix, Domain));
         await fixture.Start();
         await using var client = await fixture.Connect("a");
-        Assert.Equal("Retail", client.ServerInfo.Title);
-        EqualUtf8("Retail service. " + ReplaceNames(Instructions, prefix), client.ServerInstructions!);
+        Assert.Equal("DataGateway", client.ServerInfo.Title);
+        EqualUtf8(McpMetadataFixture.Seed.About + " " + ReplaceNames(Instructions, prefix), client.ServerInstructions!);
         NoCanonicalReference(client.ServerInstructions!);
         var tools = await client.ListToolsAsync(cancellationToken: fixture.Token);
         Assert.Equal(3, tools.Count);
@@ -171,7 +171,7 @@ public sealed class McpToolPrefixTests
 
     [Theory]
     [InlineData(999, true)]
-    [InlineData(1000, false)]
+    [InlineData(1000, true)]
     [InlineData(1001, false)]
     public void T5_final_description_budget_uses_registration_guard(int length, bool accepted)
     {
@@ -180,7 +180,7 @@ public sealed class McpToolPrefixTests
         if (accepted)
             Validate();
         else
-            Assert.Equal("Gateway 'a'. MCP tool 'retail_query_source' description must be fewer than 1,000 characters.",
+            Assert.Equal("Gateway 'a'. MCP tool 'retail_query_source' description must be at most 1,000 characters.",
                 Assert.Throws<InvalidOperationException>(Validate).Message);
     }
 
@@ -205,7 +205,7 @@ public sealed class McpToolPrefixTests
         Assert.Equal(name, registration.McpTools.NamePrefix);
         Assert.Equal(description, registration.McpTools.DescriptionPrefix);
         Assert.Equal(80, Encoding.UTF8.GetByteCount(description));
-        var tools = DataGatewayTools.Definitions(registration.McpTools);
+        var tools = DataGatewayTools.Definitions(registration.McpTools, McpMetadataFixture.Seed);
         Assert.Equal(unicode ? new[] { 394, 523, 548 } : new[] { 433, 562, 587 }, tools.Select(tool => tool.Description!.Length));
         Assert.All(tools, tool => Assert.InRange(tool.Description!.Length, 1, 999));
         Assert.Equal("Gateway 'a'. Registration is already complete.",
@@ -218,7 +218,7 @@ public sealed class McpToolPrefixTests
         await using var fixture = new PrefixHost(gateway => gateway.UseMcpTools("retail", Domain).UseMcpTools());
         await fixture.Start();
         await using var client = await fixture.Connect("a");
-        EqualUtf8(Instructions, client.ServerInstructions!);
+        EqualUtf8(McpMetadataFixture.Seed.About + " " + Instructions, client.ServerInstructions!);
         foreach (var tool in await client.ListToolsAsync(cancellationToken: fixture.Token))
             EqualUtf8(Golden[tool.Name].Description, tool.Description!);
     }
@@ -232,7 +232,7 @@ public sealed class McpToolPrefixTests
         foreach (var (gateway, prefix, description) in new[] { ("a", "retail", Domain), ("b", "warehouse", "Warehouse inventory.") })
         {
             await using var client = await fixture.Connect(gateway);
-            EqualUtf8(ReplaceNames(Instructions, prefix), client.ServerInstructions!);
+            EqualUtf8(McpMetadataFixture.Seed.About + " " + ReplaceNames(Instructions, prefix), client.ServerInstructions!);
             var tools = await client.ListToolsAsync(cancellationToken: fixture.Token);
             Assert.Equal(Golden.Keys.Select(name => prefix + "_" + name).Order(), tools.Select(tool => tool.Name).Order());
             Assert.All(tools, tool => Assert.StartsWith(description + " ", tool.Description));
@@ -306,7 +306,7 @@ public sealed class McpToolPrefixTests
         var readme = File.ReadAllText(TestFiles.InRepo("README.md"));
         Assert.Contains("UseMcpTools(namePrefix: \"retail\", descriptionPrefix: \"Retail sales and inventory.\")", readme);
         Assert.Contains("Some clients do not show server instructions and see only tool names and descriptions.", readme);
-        Assert.Contains("fewer than 1,000 characters", readme);
+        Assert.Contains("at most 1,000 characters", readme);
     }
 
     private static void Refusal(Action<DataGatewayBuilder> configure, string reason)

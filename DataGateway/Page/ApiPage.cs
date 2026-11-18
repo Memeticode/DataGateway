@@ -22,7 +22,7 @@ internal static class ApiPage
             {
                 GatewaySchemaNames.Apply(document);
                 await OperationDocument.DescribeDocument(document, context, token);
-                document.Info.Title = registration.McpTitle ?? registration.Name;
+                document.Info.Title = registration.Name;
                 if (registration.HostPolicy is { } policy)
                     document.Info.Description += " " + policy.Description;
             });
@@ -81,6 +81,6 @@ internal static class ApiPage
             path = path[..path.LastIndexOf('/')];
         var prefix = path[..path.LastIndexOf('/')];
         var documentPath = (prefix + "/openapi/v1.json").TrimStart('/');
-        options.WithTitle(registration.McpTitle ?? registration.Name).WithOpenApiRoutePattern(documentPath);
+        options.WithTitle(registration.Name).WithOpenApiRoutePattern(documentPath);
     }
 }

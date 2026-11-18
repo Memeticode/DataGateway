@@ -422,7 +422,7 @@ public sealed class NamedGatewayLimitsTests
                             MaxFilterConditions = 1,
                             MaxInValues = 1
                         })
-                        .UseMcpServer("Synthetic example", "Synthetic proof."));
+                        );
                 }, extraFirst: exampleFirst);
             rig.Fixture("a").Change("UPDATE gateway_source SET query_timeout_seconds=7");
             rig.Host.App.MapDataGateway("SyntheticExample", "");

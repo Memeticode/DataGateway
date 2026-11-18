@@ -19,12 +19,12 @@ public sealed class ProxyTests
     {
         using var settings = new ErrorLogSettingsScope();
         await using var wire = new ReadmeWire(settings: new Dictionary<string, string?>
-            { ["DataGateway:Mcp:Title"] = "Synthetic Title", ["DataGateway:Mcp:About"] = "Synthetic about text." });
+            { ["DataGateway:Mcp:Title"] = "Ignored", ["DataGateway:Mcp:About"] = "Ignored" });
         await wire.Start();
         await using var direct = await McpWire.Connect(wire.SourceHost.Client, protocol);
         await using var proxy = await ProxyWire.Connect(wire.SourceHost.Client, protocol);
-        Assert.Equal(("DataGateway.Web", "Synthetic Title", "1.0.0"), (proxy.ServerInfo.Name, proxy.ServerInfo.Title, proxy.ServerInfo.Version));
-        Assert.StartsWith("Synthetic about text. ", proxy.ServerInstructions);
+        Assert.Equal(("DataGateway.Web", "DataGateway", "1.0.0"), (proxy.ServerInfo.Name, proxy.ServerInfo.Title, proxy.ServerInfo.Version));
+        Assert.StartsWith(McpMetadataFixture.Seed.About + " ", proxy.ServerInstructions);
         Assert.Equal((direct.ServerInfo.Name, direct.ServerInfo.Title, direct.ServerInfo.Version), (proxy.ServerInfo.Name, proxy.ServerInfo.Title, proxy.ServerInfo.Version));
         Assert.Equal(direct.ServerInstructions, proxy.ServerInstructions);
         var expected = (await direct.ListToolsAsync()).Select(t => JsonSerializer.Serialize(t.ProtocolTool)).Order().ToArray();

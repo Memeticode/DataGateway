@@ -1,6 +1,10 @@
 using DataGateway.Failures;
+using DataGateway.Core.Errors;
+using DataGateway.Core.Catalog;
+using System.Text.Json;
 using DataGateway.Routes;
 using Microsoft.Extensions.Options;
+using ModelContextProtocol;
 using ModelContextProtocol.AspNetCore;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -68,25 +72,48 @@ internal static class McpEndpoint
                 "from its own app, or remove the app's MCP HTTP transport configuration.");
     }
 
-    private static Task ConfigureSessionOptions(HttpContext context, McpServerOptions options,
+    private sealed class MetadataUnavailable(CatalogFailure failure) : Exception
+    {
+        internal CatalogFailure Failure { get; } = failure;
+    }
+
+    private static async Task ConfigureSessionOptions(HttpContext context, McpServerOptions options,
         CancellationToken token)
     {
-        if (context.GetEndpoint()?.Metadata.GetMetadata<GatewayBinding>() is not { } binding)
-            return Task.CompletedTask;
-
+        if (context.GetEndpoint()?.Metadata.GetMetadata<GatewayBinding>() is not { } binding) return;
         var registration = binding.Registration;
+        var catalog = registration.CreateCatalog(context.RequestServices);
+        var read = await catalog.MetadataAsync(registration.Name, registration.McpTools, token);
+        if (read.Failure is { } failure)
+        {
+            // The SDK has parsed the envelope. Rewind only on failure to distinguish presentation requests.
+            var position = context.Request.Body.Position;
+            try
+            {
+                context.Request.Body.Position = 0;
+                var envelope = await context.Request.ReadFromJsonAsync<JsonElement>(McpJsonUtilities.DefaultOptions, token);
+                if (envelope.ValueKind == JsonValueKind.Object
+                    && envelope.TryGetProperty("id", out _)
+                    && envelope.TryGetProperty("method", out var method)
+                    && method.ValueKind == JsonValueKind.String
+                    && method.GetString() is "initialize" or "tools/list")
+                    throw new MetadataUnavailable(failure);
+            }
+            finally
+            {
+                context.Request.Body.Position = position;
+            }
+        }
         options.ServerInfo = new Implementation
         {
             Name = registration.Name,
-            Title = registration.McpTitle,
+            Title = read.IsSuccess ? registration.McpTools.Text(read.Value.Title) : null,
             Version = typeof(DataGatewayBuilder).Assembly.GetName().Version!.ToString(3)
         };
         var instructions = DataGatewayTools.GetInstructions(registration.McpTools);
-        options.ServerInstructions = registration.McpAbout is null
-            ? instructions
-            : registration.McpAbout + " " + instructions;
-        options.ToolCollection = [.. DataGatewayTools.Create(registration, binding.Failures)];
-        return Task.CompletedTask;
+        options.ServerInstructions = read.IsSuccess ? registration.McpTools.Text(read.Value.About) + " " + instructions : instructions;
+        options.ToolCollection = [.. DataGatewayTools.Create(registration, binding.Failures,
+            read.IsSuccess ? read.Value : null, catalog)];
     }
 
     internal static void Map(RouteGroupBuilder group, GatewayRegistration registration, FailureLog failures)
@@ -105,8 +132,17 @@ internal static class McpEndpoint
                 using var scope = failures.BeginGatewayScope(registration.Name);
                 try
                 {
+                    context.Request.EnableBuffering();
                     _ = RequestTrail.Of(context);
                     await next(context);
+                }
+                catch (MetadataUnavailable error)
+                {
+                    var incident = failures.Write(context, "mcp", body: null, error.Failure);
+                    var failure = error.Failure.Code == DataGatewayError.CatalogUnavailable.Code
+                        ? error.Failure with { Message = GatewayCatalog.UnavailableMessage }
+                        : error.Failure;
+                    await RouteReply.Fail(context, ErrorEnvelope.From(failure, incident));
                 }
                 catch (Exception error)
                 {

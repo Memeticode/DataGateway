@@ -41,7 +41,7 @@ public sealed class RepositorySourceTests
         Assert.Contains("[dbo].[vDataSource]", source);
         Assert.Contains("[dbo].[vDataSourceColumn]", source);
         var ddl = File.ReadAllText(DataGateway.Core.Tests.TestFiles.InRepo("db/catalog-views.sql"));
-        Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(ddl, "CREATE OR ALTER VIEW").Count);
+        Assert.Equal(4, System.Text.RegularExpressions.Regex.Matches(ddl, "CREATE OR ALTER VIEW").Count);
         foreach (var name in new[] { "id", "name", "connection_string", "object_name", "title", "description", "grain", "is_active", "row_cap",
                      "datasource_fk", "column_name", "ordinal", "data_type", "unit", "magnitude", "display_format",
                      "can_select", "can_filter", "can_sort", "can_group", "can_aggregate" })

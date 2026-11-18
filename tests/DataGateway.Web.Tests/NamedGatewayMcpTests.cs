@@ -59,144 +59,69 @@ public sealed class NamedGatewayMcpTests
     }
 
     [Fact]
-    public async Task T02_unset_blank_trimmed_and_boundary_values()
+    public async Task T02_catalog_text_is_preserved_without_trimming()
     {
-        using var fixture = new SqliteFixture();
-        var cases = new List<(bool Set, string? Title, string? About)>
-        {
-            (false, null, null), (true, null, null), (true, "", ""), (true, " ", "  "),
-            (true, "\r\n", "\n\r"), (true, new string(' ', 200), new string(' ', 200)),
-            (true, "  Title  ", "  About.  "), (true, "Title", null), (true, null, "About."),
-            (true, new string('x', 80), new string('y', 120)),
-            (true, new string('\u00e9', 40), new string('\u00e9', 60)),
-            (true, string.Concat(Enumerable.Repeat("\U0001f600", 20)), string.Concat(Enumerable.Repeat("\U0001f600", 30)))
-        };
-        foreach (var item in cases)
-        {
-            var state = new NamedGatewayState(fixture);
-            await using var host = new NamedGatewayHost(builder => builder.Services.AddDataGateway("a", gateway =>
-            {
-                gateway.UseCatalog(state.Create).AddEngine(new NamedGatewayEngine());
-                if (item.Set)
-                    gateway.UseMcpServer(item.Title, item.About);
-            }));
-            host.App.MapDataGateway("a", "/metadata");
-            await host.Start();
-            using var deadline = Deadline();
-            await using var client = await Connect(host.Client, "/metadata/mcp", null, deadline.Token);
-            var title = string.IsNullOrWhiteSpace(item.Title) ? null : item.Title.Trim();
-            var about = string.IsNullOrWhiteSpace(item.About) ? null : item.About.Trim();
-            Identity(client, "a", title, about);
-            Assert.Equal(497, Encoding.UTF8.GetByteCount(Instructions));
-            Assert.Equal(497 + (about is null ? 0 : Encoding.UTF8.GetByteCount(about) + 1),
-                Encoding.UTF8.GetByteCount(client.ServerInstructions!));
-        }
+        await using var pair = new NamedGatewayMcpPair();
+        pair.Sa.Metadata = McpMetadataFixture.Seed with { Title = "  Retail  ", About = new string('x', 1000) };
+        await pair.Start();
+        await using var client = await pair.Connect("a");
+        Identity(client, "a", "  Retail  ", new string('x', 1000));
     }
 
     [Fact]
-    public void T03_invalid_metadata_is_refused_before_registration()
+    public async Task T03_invalid_catalog_metadata_refuses_startup()
     {
-        using var fixture = new SqliteFixture();
-        foreach (var field in new[] { "title", "about" })
-            foreach (var withExisting in new[] { false, true })
-            {
-                var maximum = field == "title" ? 80 : 120;
-                var invalid = new[]
-                {
-                    new string('x', maximum + 1), new string('\u00e9', maximum / 2 + 1),
-                    string.Concat(Enumerable.Repeat("\U0001f600", maximum / 4 + 1)),
-                    "one\rtwo", "one\ntwo", "one\r\ntwo", new string('x', maximum) + " "
-                };
-                foreach (var value in invalid)
-                {
-                    var services = new ServiceCollection();
-                    var state = new NamedGatewayState(fixture);
-                    if (withExisting)
-                        NamedGatewayHost.Register(services, "existing", state);
-                    var snapshot = services.ToArray();
-                    var error = Assert.Throws<InvalidOperationException>(() => services.AddDataGateway("a", gateway =>
-                        gateway.UseCatalog(state.Create).AddEngine(new NamedGatewayEngine())
-                            .UseMcpServer(field == "title" ? value : "Title", field == "about" ? value : "About")));
-                    Assert.Equal($"Gateway 'a'. MCP {field} must be one line of at most {maximum} bytes (UTF-8).", error.Message);
-                    Assert.Null(error.InnerException);
-                    Assert.Equal(snapshot, services.ToArray());
-                    Assert.Equal(0, state.Factories);
-                    NamedGatewayMcpPair.Register(services, "a", state, new(), "valid", "valid");
-                    Assert.Contains(services, descriptor => descriptor.ImplementationInstance is GatewayRegistration { Name: "a" });
-                }
-            }
+        await using var pair = new NamedGatewayMcpPair();
+        pair.Sa.Metadata = McpMetadataFixture.Seed with { Title = "bad\nvalue" };
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => pair.Start());
+        Assert.Contains("mcpserver.title", error.Message);
     }
 
     [Fact]
-    public async Task T04_last_assignment_and_frozen_builder()
+    public async Task T04_catalog_edits_are_independent_of_frozen_builder()
     {
         using var fixture = new SqliteFixture();
-        foreach (var variant in Enumerable.Range(0, 4))
+        var state = new NamedGatewayState(fixture);
+        DataGatewayBuilder saved = null!;
+        await using var host = new NamedGatewayHost(builder => builder.Services.AddDataGateway("a", gateway =>
         {
-            var state = new NamedGatewayState(fixture);
-            DataGatewayBuilder? retained = null;
-            Action<DataGatewayBuilder> configure = gateway =>
-            {
-                retained = gateway;
-                gateway.UseCatalog(state.Create).AddEngine(new NamedGatewayEngine());
-                Assert.Same(gateway, gateway.UseMcpServer(variant == 2 ? "bad\nvalue" : "first", "first"));
-                gateway.UseMcpServer(variant == 1 ? null : variant == 3 ? "bad\nvalue" : "last", variant == 1 ? null : "last");
-            };
-            if (variant == 3)
-            {
-                var services = new ServiceCollection();
-                Assert.Throws<InvalidOperationException>(() => services.AddDataGateway("a", configure));
-                Assert.Empty(services);
-            }
-            else
-            {
-                await using var host = new NamedGatewayHost(builder => builder.Services.AddDataGateway("a", configure));
-                host.App.MapDataGateway("a", "/a");
-                await host.Start();
-                using var deadline = Deadline();
-                await using var client = await Connect(host.Client, "/a/mcp", null, deadline.Token);
-                Identity(client, "a", variant == 1 ? null : "last", variant == 1 ? null : "last");
-            }
-            Frozen(retained!);
-        }
-        foreach (var variant in Enumerable.Range(0, 4))
-        {
-            var services = new ServiceCollection();
-            DataGatewayBuilder? retained = null;
-            var error = Assert.ThrowsAny<Exception>(() => services.AddDataGateway("a", gateway =>
-            {
-                retained = gateway;
-                gateway.UseMcpServer("bad\nvalue", null);
-                if (variant == 0)
-                    gateway.AddEngine(new NamedGatewayEngine());
-                if (variant == 1)
-                    gateway.UseCatalog(new NamedGatewayState(fixture).Create);
-                if (variant == 2)
-                    throw new SyntheticFault("callback");
-            }));
-            Assert.Equal(variant == 1 ? "Gateway 'a'. Register at least one engine with AddEngine." :
-                variant == 2 ? "callback" : "Gateway 'a'. Configure a catalog with UseCatalog.", error.Message);
-            Assert.Empty(services);
-            Frozen(retained!);
-        }
+            saved = gateway;
+            gateway.UseCatalog(state.Create).AddEngine(new NamedGatewayEngine());
+        }));
+        host.App.MapDataGateway("a", "/a");
+        await host.Start();
+        state.Metadata = state.Metadata with { Title = "Retail", About = "Retail data." };
+        using var deadline = Deadline();
+        await using var client = await Connect(host.Client, "/a/mcp", null, deadline.Token);
+        Identity(client, "a", "Retail", "Retail data.");
+        Frozen(saved);
     }
 
     [Fact]
-    public async Task T05_tools_are_exact_and_listing_does_not_read_catalogs()
+    public async Task T05_each_stateless_post_reads_metadata_and_creates_one_catalog()
     {
         await using var pair = new NamedGatewayMcpPair();
         await pair.Start();
-        var a = pair.Sa.Counts;
-        var b = pair.Sb.Counts;
-        foreach (var protocol in Protocols)
-            foreach (var gateway in new[] { "a", "b" })
+        foreach (var (state, path) in new[] { (pair.Sa, "/north/mcp"), (pair.Sb, "/south/mcp") })
+        {
+            var start = state.Counts;
+            var metadata = state.MetadataReads;
+            var bodies = new[]
             {
-                await using var client = await pair.Connect(gateway, protocol);
-                await Definitions(client, pair.Token);
-                await Definitions(client, pair.Token);
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"retail\",\"version\":\"1\"}}}",
+                LegacyList, LegacyList
+            };
+            for (var index = 0; index < bodies.Length; index++)
+            {
+                using var response = await Raw(pair.Http, path, bodies[index], pair.Token);
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                Assert.False(response.Headers.Contains("Mcp-Session-Id"));
+                Assert.Equal(metadata + index + 1, state.MetadataReads);
+                Assert.Equal((start.Item1 + index + 1, start.Item2, start.Item3), state.Counts);
             }
-        Assert.Equal(a, pair.Sa.Counts);
-        Assert.Equal(b, pair.Sb.Counts);
+        }
+        await using var client = await pair.Connect("a");
+        await Definitions(client, pair.Token);
         pair.Capture.Stateless("/north/mcp", "/south/mcp");
     }
 
@@ -294,7 +219,8 @@ public sealed class NamedGatewayMcpTests
         Assert.Equal(9, created.Select(item => item.Catalog).Distinct().Count());
         Assert.Equal(9, created.Select(item => item.Scope).Distinct().Count());
         var concurrentReads = pair.Sa.Reads.Where(read => created.Any(item => item.Catalog == read.Catalog.Id)).ToArray();
-        Assert.Equal(10, concurrentReads.Length);
+        Assert.Equal(19, concurrentReads.Length);
+        Assert.Equal(9, concurrentReads.Count(read => read.Operation == "metadata"));
         Assert.Equal(9, concurrentReads.Select(read => read.Catalog).Distinct().Count());
         NamedGatewayCatalog? previous = null;
         for (var call = 0; call < 2; call++)
@@ -302,7 +228,11 @@ public sealed class NamedGatewayMcpTests
             var before = pair.Sa.Reads.Count;
             var result = await McpWire.Call(a, "describe_source", NamedGatewayHost.Body("describe", "missing"), pair.Token);
             Failed(result, Unknown("a"));
-            var reads = pair.Sa.Reads.Skip(before).ToArray();
+            var allReads = pair.Sa.Reads.Skip(before).ToArray();
+            Assert.Equal(3, allReads.Length);
+            Assert.Equal("metadata", allReads[0].Operation);
+            Assert.All(allReads, read => Assert.Same(allReads[0].Catalog, read.Catalog));
+            var reads = allReads.Where(read => read.Operation != "metadata").ToArray();
             Assert.Equal(2, reads.Length);
             Assert.Equal("detail", reads[0].Operation);
             Assert.Equal("missing", reads[0].Source);
@@ -314,12 +244,14 @@ public sealed class NamedGatewayMcpTests
             previous = reads[0].Catalog;
         }
         var snapshot = pair.Sa.Counts;
+        var metadataBefore = pair.Sa.MetadataReads;
         foreach (var operation in Operations)
         {
             var body = operation == "list" ? "{\"extra\":1}" : "{}";
             Assert.True((await McpWire.Call(a, Tool(operation), body, pair.Token)).IsError);
         }
-        Assert.Equal(snapshot, pair.Sa.Counts);
+        Assert.Equal((snapshot.Item1 + 3, snapshot.Item2, snapshot.Item3), pair.Sa.Counts);
+        Assert.Equal(metadataBefore + 3, pair.Sa.MetadataReads);
         await a.DisposeAsync();
         await pair.Host.App.StopAsync(pair.Token);
         Assert.All(created, item => Assert.Contains(item.Scope, pair.Host.Cleanup.Disposed));
@@ -829,7 +761,7 @@ public sealed class NamedGatewayMcpTests
                 PrepareExample(example);
                 var sa = new NamedGatewayState(a);
                 var sb = new NamedGatewayState(b);
-                var rootState = new NamedGatewayState(example);
+                var rootState = new NamedGatewayState(example) { Metadata = McpMetadataFixture.Seed with { Title = "Example title", About = "Example about." } };
                 var engine = new SqliteEngine();
                 ServiceDescriptor[]? before = null;
                 await using var host = new NamedGatewayHost(builder =>
@@ -840,7 +772,7 @@ public sealed class NamedGatewayMcpTests
                             .UseCatalog(rootState.Create)
                             .AddEngine(engine)
                             .UseLimits(new GatewayLimits { MaxFilterConditions = 1 })
-                            .UseMcpServer("Example title", "Example about."));
+                            );
                     }
                     if (exampleFirst)
                         Example();
@@ -952,7 +884,7 @@ public sealed class NamedGatewayMcpTests
         {
             await using var cp = await Connect(http, "/mcp", protocol, deadline.Token);
             await using var cn = await Connect(http, "/named/mcp", protocol, deadline.Token);
-            ExampleIdentity(cp, "Composition example", "Composition about.", "1.0.0");
+            ExampleIdentity(cp, "DataGateway", McpMetadataFixture.Seed.About, "1.0.0");
             Identity(cn, "a", "Named composition", "Named about.");
             foreach (var operation in Operations)
                 foreach (var (client, prefix, isExample) in new[] { (cp, "", true), (cn, "/named", false) })
@@ -998,7 +930,7 @@ public sealed class NamedGatewayMcpTests
         await using var first = new NamedGatewayHost(builder =>
         {
             var original = builder.Services.ToArray();
-            Assert.Throws<InvalidOperationException>(() => NamedGatewayMcpPair.Register(builder.Services, "a", sa, new(), "bad\nvalue", null));
+            Assert.Throws<InvalidOperationException>(() => builder.Services.AddDataGateway("a", gateway => gateway.UseCatalog(sa.Create).AddEngine(new NamedGatewayEngine()).UseMcpTools("invalid_")));
             Assert.Equal(original, builder.Services.ToArray());
             NamedGatewayMcpPair.Register(builder.Services, "a", sa, new(), "First", "First about.");
             var transport = TransportDescriptors(builder.Services);
@@ -1053,7 +985,7 @@ public sealed class NamedGatewayMcpTests
                 Assert.Empty(await response.Content.ReadAsStringAsync(deadline.Token));
             }
             await using var client = await Connect(http, path, "2025-11-25", deadline.Token);
-            Identity(client, "unrelated", null, null);
+            Identity(client, "unrelated", "DataGateway", McpMetadataFixture.Seed.About);
             capture.Stateless(path);
             Assert.Equal(2, capture.Responses.Count(item => item.Status == 405));
         }
@@ -1097,7 +1029,7 @@ public sealed class NamedGatewayMcpTests
     }
 
     private static void Frozen(DataGatewayBuilder builder) => Assert.Equal("Gateway 'a'. Registration is already complete.",
-        Assert.Throws<InvalidOperationException>(() => builder.UseMcpServer(null, null)).Message);
+        Assert.Throws<InvalidOperationException>(() => builder.UseMcpTools()).Message);
 
     private static async Task Successful(NamedGatewayMcpPair pair, McpClient client, string gateway, string operation)
     {
@@ -1289,7 +1221,7 @@ public sealed class NamedGatewayMcpTests
             Assert.False(tool.ProtocolTool.Annotations.OpenWorldHint);
             Assert.Null(tool.ProtocolTool.Annotations.IdempotentHint);
             Assert.Null(tool.ProtocolTool.OutputSchema);
-            Assert.Null(tool.ProtocolTool.Title);
+            Assert.Equal(McpMetadataFixture.Seed.Tools.Single(row => row.ToolName == tool.Name).Title, tool.ProtocolTool.Title);
         }
     }
 

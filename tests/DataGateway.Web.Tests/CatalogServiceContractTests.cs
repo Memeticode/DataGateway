@@ -40,9 +40,10 @@ public sealed class CatalogServiceContractTests
         Assert.False(typeof(IDisposable).IsAssignableFrom(service));
         Assert.False(typeof(IAsyncDisposable).IsAssignableFrom(service));
         var methods = service.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly);
-        Assert.Equal(new[] { "QueryCatalogAsync", "QueryCatalogDetailAsync" }, methods.Select(m => m.Name).Order());
+        Assert.Equal(new[] { "QueryCatalogAsync", "QueryCatalogDetailAsync", "QueryMcpMetadataAsync" }, methods.Select(m => m.Name).Order());
         CheckMethod("QueryCatalogAsync", typeof(Task<IReadOnlyList<SourceListRow>>), [typeof(CancellationToken)]);
         CheckMethod("QueryCatalogDetailAsync", typeof(Task<CatalogDetail>), [typeof(string), typeof(CancellationToken)]);
+        CheckMethod("QueryMcpMetadataAsync", typeof(Task<McpMetadata>), [typeof(CancellationToken)]);
         var nullable = new NullabilityInfoContext();
         Assert.Equal(NullabilityState.Nullable, Assert.Single(nullable.Create(
             methods.Single(m => m.Name == "QueryCatalogDetailAsync").ReturnParameter).GenericTypeArguments).ReadState);
@@ -368,12 +369,24 @@ public sealed class CatalogServiceContractTests
 
     private sealed class RawCatalog(IReadOnlyList<SourceListRow> list, CatalogDetail? detail) : CatalogService<SqliteConnection>(NewDb())
     {
+        public override Task<global::DataGateway.Core.Catalog.McpMetadata> QueryMcpMetadataAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(global::DataGateway.Web.Tests.McpMetadataFixture.Seed);
+        }
+
         public override Task<IReadOnlyList<SourceListRow>> QueryCatalogAsync(CancellationToken cancellationToken) => Task.FromResult(list);
         public override Task<CatalogDetail?> QueryCatalogDetailAsync(string sourceName, CancellationToken cancellationToken) => Task.FromResult(detail);
     }
 
     private sealed class GatedCatalog() : CatalogService<SqliteConnection>(NewDb())
     {
+    public override Task<global::DataGateway.Core.Catalog.McpMetadata> QueryMcpMetadataAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(global::DataGateway.Web.Tests.McpMetadataFixture.Seed);
+    }
+
         public TaskCompletionSource<bool> Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private TaskCompletionSource<bool> Pending { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public CancellationToken LastToken { get; private set; }
@@ -418,6 +431,12 @@ public sealed class CatalogServiceContractTests
 
     private sealed class ExampleCatalog(DbContext<SqliteConnection> db) : CatalogService<SqliteConnection>(db)
     {
+    public override Task<global::DataGateway.Core.Catalog.McpMetadata> QueryMcpMetadataAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(global::DataGateway.Web.Tests.McpMetadataFixture.Seed);
+    }
+
         public const string TargetProvider = "fixture-target";
         public DbContext<SqliteConnection> SuppliedDb => Db;
         public string? LastSourceName { get; private set; }

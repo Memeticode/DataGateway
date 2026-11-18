@@ -36,7 +36,8 @@ public sealed class McpEndpointTests
             await using var client = await McpWire.Connect(host.Client, protocol);
             Assert.Equal("DataGateway.Web", client.ServerInfo.Name);
             Assert.Equal("1.0.0", client.ServerInfo.Version);
-            Assert.Equal(DataGatewayTools.Instructions, client.ServerInstructions);
+            Assert.Equal(McpMetadataFixture.Seed.About + " " + DataGatewayTools.Instructions, client.ServerInstructions);
+            Assert.Equal("DataGateway", client.ServerInfo.Title);
             var tools = await client.ListToolsAsync();
             Assert.Equal(DataGatewayTools.Routes.Keys.Order(), tools.Select(t => t.Name).Order());
             foreach (var tool in tools)
@@ -48,7 +49,7 @@ public sealed class McpEndpointTests
                 Assert.False(tool.ProtocolTool.Annotations.DestructiveHint);
                 Assert.False(tool.ProtocolTool.Annotations.OpenWorldHint);
                 Assert.Null(tool.ProtocolTool.OutputSchema);
-                Assert.Null(tool.ProtocolTool.Title);
+                Assert.Equal(McpMetadataFixture.Seed.Tools.Single(row => row.ToolName == tool.Name).Title, tool.ProtocolTool.Title);
             }
             Assert.False((await McpWire.Call(client, "query_source", """{"source":"sales_by_line","query":{"limit":1}}""")).IsError == true);
         }
@@ -72,54 +73,16 @@ public sealed class McpEndpointTests
         Assert.Empty(host.Lines());
     }
 
-    [Theory]
-    [InlineData("", "", null, "")]
-    [InlineData("Synthetic Title", "", "Synthetic Title", "")]
-    [InlineData("", "Synthetic about text.", null, "Synthetic about text. ")]
-    [InlineData("Synthetic Title", "Synthetic about text.", "Synthetic Title", "Synthetic about text. ")]
-    [InlineData("   ", "   ", null, "")]
-    [InlineData("  Padded  ", "  Padded about.  ", "Padded", "Padded about. ")]
-    public async Task T25_title_and_about_settings_shape_server_info_and_instructions(string title, string about, string? expectedTitle, string expectedPrefix)
+    [Fact]
+    public async Task T25_retired_host_keys_have_no_effect()
     {
         using var settings = new ErrorLogSettingsScope();
-        await using var host = new LoggedHost(ErrorLogTests.Catalog(), settings: new Dictionary<string, string?>
-            { ["DataGateway:Mcp:Title"] = title, ["DataGateway:Mcp:About"] = about });
+        await using var host = new LoggedHost(settings: new Dictionary<string, string?>
+            { ["DataGateway:Mcp:Title"] = "bad\nvalue", ["DataGateway:Mcp:About"] = new string('x', 1001) });
         await host.Start();
-        foreach (var protocol in new string?[] { null, "2025-11-25" })
-        {
-            await using var client = await McpWire.Connect(host.Client, protocol);
-            Assert.Equal("DataGateway.Web", client.ServerInfo.Name);
-            Assert.Equal("1.0.0", client.ServerInfo.Version);
-            Assert.Equal(expectedTitle, client.ServerInfo.Title);
-            Assert.Equal(expectedPrefix + DataGatewayTools.Instructions, client.ServerInstructions);
-        }
-    }
-
-    public static IEnumerable<object[]> Limits() =>
-    [
-        ["DataGateway:Mcp:About", new string('a', 120), true], ["DataGateway:Mcp:About", new string('a', 121), false],
-        ["DataGateway:Mcp:About", new string('é', 60), true], ["DataGateway:Mcp:About", new string('é', 61), false],
-        ["DataGateway:Mcp:About", "one\ntwo", false], ["DataGateway:Mcp:About", "one\rtwo", false],
-        ["DataGateway:Mcp:Title", new string('a', 80), true], ["DataGateway:Mcp:Title", new string('a', 81), false],
-        ["DataGateway:Mcp:Title", new string('é', 41), false], ["DataGateway:Mcp:Title", "one\ntwo", false],
-        ["DataGateway:Mcp:About", new string(' ', 121), true], ["DataGateway:Mcp:About", "\r\n", true],
-        ["DataGateway:Mcp:Title", new string(' ', 81), true], // blank counts as unset, so start-up continues
-        ["DataGateway:Mcp:Title", new string('a', 80) + " ", false] // non-blank: checked as written, before trimming
-    ];
-
-    [Theory]
-    [MemberData(nameof(Limits))]
-    public void T26_over_long_or_multi_line_values_are_refused_at_start_up(string key, string value, bool accepted)
-    {
-        using var config = new ConfigurationManager();
-        config[key] = value;
-        if (accepted) { McpConfiguration.Read(config); return; }
-        var error = Assert.Throws<OptionsValidationException>(() => McpConfiguration.Read(config));
-        Assert.StartsWith("InvalidConfiguration: " + key + " must be one line of at most ", error.Message);
-        Assert.DoesNotContain(value, error.Message, StringComparison.Ordinal);
-        // The same value stops the real host before it serves anything (exit 2 in Program.Main).
-        using var scope = new ErrorLogSettingsScope();
-        Assert.Throws<OptionsValidationException>(() => new LoggedHost(ErrorLogTests.Catalog(), settings: new Dictionary<string, string?> { [key] = value }));
+        await using var client = await McpWire.Connect(host.Client);
+        Assert.Equal("DataGateway", client.ServerInfo.Title);
+        Assert.Equal(McpMetadataFixture.Seed.About + " " + DataGatewayTools.Instructions, client.ServerInstructions);
     }
 
     [Fact]

@@ -198,8 +198,6 @@ public sealed class HostCompositionTests
         Assert.Equal((0, 0, 0), state.Counts);
         var registration = Assert.Single(host.App.Services.GetServices<GatewayRegistration>());
         Assert.Equal("DataGateway.Web", registration.Name);
-        Assert.Equal("Display", registration.McpTitle);
-        Assert.Equal("About", registration.McpAbout);
         Assert.Equal(4000, registration.Limits.MaxJsonLength);
         Assert.Equal(0, registration.Limits.MaxFilterDepth);
         Assert.Equal(3, registration.Limits.MaxFilterConditions);
@@ -225,7 +223,7 @@ public sealed class HostCompositionTests
         }
         Assert.Equal((3, 3, 1), state.Counts);
         using var document = JsonDocument.Parse(await host.Client.GetByteArrayAsync("/openapi/v1.json"));
-        Assert.Equal("Display", document.RootElement.GetProperty("info").GetProperty("title").GetString());
+        Assert.Equal("DataGateway.Web", document.RootElement.GetProperty("info").GetProperty("title").GetString());
         var operations = document.RootElement.GetProperty("paths").EnumerateObject().Select(p => p.Value.GetProperty("post")).ToArray();
         Assert.Equal(new[] { "describe", "list", "query" }, operations.Select(p => p.GetProperty("operationId").GetString()).Order());
         foreach (var operation in operations) Assert.Equal("DataGateway.Web", Assert.Single(operation.GetProperty("tags").EnumerateArray()).GetString());
@@ -335,9 +333,11 @@ public sealed class HostCompositionTests
         var state = new HostCatalogState();
         state.List = _ => throw Fault(kind);
         state.Detail = (_, _) => throw Fault(kind);
-        if (origin == "factory") state.FactoryFailure = () => Fault(kind);
+        
         await using var host = Host(state);
         await host.Start();
+        await using var mcp = await McpWire.Connect(host.Client);
+        if (origin == "factory") state.FactoryFailure = () => Fault(kind);
         state.Arm();
         var operation = origin == "detail" ? "describe" : "list";
         using var response = await host.Client.PostAsync(ErrorLogTests.Route(operation), new StringContent(ErrorLogTests.Body(operation)));
@@ -366,7 +366,6 @@ public sealed class HostCompositionTests
             Assert.DoesNotContain("planted-private-marker", actualText + actualLine.GetRawText());
         }
         AssertDiagnostics(line, incident, text);
-        await using var mcp = await McpWire.Connect(host.Client);
         var result = await McpWire.Call(mcp, operation == "list" ? "list_sources" : "describe_source", ErrorLogTests.Body(operation));
         Assert.True(result.IsError);
         Assert.Single(result.Content);
@@ -454,7 +453,7 @@ public sealed class HostCompositionTests
         }
         var program = File.ReadAllText(TestFiles.InRepo("DataGateway.Web/Program.cs"));
         Assert.DoesNotContain("Catalog" + "ReaderFactory", program, StringComparison.Ordinal);
-        foreach (var member in new[] { "AddDataGateway(", "HostCatalogs.Use(", "AddEngine(", "UseLimits(", "UseMcpServer(", "UseHostPolicy(", "UseDataGatewayErrors(", "MapDataGateway(", "MapDataGatewayApiPage(" })
+        foreach (var member in new[] { "AddDataGateway(", "HostCatalogs.Use(", "AddEngine(", "UseLimits(", "UseHostPolicy(", "UseDataGatewayErrors(", "MapDataGateway(", "MapDataGatewayApiPage(" })
             Assert.Contains(member, program, StringComparison.Ordinal);
     }
 

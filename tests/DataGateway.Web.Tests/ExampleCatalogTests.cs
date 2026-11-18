@@ -59,8 +59,10 @@ public sealed class ExampleCatalogTests
         CatalogService<NpgsqlConnection> pg = new PostgreSqlCatalog(pgDb, 43);
         using var cancel = new CancellationTokenSource();
         cancel.Cancel();
+        await Cancelled(() => sql.QueryMcpMetadataAsync(cancel.Token), cancel.Token);
         await Cancelled(() => sql.QueryCatalogAsync(cancel.Token), cancel.Token);
         await Cancelled(() => sql.QueryCatalogDetailAsync("synthetic", cancel.Token), cancel.Token);
+        await Cancelled(() => pg.QueryMcpMetadataAsync(cancel.Token), cancel.Token);
         await Cancelled(() => pg.QueryCatalogAsync(cancel.Token), cancel.Token);
         await Cancelled(() => pg.QueryCatalogDetailAsync("synthetic", cancel.Token), cancel.Token);
         await Assert.ThrowsAsync<ArgumentNullException>(() => pg.QueryCatalogDetailAsync(null!, CancellationToken.None));
@@ -73,8 +75,10 @@ public sealed class ExampleCatalogTests
         Assert.Same(failure, await Record.ExceptionAsync(() => sql.QueryCatalogDetailAsync("synthetic", CancellationToken.None)));
         Assert.Same(failure, await Record.ExceptionAsync(() => pg.QueryCatalogAsync(CancellationToken.None)));
         Assert.Same(failure, await Record.ExceptionAsync(() => pg.QueryCatalogDetailAsync("synthetic", CancellationToken.None)));
-        Assert.Equal(2, sqlCalls);
-        Assert.Equal(2, pgCalls);
+        Assert.Same(failure, await Record.ExceptionAsync(() => sql.QueryMcpMetadataAsync(CancellationToken.None)));
+        Assert.Equal(3, sqlCalls);
+        Assert.Same(failure, await Record.ExceptionAsync(() => pg.QueryMcpMetadataAsync(CancellationToken.None)));
+        Assert.Equal(3, pgCalls);
     }
 
     [Fact]
@@ -705,7 +709,12 @@ public sealed class ExampleCatalogTests
         Assert.True(parameters[1].HasDefaultValue);
         Assert.Equal(15, parameters[1].DefaultValue);
         var methods = service.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-        Assert.Equal(2, methods.Length);
+        Assert.Equal(3, methods.Length);
+        Assert.Equal(new[] { "QueryCatalogAsync", "QueryCatalogDetailAsync", "QueryMcpMetadataAsync" }, methods.Select(method => method.Name).Order());
+        var metadata = Assert.Single(methods, method => method.Name == "QueryMcpMetadataAsync");
+        Assert.Equal(typeof(Task<McpMetadata>), metadata.ReturnType);
+        Assert.Equal(typeof(CancellationToken), Assert.Single(metadata.GetParameters()).ParameterType);
+        Assert.False(metadata.GetParameters()[0].IsOptional);
         Assert.All(methods, method => Assert.NotEqual(method, method.GetBaseDefinition()));
     }
 

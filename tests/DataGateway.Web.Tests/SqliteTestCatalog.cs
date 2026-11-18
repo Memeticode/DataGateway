@@ -8,6 +8,12 @@ namespace DataGateway.Web.Tests;
 
 internal sealed class SqliteTestCatalog : CatalogService<SqliteConnection>
 {
+    public override Task<global::DataGateway.Core.Catalog.McpMetadata> QueryMcpMetadataAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(global::DataGateway.Web.Tests.McpMetadataFixture.Seed);
+    }
+
     private readonly int timeout;
     private readonly string provider;
 

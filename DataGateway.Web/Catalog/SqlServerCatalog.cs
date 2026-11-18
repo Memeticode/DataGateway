@@ -24,6 +24,12 @@ public sealed class SqlServerCatalog : CatalogService<SqlConnection>
         CatalogTableReader.Matching(await CatalogTableReader.DetailAsync(Db, ReadSql, AvailableSql, sourceName,
             SqlServerEngine.ProviderName, true, catalogTimeoutSeconds, cancellationToken).ConfigureAwait(false), sourceName);
 
+    public override Task<McpMetadata> QueryMcpMetadataAsync(CancellationToken cancellationToken) =>
+        CatalogTableReader.MetadataAsync(Db, McpServerSql, McpToolsSql, catalogTimeoutSeconds, cancellationToken);
+
+    internal const string McpServerSql = "SELECT [id], [title], [about] FROM [dbo].[vMcpServer];";
+    internal const string McpToolsSql = "SELECT [tool_name], [title], [description] FROM [dbo].[vMcpTool];";
+
     internal const string ListSql =
         "SELECT [name], [title], [description], [grain], [row_cap]\r\n" +
         "FROM [dbo].[vDataSource]\r\n" +

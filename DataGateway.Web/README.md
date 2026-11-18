@@ -415,7 +415,7 @@ MCP SDK as JSON-RPC errors and write no DataGateway log line.
 
 MCP `serverInfo.name` is the gateway registration name; `serverInfo.version` comes from the DataGateway library assembly version. The library version changes with every change a caller can see. The first number rises when a valid documented call stops working or its documented meaning changes; the second for anything else a caller can see (tool text, instructions, `querySchema` rules, a response member, an annotation, an error code or message); the third for a fix with nothing visible to a caller. Catalog rows are data, not the server, and do not change it.
 
-Two optional appsettings entries, both empty by default, add to what a client is told: `DataGateway:Mcp:Title` sets `serverInfo.title` (one line, at most 80 bytes), and `DataGateway:Mcp:About` goes, with one space, in front of the server instructions (one line, at most 120 bytes). A blank value counts as unset; a non-blank value that is longer, or holds a line break, stops start-up with exit 2 and names the key.
+
 
 **The local proxy.** `DataGateway.Proxy` is a stdio MCP server for clients that cannot sign in with Windows. It forwards the tool list and tool calls to the server's `/mcp` unchanged, signed in as the Windows user it runs as, and answers the client's initialize with the server's own instructions and `serverInfo`. Start it with the server's `/mcp` URL as its only argument, for example `DataGateway.Proxy https://host/mcp`; a client's configuration puts that URL in `args`. It connects once, at start. If the server cannot be reached then, it exits with code 1 and says why on stderr; a missing or malformed argument exits with code 2. If the server stops later, a tool call returns an `isError` result with the code `ServiceUnreachable` (path `$`, a message, and an `incidentId` that names the proxy's own log entry); if the server answers a tool call with an HTTP error instead, such as a refused Windows sign-in, the code is `ServiceRefused` and the message names the status, distinct from `SourceUnavailable`, which a running server returns when a database is down; the next call works once the server is back. A `notifications/cancelled` from the client ends the forwarded request, which stops the server's query. In server mode stdout carries only the protocol; logs go to stderr and to `logs/datagateway-proxy-<date>.log` beside the program.
 
@@ -576,3 +576,34 @@ Apache License 2.0: [LICENSE](../LICENSE), [NOTICE](../NOTICE).
 Designed and directed by Maxim Konstantinovski. Built with AI models (Anthropic's Claude and OpenAI's GPT) under his direction and review.
 
 The sealed example catalog readers accept `(db, int catalogTimeoutSeconds = 15)` for their own reads; the host uses 15 seconds independently of each source query timeout.
+
+## Catalog MCP metadata
+
+MCP presentation text comes from two catalog tables: SQL Server `dbo.McpServer` and `dbo.McpTool`, or PostgreSQL `datagateway.mcpserver` and `datagateway.mcptool`.
+The readers select their projection views `vMcpServer` / `vMcpTool` or `vmcpserver` / `vmcptool`, with the catalog command timeout.
+The server table contains exactly one row, `id = 1`, with nonblank `title` (1-80 characters, no CR/LF) and `about` (1-1,000 characters).
+The tool table contains exactly the keys `list_sources`, `describe_source`, and `query_source`; each has nonblank `title` (1-80 characters, no CR/LF) and `description` (1-1,000 characters).
+Titles and text are preserved as stored, including surrounding spaces.
+Lengths count UTF-16 code units, as .NET strings do, in both catalog CHECKs and runtime validation.
+The seeded server title is `DataGateway` and its exact About is `Read-only access to cataloged data sources.`
+The seeded tools are:
+
+| tool_name | title | description |
+| --- | --- | --- |
+| `list_sources` | List sources | No source named? See all data sources and what each holds. Takes no arguments and returns {"sources":[...]}: each active source's name, title, description, grain (what one row represents) and rowCap (maximum rows per query). Pick the source whose description and grain fit the question, then call describe_source with its name. |
+| `describe_source` | Describe a source | Named source not yet described? Get schema and query rules. Returns one source (name, title, description, grain, rowCap) with querySchema: every column with its meaning, type, unit, magnitude, display format and can* flags, then the rules of each query clause. Use only listed columns, as their flags allow. Before stating a number, read its unit and magnitude: "millions" means 523.06 is 523.06 million, for sum_, avg_, min_ and max_ outputs too; a count_ output is a plain count. |
+| `query_source` | Query a source | Source already described? Run a read-only query, get rows. Build query from that source's querySchema (describe_source). Returns {source, columns, rows, rowCount, more, hint}. Prefer filters and aggregates over pulling raw rows. With or without limit, more is true exactly when rows were left out: never report that answer as complete. Narrow or aggregate; there is no way to ask for the rest. Empty rows, or an aggregate's 0 or null, can mean no row matched or a misspelled value. |
+
+Fresh catalogs use `catalog-ddl.sql`, `catalog-views.sql` and `catalog-seed-example.sql` under `db/` or `db/postgresql/`.
+Upgrade existing catalogs with `db/catalog-mcp-metadata.sql` or `db/postgresql/catalog-mcp-metadata.sql`; both scripts are idempotent, create the tables, views and audit triggers, seed missing rows, and preserve edited rows.
+PostgreSQL readers receive grants through `db/postgresql/gateway-reader.sql`; SQL Server uses the existing reader role.
+Startup validates all metadata and the final prefixed descriptions; an invalid row refuses startup with its table and field.
+Every stateless POST reads metadata again through the asynchronous `ConfigureSessionOptions` hook, sharing its request catalog with any source reads.
+There is no cache or server-held snapshot across initialize and tools/list; initialize and a later tools/list are separate reads.
+Clients normally read the tool list when they connect, so an edit reaches a client on its next connection.
+An explicit tools/list can refresh tool titles and descriptions sooner on an existing connection; text already received by the client remains unchanged.
+The About precedes the fixed protocol rules with one space; the library still generates schemas and annotations.
+`UseMcpTools` applies name prefixes to names and every tool reference in table text, and prepends the description prefix to each table description.
+Each final description must be at most 1,000 characters, inclusive, after renaming and prefixing: 1,000 is accepted and 1,001 is refused.
+Initialize and tools/list can fail with HTTP 503 CatalogUnavailable; tools/call retains its tool-result errors and existing argument paths and failure logging.
+Scalar page titles and OpenAPI `info.title` always use the gateway registration name (`DataGateway.Web` in the packaged host), without reading MCP metadata; About appears in neither surface.

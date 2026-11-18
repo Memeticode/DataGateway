@@ -100,6 +100,17 @@ namespace GatewaySample
         DbContext<SqliteConnection> db, string sourceConnection)
         : CatalogService<SqliteConnection>(db)
     {
+        public override Task<global::DataGateway.Core.Catalog.McpMetadata> QueryMcpMetadataAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(new McpMetadata("DataGateway", "Read-only access to cataloged data sources.",
+            [
+                new("list_sources", "List sources", """No source named? See all data sources and what each holds. Takes no arguments and returns {"sources":[...]}: each active source's name, title, description, grain (what one row represents) and rowCap (maximum rows per query). Pick the source whose description and grain fit the question, then call describe_source with its name."""),
+                new("describe_source", "Describe a source", """Named source not yet described? Get schema and query rules. Returns one source (name, title, description, grain, rowCap) with querySchema: every column with its meaning, type, unit, magnitude, display format and can* flags, then the rules of each query clause. Use only listed columns, as their flags allow. Before stating a number, read its unit and magnitude: "millions" means 523.06 is 523.06 million, for sum_, avg_, min_ and max_ outputs too; a count_ output is a plain count."""),
+                new("query_source", "Query a source", """Source already described? Run a read-only query, get rows. Build query from that source's querySchema (describe_source). Returns {source, columns, rows, rowCount, more, hint}. Prefer filters and aggregates over pulling raw rows. With or without limit, more is true exactly when rows were left out: never report that answer as complete. Narrow or aggregate; there is no way to ask for the rest. Empty rows, or an aggregate's 0 or null, can mean no row matched or a misspelled value."""),
+            ]));
+        }
+
         public override async Task<IReadOnlyList<SourceListRow>> QueryCatalogAsync(
             CancellationToken cancellationToken)
         {
@@ -466,13 +477,13 @@ A request combining the vocabulary:
 
 ## MCP
 
-`/mcp` uses streamable HTTP in stateless mode, with POST only. The app supplies authentication and authorization. The MCP SDK applies its HTTP transport settings to every MCP endpoint in a process, so an app that also configures the SDK's HTTP transport for an MCP server of its own is refused at startup; serve DataGateway from its own app. MCP identity comes from the gateway registration name and the DataGateway assembly version. `UseMcpServer(title, about)` configures optional display text; see [configuration](CONFIGURATION.md).
+`/mcp` uses streamable HTTP in stateless mode, with POST only. The app supplies authentication and authorization. The MCP SDK applies its HTTP transport settings to every MCP endpoint in a process, so an app that also configures the SDK's HTTP transport for an MCP server of its own is refused at startup; serve DataGateway from its own app. MCP identity comes from the gateway registration name and the DataGateway assembly version. Server display text comes from the catalog tables described below.
 
 Some clients do not show server instructions and see only tool names and descriptions. Configure each gateway with `gateway.UseMcpTools(namePrefix: "retail", descriptionPrefix: "Retail sales and inventory.");` to identify its domain in those clients.
 
 This names the tools `retail_list_sources`, `retail_describe_source` and `retail_query_source`. Each description starts with `Retail sales and inventory. ` followed immediately by the existing hook and text. Instructions and argument descriptions refer to the final tool names. JSON routes and failure-log operation names stay canonical. Each gateway may use different prefixes.
 
-Both arguments are optional; null, empty and whitespace-only values unset the corresponding prefix. The last call wins, and registration validates the final settings. A name prefix must match `[a-z][a-z0-9_]{0,23}` with no trailing underscore. A description prefix must be one line, at most 80 UTF-8 bytes, and end with a period. Nonblank values are checked and preserved as supplied, without trimming; CR and LF are refused. Every final tool description must be fewer than 1,000 characters. Omitting the settings preserves the default names and text.
+Both arguments are optional; null, empty and whitespace-only values unset the corresponding prefix. The last call wins, and registration validates the final settings. A name prefix must match `[a-z][a-z0-9_]{0,23}` with no trailing underscore. A description prefix must be one line, at most 80 UTF-8 bytes, and end with a period. Nonblank values are checked and preserved as supplied, without trimming; CR and LF are refused. Every final tool description must be at most 1,000 characters. Omitting the settings preserves the default names and text.
 
 <!-- tool-table -->
 | Tool | Arguments | Route |
@@ -590,3 +601,34 @@ From this public root, build with `dotnet build DataGateway.slnx -m:1 -nodeReuse
 Apache License 2.0: [LICENSE](LICENSE), [NOTICE](NOTICE).
 
 Designed and directed by Maxim Konstantinovski. Built with AI models (Anthropic's Claude and OpenAI's GPT) under his direction and review.
+
+## Catalog MCP metadata
+
+MCP presentation text comes from two catalog tables: SQL Server `dbo.McpServer` and `dbo.McpTool`, or PostgreSQL `datagateway.mcpserver` and `datagateway.mcptool`.
+The readers select their projection views `vMcpServer` / `vMcpTool` or `vmcpserver` / `vmcptool`, with the catalog command timeout.
+The server table contains exactly one row, `id = 1`, with nonblank `title` (1-80 characters, no CR/LF) and `about` (1-1,000 characters).
+The tool table contains exactly the keys `list_sources`, `describe_source`, and `query_source`; each has nonblank `title` (1-80 characters, no CR/LF) and `description` (1-1,000 characters).
+Titles and text are preserved as stored, including surrounding spaces.
+Lengths count UTF-16 code units, as .NET strings do, in both catalog CHECKs and runtime validation.
+The seeded server title is `DataGateway` and its exact About is `Read-only access to cataloged data sources.`
+The seeded tools are:
+
+| tool_name | title | description |
+| --- | --- | --- |
+| `list_sources` | List sources | No source named? See all data sources and what each holds. Takes no arguments and returns {"sources":[...]}: each active source's name, title, description, grain (what one row represents) and rowCap (maximum rows per query). Pick the source whose description and grain fit the question, then call describe_source with its name. |
+| `describe_source` | Describe a source | Named source not yet described? Get schema and query rules. Returns one source (name, title, description, grain, rowCap) with querySchema: every column with its meaning, type, unit, magnitude, display format and can* flags, then the rules of each query clause. Use only listed columns, as their flags allow. Before stating a number, read its unit and magnitude: "millions" means 523.06 is 523.06 million, for sum_, avg_, min_ and max_ outputs too; a count_ output is a plain count. |
+| `query_source` | Query a source | Source already described? Run a read-only query, get rows. Build query from that source's querySchema (describe_source). Returns {source, columns, rows, rowCount, more, hint}. Prefer filters and aggregates over pulling raw rows. With or without limit, more is true exactly when rows were left out: never report that answer as complete. Narrow or aggregate; there is no way to ask for the rest. Empty rows, or an aggregate's 0 or null, can mean no row matched or a misspelled value. |
+
+Fresh catalogs use `catalog-ddl.sql`, `catalog-views.sql` and `catalog-seed-example.sql` under `db/` or `db/postgresql/`.
+Upgrade existing catalogs with `db/catalog-mcp-metadata.sql` or `db/postgresql/catalog-mcp-metadata.sql`; both scripts are idempotent, create the tables, views and audit triggers, seed missing rows, and preserve edited rows.
+PostgreSQL readers receive grants through `db/postgresql/gateway-reader.sql`; SQL Server uses the existing reader role.
+Startup validates all metadata and the final prefixed descriptions; an invalid row refuses startup with its table and field.
+Every stateless POST reads metadata again through the asynchronous `ConfigureSessionOptions` hook, sharing its request catalog with any source reads.
+There is no cache or server-held snapshot across initialize and tools/list; initialize and a later tools/list are separate reads.
+Clients normally read the tool list when they connect, so an edit reaches a client on its next connection.
+An explicit tools/list can refresh tool titles and descriptions sooner on an existing connection; text already received by the client remains unchanged.
+The About precedes the fixed protocol rules with one space; the library still generates schemas and annotations.
+`UseMcpTools` applies name prefixes to names and every tool reference in table text, and prepends the description prefix to each table description.
+Each final description must be at most 1,000 characters, inclusive, after renaming and prefixing: 1,000 is accepted and 1,001 is refused.
+Initialize and tools/list can fail with HTTP 503 CatalogUnavailable; tools/call retains its tool-result errors and existing argument paths and failure logging.
+Scalar page titles and OpenAPI `info.title` always use the gateway registration name (`DataGateway.Web` in the packaged host), without reading MCP metadata; About appears in neither surface.

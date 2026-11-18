@@ -25,7 +25,7 @@ internal static class PublicGatewayProbe
         var registration = Assert.Single(services.Select(item => item.ImplementationInstance)
             .OfType<GatewayRegistration>());
         var failures = new FailureLog(NullLoggerFactory.Instance, registration.Limits);
-        return DataGatewayTools.Create(registration, failures).ToArray();
+        return DataGatewayTools.Create(registration, failures, McpMetadataFixture.Seed).ToArray();
     }
 
     internal static async Task Invoke(DefaultHttpContext context, string operation,

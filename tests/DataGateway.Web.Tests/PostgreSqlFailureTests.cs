@@ -126,6 +126,12 @@ public sealed class PostgreSqlFailureTests
     }
     private sealed class ProviderCatalog(HostEngine engine, string mode) : CatalogService<NpgsqlConnection>(Dapper.Data.DbContext<NpgsqlConnection>.FromFactory(() => throw new InvalidOperationException("Synthetic provider only.")))
     {
+    public override Task<global::DataGateway.Core.Catalog.McpMetadata> QueryMcpMetadataAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(global::DataGateway.Web.Tests.McpMetadataFixture.Seed);
+    }
+
         public override Task<IReadOnlyList<SourceListRow>> QueryCatalogAsync(CancellationToken token)
         {
             token.ThrowIfCancellationRequested();

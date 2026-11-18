@@ -11,7 +11,7 @@ internal sealed class GatewayStartup(IEnumerable<GatewayRegistration> registrati
         {
             await using var scope = scopes.CreateAsyncScope();
             var catalog = registration.CreateCatalog(scope.ServiceProvider);
-            await catalog.ValidateAsync(registration.Name, cancellationToken);
+            await catalog.ValidateAsync(registration.Name, registration.McpTools, cancellationToken);
         }
     }
 

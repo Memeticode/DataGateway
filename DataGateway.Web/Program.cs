@@ -63,11 +63,9 @@ public partial class Program
         }
         var forwarding = new HostDatabaseEngine(postgreSql ? PostgreSqlEngine.ProviderName : SqlServerEngine.ProviderName);
         HostCatalogs.Configure(builder.Services, postgreSql);
-        var mcp = McpConfiguration.Read(builder.Configuration);
         builder.Services.AddDataGateway("DataGateway.Web", gateway =>
         {
             gateway.AddEngine(forwarding).UseLimits(limits)
-                .UseMcpServer(mcp.Title, mcp.About)
                 .UseHostPolicy(WindowsSignIn.NotAuthenticated, WindowsSignIn.Description, WindowsSignIn.ResponseDescription);
             HostCatalogs.Use(gateway, postgreSql);
         });

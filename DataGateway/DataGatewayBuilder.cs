@@ -18,25 +18,12 @@ public sealed class DataGatewayBuilder
     private readonly Dictionary<string, IDatabaseEngine> engines = new(StringComparer.OrdinalIgnoreCase);
     private Func<IServiceProvider, IReadOnlyDictionary<string, QueryRunner>, GatewayCatalog>? catalog;
     private bool frozen;
-    private string? mcpTitle;
-    private string? mcpAbout;
     private string? mcpNamePrefix;
     private string? mcpDescriptionPrefix;
     private GatewayLimits limits = new();
     private GatewayHostPolicy? hostPolicy;
 
     internal DataGatewayBuilder(string name) => this.name = name;
-
-    /// <summary>Sets the MCP title and about line. The final assignment is validated during registration.</summary>
-    /// <remarks>Blank values are unset. Nonblank input is checked before trimming, with UTF-8 limits of
-    /// 80 bytes for title and 120 for about. CR and LF are refused in nonblank input.</remarks>
-    public DataGatewayBuilder UseMcpServer(string? title, string? about)
-    {
-        CheckMutable();
-        mcpTitle = title;
-        mcpAbout = about;
-        return this;
-    }
 
     /// <summary>Sets optional MCP tool name and description prefixes. The last call wins.</summary>
     /// <remarks>Blank values are unset. Registration validates nonblank values as supplied: names use
@@ -52,7 +39,8 @@ public sealed class DataGatewayBuilder
 
     /// <summary>Sets the application catalog factory; the last assignment wins during configuration.</summary>
     /// <remarks>The factory runs lazily at most once per HTTP invocation, with request services, after valid
-    /// parsing requires a read. Startup invokes it in a separate scope and validates every active detail before
+    /// parsing requires a read on JSON routes; each stateless MCP POST also reads presentation metadata. Startup
+    /// invokes it in a separate scope and validates MCP metadata and every active detail before
     /// the server starts, including unmapped gateways. The application owns created catalogs and supplied contexts;
     /// DI owns dependencies resolved from its scopes. Fresh wrappers isolate mutable state; applications returning
     /// a shared catalog are responsible for concurrent access to overrides and result objects.</remarks>
@@ -66,7 +54,8 @@ public sealed class DataGatewayBuilder
             var instance = new Lazy<CatalogService<TConnection>>(() =>
                 factory(services) ?? throw new InvalidOperationException());
             return new GatewayCatalog(token => instance.Value.QueryCatalogAsync(token),
-                (source, token) => instance.Value.QueryCatalogDetailAsync(source, token), runners);
+                (source, token) => instance.Value.QueryCatalogDetailAsync(source, token), runners,
+                token => instance.Value.QueryMcpMetadataAsync(token));
         };
         return this;
     }
@@ -142,10 +131,8 @@ public sealed class DataGatewayBuilder
     {
         if (catalog is null) throw Refuse("Configure a catalog with UseCatalog.");
         if (engines.Count == 0) throw Refuse("Register at least one engine with AddEngine.");
-        var title = ReadMcpLine(mcpTitle, "title", 80);
-        var about = ReadMcpLine(mcpAbout, "about", 120);
         var queryLimits = ReadLimits();
-        return new GatewayRegistration(name, catalog, CreateRunners(), title, about)
+        return new GatewayRegistration(name, catalog, CreateRunners())
         {
             McpTools = ReadMcpTools(),
             Limits = queryLimits,
@@ -163,7 +150,6 @@ public sealed class DataGatewayBuilder
         if (descriptionPrefix is not null && !descriptionPrefix.EndsWith('.'))
             throw Refuse("MCP descriptionPrefix must end with a period.");
         var settings = new McpToolSettings(namePrefix, descriptionPrefix);
-        DataGatewayTools.ValidateDescriptions(DataGatewayTools.Definitions(settings), Refuse);
         return settings;
     }
 

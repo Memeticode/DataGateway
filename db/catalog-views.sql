@@ -14,3 +14,11 @@ SELECT [datasource_fk], [column_name], [ordinal], [title], [description], [data_
        [display_format], [can_select], [can_filter], [can_sort], [can_group], [can_aggregate]
 FROM [dbo].[DataSourceColumn];
 GO
+CREATE OR ALTER VIEW [dbo].[vMcpServer] AS
+SELECT [id], [title], [about]
+FROM [dbo].[McpServer];
+GO
+CREATE OR ALTER VIEW [dbo].[vMcpTool] AS
+SELECT [tool_name], [title], [description]
+FROM [dbo].[McpTool];
+GO

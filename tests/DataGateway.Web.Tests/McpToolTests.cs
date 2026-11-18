@@ -281,9 +281,10 @@ public sealed class McpToolTests(ITestOutputHelper output)
     public async Task T12_dependency_activation_fault_is_caught_inside_tool()
     {
         using var settings = new ErrorLogSettingsScope();
-        var catalog = new HostCatalogState { FactoryFailure = () => new SyntheticFault("synthetic activation fault") };
+        var catalog = new HostCatalogState();
         await using var host = new LoggedHost(catalog);
         await host.Start(); await using var client = await McpWire.Connect(host.Client);
+        catalog.FactoryFailure = () => new SyntheticFault("synthetic activation fault");
         var result = await McpWire.Call(client, "describe_source", """{"source":"sales_by_line"}""");
         Assert.True(result.IsError); Assert.Single(result.Content);
         Assert.Equal("CatalogUnavailable", JsonSerializer.Deserialize<JsonElement>(McpWire.Text(result)).GetProperty("code").GetString());

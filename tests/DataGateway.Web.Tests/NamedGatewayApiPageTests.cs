@@ -36,8 +36,11 @@ public sealed class NamedGatewayApiPageTests
         return fixture;
     }
 
-    private static void Register(IServiceCollection services, string name, NamedGatewayState state, string? title = null, string? about = null) =>
-        services.AddDataGateway(name, gateway => gateway.UseCatalog<SqliteConnection>(_ => new NamedGatewayCatalog(state, Guid.Empty)).AddEngine(new SqliteEngine()).UseMcpServer(title, about));
+    private static void Register(IServiceCollection services, string name, NamedGatewayState state, string? title = null, string? about = null)
+    {
+        state.Metadata = McpMetadataFixture.Seed with { Title = title ?? "DataGateway", About = about ?? McpMetadataFixture.Seed.About };
+        services.AddDataGateway(name, gateway => gateway.UseCatalog<SqliteConnection>(_ => new NamedGatewayCatalog(state, Guid.Empty)).AddEngine(new SqliteEngine()));
+    }
 
     private static async Task<byte[]> Get(HttpClient client, string path, string? contentType = null)
     {
@@ -208,11 +211,11 @@ public sealed class NamedGatewayApiPageTests
         await pair.Host.Start();
         var north = await Get(pair.Host.Client, "/north-docs/openapi/v1.json");
         var south = await Get(pair.Host.Client, "/south-docs/openapi/v1.json");
-        await Witness(pair.Host.Client, Document(north, "/north", "North display"), "north_items", 1);
-        await Witness(pair.Host.Client, Document(south, "/south", "South display"), "south_items", 101);
+        await Witness(pair.Host.Client, Document(north, "/north", "north"), "north_items", 1);
+        await Witness(pair.Host.Client, Document(south, "/south", "north:archive"), "south_items", 101);
         Assert.Equal(north, await Get(pair.Host.Client, "/north-docs/openapi/v1.json"));
         Assert.Equal(south, await Get(pair.Host.Client, "/south-docs/openapi/v1.json"));
-        Assert.Equal(Normalize(north, "/north", "North display"), Normalize(south, "/south", "South display"));
+        Assert.Equal(Normalize(north, "/north", "north"), Normalize(south, "/south", "north:archive"));
     }
 
     private static string Normalize(byte[] bytes, string prefix, string title)
@@ -232,7 +235,7 @@ public sealed class NamedGatewayApiPageTests
     {
         await using var pair = new Pair();
         await pair.Host.Start();
-        var document = Document(await Get(pair.Host.Client, "/north-docs/openapi/v1.json"), "/north", "North display");
+        var document = Document(await Get(pair.Host.Client, "/north-docs/openapi/v1.json"), "/north", "north");
         var golden = Json(WebApiPageGolden.Document());
         Assert.Equal(golden.GetProperty("components").GetRawText(), document.GetProperty("components").GetRawText());
         foreach (var operation in Operations)
@@ -318,7 +321,7 @@ public sealed class NamedGatewayApiPageTests
         await host.Start();
         foreach (var index in Enumerable.Range(0, names.Length).Concat(Enumerable.Range(0, names.Length).Reverse()))
         {
-            var title = string.IsNullOrWhiteSpace(titles[index]) ? names[index] : titles[index]!.Trim();
+            var title = names[index];
             var bytes = await Get(host.Client, "/page-" + index + "/openapi/v1.json");
             Document(bytes, "/api-" + index, title);
             Assert.DoesNotContain("About must stay out", Encoding.UTF8.GetString(bytes));
@@ -429,7 +432,7 @@ public sealed class NamedGatewayApiPageTests
         await using (var pair = new Pair())
         {
             await pair.Host.Start();
-            foreach (var (page, api, title) in new[] { ("/north-docs", "/north", "North display"), ("/south-docs", "/south", "South display") })
+            foreach (var (page, api, title) in new[] { ("/north-docs", "/north", "north"), ("/south-docs", "/south", "north:archive") })
             {
                 var expected = await Get(pair.Host.Client, page + "/openapi/v1.json");
                 Document(expected, api, title);
@@ -479,7 +482,7 @@ public sealed class NamedGatewayApiPageTests
         context.Request.PathBase = "/base";
         if (document is not null)
             context.Request.RouteValues["documentName"] = document;
-        var registration = new GatewayRegistration("unused", (_, _) => throw new InvalidOperationException(), new Dictionary<string, DataGateway.Data.Queries.QueryRunner>(), title, null);
+        var registration = new GatewayRegistration(title, (_, _) => throw new InvalidOperationException(), new Dictionary<string, DataGateway.Data.Queries.QueryRunner>());
         var options = new ScalarOptions();
         ApiPage.Configure(options, registration, context);
         Assert.Equal(title, options.Title);
@@ -618,8 +621,8 @@ public sealed class NamedGatewayApiPageTests
     {
         var host = new LoggedHost(environment: "Development", configure: builder =>
         {
-            Register(builder.Services, "north", north, "North display");
-            Register(builder.Services, "south", south, "South display");
+            Register(builder.Services, "north", north, "north");
+            Register(builder.Services, "south", south, "south");
         });
         host.App.MapDataGateway("north", "/north");
         host.App.MapDataGateway("south", "/south");
@@ -666,8 +669,8 @@ public sealed class NamedGatewayApiPageTests
         {
             await host.Start();
             await ExampleBytes(host);
-            Document(await Get(host.Client, "/north-docs/openapi/v1.json"), "/north", "North display");
-            Document(await Get(host.Client, "/south-docs/openapi/v1.json"), "/south", "South display");
+            Document(await Get(host.Client, "/north-docs/openapi/v1.json"), "/north", "north");
+            Document(await Get(host.Client, "/south-docs/openapi/v1.json"), "/south", "south");
             foreach (var registration in host.App.Services.GetServices<GatewayRegistration>())
             {
                 using var hidden = await host.Client.GetAsync("/openapi/" + registration.DocumentName + ".json");
@@ -691,8 +694,8 @@ public sealed class NamedGatewayApiPageTests
         await using var host = Mixed(new(north), new(south));
         host.App.MapGet("/extra", () => "x").WithName("extra");
         await host.Start();
-        Document(await Get(host.Client, "/north-docs/openapi/v1.json"), "/north", "North display");
-        Document(await Get(host.Client, "/south-docs/openapi/v1.json"), "/south", "South display");
+        Document(await Get(host.Client, "/north-docs/openapi/v1.json"), "/north", "north");
+        Document(await Get(host.Client, "/south-docs/openapi/v1.json"), "/south", "south");
         using var response = await host.Client.GetAsync("/openapi/v1.json");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var document = Json(await response.Content.ReadAsByteArrayAsync());
@@ -864,8 +867,8 @@ public sealed class NamedGatewayApiPageTests
             var paths = new[] { "/openapi/v1.json", "/north-docs/openapi/v1.json", "/south-docs/openapi/v1.json" };
             var expected = new[] { await Get(host.Client, paths[0]), await Get(host.Client, paths[1]), await Get(host.Client, paths[2]) };
             Assert.Equal(WebApiPageGolden.Document(), expected[0]);
-            var first = Document(expected[1], "/north", "North display");
-            var second = Document(expected[2], "/south", "South display");
+            var first = Document(expected[1], "/north", "north");
+            var second = Document(expected[2], "/south", "south");
             References(Json(expected[0]), Json(expected[0]));
             await Witness(host.Client, first, "north_items", 1);
             await Witness(host.Client, second, "south_items", 101);
@@ -890,8 +893,8 @@ public sealed class NamedGatewayApiPageTests
         await secondHost.Start();
         var firstBytes = await Get(firstHost.Client, "/first-docs/openapi/v1.json");
         var secondBytes = await Get(secondHost.Client, "/second-docs/openapi/v1.json");
-        await Witness(firstHost.Client, Document(firstBytes, "/first", "First app"), "north_items", 1);
-        await Witness(secondHost.Client, Document(secondBytes, "/second", "Second app"), "south_items", 101);
+        await Witness(firstHost.Client, Document(firstBytes, "/first", "same"), "north_items", 1);
+        await Witness(secondHost.Client, Document(secondBytes, "/second", "same"), "south_items", 101);
         var before = (firstState.Counts, secondState.Counts, firstState.Instances.Count, secondState.Instances.Count);
         await Task.WhenAll(Enumerable.Range(0, 12).Select(async _ =>
         {

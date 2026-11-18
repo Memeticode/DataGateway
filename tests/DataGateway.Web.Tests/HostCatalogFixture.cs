@@ -10,16 +10,25 @@ namespace DataGateway.Web.Tests;
 // A fresh typed application catalog per invocation. All data and runtime fault ownership is explicit.
 internal sealed class HostCatalogFixture(
     Func<CancellationToken, Task<IReadOnlyList<SourceListRow>>> list,
-    Func<string, CancellationToken, Task<CatalogDetail?>> detail)
+    Func<string, CancellationToken, Task<CatalogDetail?>> detail,
+    Func<CancellationToken, Task<McpMetadata>>? metadata = null)
     : CatalogService<SqlConnection>(DbContext<SqlConnection>.FromFactory(() =>
         throw new InvalidOperationException("The synthetic catalog must not open SQL Server.")))
 {
+    public override Task<global::DataGateway.Core.Catalog.McpMetadata> QueryMcpMetadataAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return metadata is { } read ? read(cancellationToken) : Task.FromResult(McpMetadataFixture.Seed);
+    }
+
     public override Task<IReadOnlyList<SourceListRow>> QueryCatalogAsync(CancellationToken cancellationToken) => list(cancellationToken);
     public override Task<CatalogDetail?> QueryCatalogDetailAsync(string sourceName, CancellationToken cancellationToken) => detail(sourceName, cancellationToken);
 }
 
 internal sealed class HostCatalogState
 {
+    internal McpMetadata Metadata { get; set; } = McpMetadataFixture.Seed;
+    internal Func<CancellationToken, Task<McpMetadata>>? ReadMetadata { get; set; }
     internal bool Armed { get; private set; }
     internal int Factories, Lists, Details;
     internal Func<CancellationToken, Task<IReadOnlyList<SourceListRow>>> StartupList { get; set; } =
@@ -39,7 +48,7 @@ internal sealed class HostCatalogState
     {
         Interlocked.Increment(ref Factories);
         if (Armed && FactoryFailure is { } fail) throw fail();
-        return new(ReadList, ReadDetail);
+        return new(ReadList, ReadDetail, token => ReadMetadata is { } read ? read(token) : Task.FromResult(Metadata));
     }
 
     private Task<IReadOnlyList<SourceListRow>> ReadList(CancellationToken token)

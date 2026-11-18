@@ -37,7 +37,7 @@ public sealed class QueryTimeoutCatalogTests
         var runner = new QueryRunner(engine);
         var catalog = fixture.Catalog(provider: "sqlserver");
         var gateway = new GatewayCatalog(catalog.QueryCatalogAsync, catalog.QueryCatalogDetailAsync,
-            new Dictionary<string, QueryRunner> { ["sqlserver"] = runner });
+            new Dictionary<string, QueryRunner> { ["sqlserver"] = runner }, catalog.QueryMcpMetadataAsync);
         var shortSource = (await gateway.TargetAsync("synthetic_items", default)).Value;
         var longSource = (await gateway.TargetAsync("synthetic_other", default)).Value;
         Assert.Same(shortSource.Runner, longSource.Runner);
@@ -96,12 +96,12 @@ public sealed class QueryTimeoutCatalogTests
         Assert.Null(error.InnerException);
         Assert.Empty(error.Data);
         var gateway = new GatewayCatalog(_ => Task.FromResult<IReadOnlyList<SourceListRow>>([]),
-            (_, _) => Task.FromResult<CatalogDetail?>(Read()), new Dictionary<string, QueryRunner>());
+            (_, _) => Task.FromResult<CatalogDetail?>(Read()), new Dictionary<string, QueryRunner>(), _ => Task.FromResult(McpMetadataFixture.Seed));
         var result = await gateway.SourceAsync(Requested, default);
         SafeFailure(result.Failure!);
         using var cancel = new CancellationTokenSource();
         var cancellationWins = new GatewayCatalog(_ => Task.FromResult<IReadOnlyList<SourceListRow>>([]),
-            (_, _) => { cancel.Cancel(); throw error; }, new Dictionary<string, QueryRunner>());
+            (_, _) => { cancel.Cancel(); throw error; }, new Dictionary<string, QueryRunner>(), _ => Task.FromResult(McpMetadataFixture.Seed));
         Assert.Equal("CatalogCancelled", (await cancellationWins.SourceAsync(Requested, cancel.Token)).Failure!.Code);
     }
 
@@ -117,7 +117,7 @@ public sealed class QueryTimeoutCatalogTests
         var failures = CatalogValidator.ValidateDetail(Requested, detail);
         var gateway = new GatewayCatalog(_ => Task.FromResult<IReadOnlyList<SourceListRow>>([]),
             (_, _) => Task.FromResult<CatalogDetail?>(detail),
-            new Dictionary<string, QueryRunner> { ["sqlserver"] = new(new SqlServerEngine()) });
+            new Dictionary<string, QueryRunner> { ["sqlserver"] = new(new SqlServerEngine()) }, _ => Task.FromResult(McpMetadataFixture.Seed));
         var result = await gateway.SourceAsync(Requested, default);
         if (seconds is < 1 or > 86400)
         {

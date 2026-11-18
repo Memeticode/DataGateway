@@ -20,6 +20,9 @@ public abstract class CatalogService<TConnection> where TConnection : DbConnecti
 
     protected DbContext<TConnection> Db { get; }
 
+    /// <summary>Returns the complete MCP server and tool text, detached from the reader.</summary>
+    public abstract Task<McpMetadata> QueryMcpMetadataAsync(CancellationToken cancellationToken);
+
     /// <summary>Returns list metadata, activity and row caps.</summary>
     public abstract Task<IReadOnlyList<SourceListRow>> QueryCatalogAsync(
         CancellationToken cancellationToken);

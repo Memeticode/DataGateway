@@ -1,11 +1,49 @@
 using System.Data.Common;
 using Dapper.Data;
 using DataGateway.Core.Catalog;
+using DataGateway.Data.Catalog;
 
 namespace DataGateway.Web.Catalog;
 
 internal static class CatalogTableReader
 {
+    internal static async Task<McpMetadata> MetadataAsync<TConnection>(DbContext<TConnection> db,
+        string serverSql, string toolsSql, int timeout, CancellationToken token)
+        where TConnection : DbConnection, new()
+    {
+        token.ThrowIfCancellationRequested();
+        var result = await db.BatchAsync<McpMetadata>(async session =>
+        {
+            var servers = await session.QueryAsync(serverSql, commandTimeout: timeout, cancellationToken: token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+            if (servers.Count != 1) throw new InvalidMcpMetadataException("mcpserver.id");
+            var presentation = Row((object?)servers[0]);
+            if (MetadataId(presentation) != 1) throw new InvalidMcpMetadataException("mcpserver.id");
+            var tools = await session.QueryAsync(toolsSql, commandTimeout: timeout, cancellationToken: token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+            return new McpMetadata(MetadataText(presentation, "title", "mcpserver"), MetadataText(presentation, "about", "mcpserver"), tools.Select(raw =>
+            {
+                var row = Row((object?)raw);
+                return new McpToolMetadata(MetadataText(row, "tool_name", "mcptool"), MetadataText(row, "title", "mcptool"), MetadataText(row, "description", "mcptool"));
+            }).ToArray());
+        }, token).ConfigureAwait(false);
+        token.ThrowIfCancellationRequested();
+        return result;
+    }
+
+    private static string MetadataText(IDictionary<string, object?> row, string field, string table)
+    {
+        if (!row.TryGetValue(field, out var value) || value is not string text)
+            throw new InvalidMcpMetadataException(table + "." + field);
+        return text;
+    }
+
+    private static int MetadataId(IDictionary<string, object?> row)
+    {
+        try { return Integer(Value(row, "id")); }
+        catch (InvalidCastException) { throw new InvalidMcpMetadataException("mcpserver.id"); }
+    }
+
     internal const string InvalidCell = "The catalog cell shape is invalid.";
     private static readonly string[] ColumnFields =
     [

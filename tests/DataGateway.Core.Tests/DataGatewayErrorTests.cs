@@ -360,7 +360,7 @@ public sealed class DataGatewayErrorTests(ITestOutputHelper output)
         Assert.All(old, v => Assert.Equal(instructionsPath, v.Path));
         var instructionsSource = File.ReadAllText(TestFiles.InRepo(instructionsPath));
         var initializerStart = instructionsSource.IndexOf("internal static readonly string Instructions =", StringComparison.Ordinal);
-        var nextField = instructionsSource.IndexOf("    private const string ListOpening", initializerStart, StringComparison.Ordinal);
+        var nextField = instructionsSource.IndexOf("    internal static IReadOnlyDictionary<string, string> Routes", initializerStart, StringComparison.Ordinal);
         Assert.True(initializerStart >= 0 && nextField > initializerStart);
         var restoredInstructions = instructionsSource[..initializerStart] + oldInstructions + "\n" + instructionsSource[nextField..];
         Assert.Equal(old, Scan(instructionsPath, restoredInstructions).Select(v => v with { Line = 1 }));

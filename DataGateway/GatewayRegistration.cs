@@ -9,12 +9,10 @@ internal sealed record GatewayHostPolicy(CatalogFailure Failure, string Descript
 
 internal sealed class GatewayRegistration(string name,
     Func<IServiceProvider, IReadOnlyDictionary<string, QueryRunner>, GatewayCatalog> catalog,
-    IReadOnlyDictionary<string, QueryRunner> runners, string? mcpTitle, string? mcpAbout)
+    IReadOnlyDictionary<string, QueryRunner> runners)
 {
     internal string DocumentName { get; } = "datagateway-" + Guid.NewGuid().ToString("N");
     internal string Name { get; } = name;
-    internal string? McpTitle { get; } = mcpTitle;
-    internal string? McpAbout { get; } = mcpAbout;
     internal McpToolSettings McpTools { get; init; } = new(null, null);
     internal JsonQueryLimits Limits { get; init; } = JsonQueryLimits.Default with { MaxLimit = null };
     internal GatewayHostPolicy? HostPolicy { get; init; }

@@ -204,8 +204,11 @@ internal sealed class NamedGatewayMcpPair : IAsyncDisposable
     }
 
     internal static void Register(IServiceCollection services, string name, NamedGatewayState state,
-        NamedGatewayEngine engine, string? title, string? about) => services.AddDataGateway(name,
-            gateway => gateway.UseCatalog(state.Create).AddEngine(engine).UseMcpServer(title, about));
+        NamedGatewayEngine engine, string? title, string? about)
+    {
+        state.Metadata = McpMetadataFixture.Seed with { Title = title!, About = about! };
+        services.AddDataGateway(name, gateway => gateway.UseCatalog(state.Create).AddEngine(engine));
+    }
 
     internal async Task Start()
     {

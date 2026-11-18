@@ -12,14 +12,13 @@ Start with the [complete new-app walkthrough](README.md#add-it-to-a-new-app). Th
 | `AddEngine(IDatabaseEngine engine)` | Registers under `engine.ProviderName`. |
 | `AddEngine(IDatabaseEngine engine, string name)` | Registers an alias for an engine variant. Names are nonblank, preserve accepted whitespace and are unique ignoring case. |
 | `UseLimits(GatewayLimits limits)` | Replaces all five settings. Omitted properties use defaults. Null fails immediately; final ranges are checked at registration. |
-| `UseMcpServer(string? title, string? about)` | Last assignment wins. Blank is unset. Nonblank raw values reject CR/LF and may not exceed 80 UTF-8 bytes for title or 120 for about. Validation precedes trimming. |
 | `UseHostPolicy(CatalogFailure failure, string description, string responseDescription)` | Configures the fallback failure and page wording. It does not enforce access. |
 
 `CatalogDetail.Provider` selects an engine alias ordinally ignoring case. Aliases are not trimmed. There is no runtime DLL discovery. Apps own catalog/context and engine instances; DI owns scoped dependencies. Shared instances require safe concurrent access and stable result objects.
 
 The catalog factory is lazy. It receives scoped services at most once per HTTP invocation needing catalog data. Awaited startup uses a separate scope for each registration, including unmapped gateways. The app must return detached results. See [catalog readers](CATALOG-READERS.md).
 
-MCP name and version use the registration name and DataGateway assembly version. About prefixes the fixed instructions with one space. Title also supplies the API page/document title; otherwise the gateway name is used.
+MCP name and version use the registration name and DataGateway assembly version. Server display text comes from the catalog tables described below.
 
 The final host-policy failure must map to its own client-visible 401 code. Both description texts must be nonblank; accepted text is preserved. Null inputs fail immediately. `DriverException` is discarded. The host supplies caller-safe `Message`, `Path`, `Step` and `ExceptionType`, and attaches authentication and authorization itself.
 
@@ -90,3 +89,34 @@ Catalog invocation exceptions map to `CatalogUnavailable`. Cancellation is inter
 Registration checks names, the final builder settings, a catalog and at least one engine. Mapping separately checks registration, route patterns and one mapping of each kind. Await host startup; it validates the list and every active detail's shape, mapped columns and registered provider, even for unmapped gateways. Missing or inactive required detail prevents startup. Startup does not check source connectivity. Source connection validation and execution happen on the query path. `HostCatalogs` supplies additional catalog connection checks for the example host.
 
 Each source's catalog `query_timeout_seconds` controls its query deadline and provider command timeout, from connection open to the last kept row. This required integer defaults to 30 and accepts 1 through 86400. It is detail-only and absent from wire answers. The host refuses the retired `DataGateway:Limits:CommandTimeoutSeconds` setting; remove it and set the source column. For existing catalogs run `db/catalog-query-timeout.sql` or `db/postgresql/catalog-query-timeout.sql`. The example catalog constructors accept `(db, int catalogTimeoutSeconds = 15)` for their own reads, independently of source deadlines.
+
+## Catalog MCP metadata
+
+MCP presentation text comes from two catalog tables: SQL Server `dbo.McpServer` and `dbo.McpTool`, or PostgreSQL `datagateway.mcpserver` and `datagateway.mcptool`.
+The readers select their projection views `vMcpServer` / `vMcpTool` or `vmcpserver` / `vmcptool`, with the catalog command timeout.
+The server table contains exactly one row, `id = 1`, with nonblank `title` (1-80 characters, no CR/LF) and `about` (1-1,000 characters).
+The tool table contains exactly the keys `list_sources`, `describe_source`, and `query_source`; each has nonblank `title` (1-80 characters, no CR/LF) and `description` (1-1,000 characters).
+Titles and text are preserved as stored, including surrounding spaces.
+Lengths count UTF-16 code units, as .NET strings do, in both catalog CHECKs and runtime validation.
+The seeded server title is `DataGateway` and its exact About is `Read-only access to cataloged data sources.`
+The seeded tools are:
+
+| tool_name | title | description |
+| --- | --- | --- |
+| `list_sources` | List sources | No source named? See all data sources and what each holds. Takes no arguments and returns {"sources":[...]}: each active source's name, title, description, grain (what one row represents) and rowCap (maximum rows per query). Pick the source whose description and grain fit the question, then call describe_source with its name. |
+| `describe_source` | Describe a source | Named source not yet described? Get schema and query rules. Returns one source (name, title, description, grain, rowCap) with querySchema: every column with its meaning, type, unit, magnitude, display format and can* flags, then the rules of each query clause. Use only listed columns, as their flags allow. Before stating a number, read its unit and magnitude: "millions" means 523.06 is 523.06 million, for sum_, avg_, min_ and max_ outputs too; a count_ output is a plain count. |
+| `query_source` | Query a source | Source already described? Run a read-only query, get rows. Build query from that source's querySchema (describe_source). Returns {source, columns, rows, rowCount, more, hint}. Prefer filters and aggregates over pulling raw rows. With or without limit, more is true exactly when rows were left out: never report that answer as complete. Narrow or aggregate; there is no way to ask for the rest. Empty rows, or an aggregate's 0 or null, can mean no row matched or a misspelled value. |
+
+Fresh catalogs use `catalog-ddl.sql`, `catalog-views.sql` and `catalog-seed-example.sql` under `db/` or `db/postgresql/`.
+Upgrade existing catalogs with `db/catalog-mcp-metadata.sql` or `db/postgresql/catalog-mcp-metadata.sql`; both scripts are idempotent, create the tables, views and audit triggers, seed missing rows, and preserve edited rows.
+PostgreSQL readers receive grants through `db/postgresql/gateway-reader.sql`; SQL Server uses the existing reader role.
+Startup validates all metadata and the final prefixed descriptions; an invalid row refuses startup with its table and field.
+Every stateless POST reads metadata again through the asynchronous `ConfigureSessionOptions` hook, sharing its request catalog with any source reads.
+There is no cache or server-held snapshot across initialize and tools/list; initialize and a later tools/list are separate reads.
+Clients normally read the tool list when they connect, so an edit reaches a client on its next connection.
+An explicit tools/list can refresh tool titles and descriptions sooner on an existing connection; text already received by the client remains unchanged.
+The About precedes the fixed protocol rules with one space; the library still generates schemas and annotations.
+`UseMcpTools` applies name prefixes to names and every tool reference in table text, and prepends the description prefix to each table description.
+Each final description must be at most 1,000 characters, inclusive, after renaming and prefixing: 1,000 is accepted and 1,001 is refused.
+Initialize and tools/list can fail with HTTP 503 CatalogUnavailable; tools/call retains its tool-result errors and existing argument paths and failure logging.
+Scalar page titles and OpenAPI `info.title` always use the gateway registration name (`DataGateway.Web` in the packaged host), without reading MCP metadata; About appears in neither surface.

@@ -29,6 +29,12 @@ public sealed class PostgreSqlCatalog : CatalogService<NpgsqlConnection>
             PostgreSqlEngine.ProviderName, false, catalogTimeoutSeconds, cancellationToken).ConfigureAwait(false), sourceName);
     }
 
+    public override Task<McpMetadata> QueryMcpMetadataAsync(CancellationToken cancellationToken) =>
+        CatalogTableReader.MetadataAsync(Db, McpServerSql, McpToolsSql, catalogTimeoutSeconds, cancellationToken);
+
+    internal const string McpServerSql = "SELECT id, title, about FROM datagateway.vmcpserver;";
+    internal const string McpToolsSql = "SELECT tool_name, title, description FROM datagateway.vmcptool;";
+
     internal const string ListSql = "SELECT name, title, description, grain, row_cap\n" +
         "FROM datagateway.vdatasource\nWHERE is_active = TRUE;";
     internal const string AvailableSql = "SELECT name FROM datagateway.vdatasource WHERE is_active = TRUE;";
