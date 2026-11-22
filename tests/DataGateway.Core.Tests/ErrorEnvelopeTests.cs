@@ -9,12 +9,12 @@ namespace DataGateway.Core.Tests;
 
 public sealed class ErrorEnvelopeTests
 {
-    private const string InternalMessage = "DataGateway could not complete the request because of a fault on its side, not in the request. Contact the DataGateway administrator. Tell the user. Do not retry.";
+    private const string InternalMessage = "DataGateway could not complete the request because of a fault on its side, not in the request. Contact the DataGateway administrator. Tell the user, give the incidentId and stop; do not retry.";
 
     [Fact]
     public void Unexpected_T15_code_always_has_the_fixed_500_body()
     {
-        const string message = "An unexpected error stopped DataGateway from completing the request. Report the incidentId to the DataGateway administrator. Tell the user. Do not retry.";
+        const string message = "An unexpected error stopped DataGateway from completing the request. Tell the user, give the incidentId and stop; do not retry.";
         var expected = new ErrorReply(500, new("UnexpectedError", "$", message, "abc"));
         Assert.Equal(expected, ErrorEnvelope.From(ErrorEnvelope.Unexpected, "abc"));
         Assert.Equal(expected, ErrorEnvelope.From(new("UnexpectedError", "$.query", "Server=x leaked"), "abc"));

@@ -31,7 +31,7 @@ public sealed class QueryRouteTests
     private const string M1 = "The request body is not valid JSON. Send {\"source\": \"<name>\", \"query\": {...}} with a name from list sources.";
     private const string M2 = "Send a JSON object with exactly two properties, source and query: {\"source\": \"<name>\", \"query\": {...}}. Take the name from list sources and the query vocabulary from describe source.";
     private const string M3 = "source must be a JSON string: the name of a source from list sources.";
-    private const string M4 = "DataGateway could not complete the request because of a fault on its side, not in the request. Contact the DataGateway administrator. Tell the user. Do not retry.";
+    private const string M4 = "DataGateway could not complete the request because of a fault on its side, not in the request. Contact the DataGateway administrator. Tell the user, give the incidentId and stop; do not retry.";
 
     [Theory]
     [InlineData(false)]

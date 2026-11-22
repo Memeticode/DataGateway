@@ -147,7 +147,7 @@ public sealed class McpMetadataTests
             Assert.False(response.Headers.Contains("Mcp-Session-Id"));
             using var body = JsonDocument.Parse(await response.Content.ReadAsByteArrayAsync(pair.Token));
             Assert.Equal("CatalogUnavailable", body.RootElement.GetProperty("code").GetString());
-            Assert.Equal("Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user. Do not retry.", body.RootElement.GetProperty("message").GetString());
+            Assert.Equal("Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user, give the incidentId and stop; do not retry.", body.RootElement.GetProperty("message").GetString());
             Assert.False(body.RootElement.TryGetProperty("tools", out _));
             var line = pair.Host.Logs.Failures.Last();
             Assert.Contains(Field(field), Assert.IsType<string>(line.Fields["Message"]));
@@ -214,7 +214,7 @@ public sealed class McpMetadataTests
             Assert.Single(result.Content);
             using var json = JsonDocument.Parse(McpWire.Text(result));
             Assert.Equal("CatalogUnavailable", json.RootElement.GetProperty("code").GetString());
-            Assert.Equal("Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user. Do not retry.", json.RootElement.GetProperty("message").GetString());
+            Assert.Equal("Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user, give the incidentId and stop; do not retry.", json.RootElement.GetProperty("message").GetString());
             Assert.Equal(operation == "list" ? "$" : "$.source", json.RootElement.GetProperty("path").GetString());
             var line = pair.Host.Logs.Failures.Last();
             Assert.Equal(name, line.Fields["Operation"]);

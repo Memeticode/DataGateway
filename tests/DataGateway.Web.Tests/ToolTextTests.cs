@@ -42,7 +42,7 @@ public sealed class ToolTextTests
             ["describe_source"] = "Named source not yet described? Get schema and query rules. ",
             ["query_source"] = "Source already described? Run a read-only query, get rows. B"
         };
-        Assert.Equal(497, Encoding.UTF8.GetByteCount(DataGatewayTools.Instructions));
+        Assert.Equal(482, Encoding.UTF8.GetByteCount(DataGatewayTools.Instructions));
         foreach (var hint in new[] { DataGateway.Core.Queries.QueryResponse.CappedAt(int.MaxValue), DataGateway.Core.Queries.QueryResponse.CappedAt(int.MaxValue) + " " + DataGateway.Core.Queries.QueryResponse.NoParticularOrder, DataGateway.Core.Queries.QueryResponse.NothingFound, DataGateway.Core.Queries.QueryResponse.CompleteSet })
             Assert.InRange(Encoding.UTF8.GetByteCount(hint), 1, 200);
         foreach (var tool in PublicGatewayProbe.Tools())

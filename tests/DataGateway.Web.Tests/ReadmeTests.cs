@@ -191,7 +191,7 @@ public sealed class ReadmeTests
 
     internal static void AssertStopGuidance(JsonElement body, Trigger trigger)
     {
-        const string guidance = "Tell the user. Do not retry.";
+        const string guidance = "Tell the user, give the incidentId and stop; do not retry.";
         var message = body.GetProperty("message").GetString()!;
         var stop = trigger.Code is "CatalogUnavailable" or "SourceUnavailable" or "InternalError" or "UnexpectedError"
             || (trigger.Code == "QueryTimeout" && trigger.Mode == "timeout");

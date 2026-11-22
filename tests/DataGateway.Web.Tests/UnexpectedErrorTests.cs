@@ -24,7 +24,7 @@ namespace DataGateway.Web.Tests;
 
 public sealed class UnexpectedErrorTests
 {
-    internal const string Message = "An unexpected error stopped DataGateway from completing the request. Report the incidentId to the DataGateway administrator. Tell the user. Do not retry.";
+    internal const string Message = "An unexpected error stopped DataGateway from completing the request. Tell the user, give the incidentId and stop; do not retry.";
 
     [Theory]
     [InlineData("list", false)]
@@ -54,7 +54,7 @@ public sealed class UnexpectedErrorTests
             Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
             ErrorLogTests.Check(line, body, operation, Encoding.UTF8.GetBytes(request), "CatalogUnavailable");
             Assert.Equal(operation == "list" ? "$" : "$.source", body.GetProperty("path").GetString());
-            Assert.Equal("Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user. Do not retry.", body.GetProperty("message").GetString());
+            Assert.Equal("Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user, give the incidentId and stop; do not retry.", body.GetProperty("message").GetString());
             Nulls(line, "ExceptionText", "DriverMessage", "SqlNumber");
         }
         else

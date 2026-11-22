@@ -529,8 +529,8 @@ Catalog invocation exceptions currently map to `CatalogUnavailable`; cancellatio
 | CatalogUnavailable | 503 | Catalog cannot be reached or read. | `$`, `$.source` |
 | SourceUnavailable | 503 | Source cannot be reached or read. | `$.source` |
 | QueryTimeout | 504 | Source query timeout; the catalog cells are legacy declared vocabulary, not currently emitted catalog failures. | `$`, `$.source`, `$.query` |
-| InternalError | 500 | Known DataGateway-side fault. Fixed message: DataGateway could not complete the request because of a fault on its side, not in the request. Contact the DataGateway administrator. Tell the user. Do not retry. Details only in the log. | `$` |
-| UnexpectedError | 500 | Unexpected exception. Fixed message: An unexpected error stopped DataGateway from completing the request. Report the incidentId to the DataGateway administrator. Tell the user. Do not retry. Details only in the log. | `$` |
+| InternalError | 500 | Known DataGateway-side fault. Fixed message: DataGateway could not complete the request because of a fault on its side, not in the request. Contact the DataGateway administrator. Tell the user, give the incidentId and stop; do not retry. Details only in the log. | `$` |
+| UnexpectedError | 500 | Unexpected exception. Fixed message: An unexpected error stopped DataGateway from completing the request. Tell the user, give the incidentId and stop; do not retry. Details only in the log. | `$` |
 
 ## The demo
 

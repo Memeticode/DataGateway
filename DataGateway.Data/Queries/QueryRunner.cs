@@ -119,7 +119,7 @@ public sealed class QueryRunner
         { SourceId = source.Id, SourceName = source.Source.Name });
 
     private static CatalogFailure QueryTimeout(int commandTimeoutSeconds) => new(DataGatewayError.QueryTimeout.Code, "$.query",
-        $"The query ran longer than the {commandTimeoutSeconds}-second command timeout and was stopped. Narrow the filters, aggregate, or request fewer rows.");
+        $"The query ran longer than the {commandTimeoutSeconds}-second command timeout and was stopped. Narrow the query once (filters, an aggregate or fewer rows) and say what you narrowed; if it times out again, tell the user, give the incidentId and stop.");
 
     private static CatalogFailure Cancelled() => new(DataGatewayError.QueryCancelled.Code, "$.query",
         "The query was cancelled because the caller ended the request. Submit a new request if still needed.");
@@ -128,5 +128,5 @@ public sealed class QueryRunner
         "The source's catalog connection string cannot be used. Ask the data steward to correct the source's catalog row.");
 
     private static CatalogFailure Unavailable() => new(DataGatewayError.SourceUnavailable.Code, "$.source",
-        "The source's database could not run the query. If it keeps failing, the DataGateway administrator should check the source. Tell the user. Do not retry.");
+        "The source's database could not run the query. The DataGateway administrator should check the source. Tell the user, give the incidentId and stop; do not retry.");
 }

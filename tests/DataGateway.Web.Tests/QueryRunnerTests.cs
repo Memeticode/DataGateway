@@ -25,7 +25,7 @@ public sealed class QueryRunnerTests
     private const string S = "Server=tcp:127.0.0.1,1;Database=Synthetic;User ID=fake-sensitive-reader;Password=fake-sensitive-password;Application Name=synthetic-app;Encrypt=False;Pooling=False;Connect Timeout=90;ConnectRetryCount=9";
     private const string InvalidMessage = "The source's catalog connection string cannot be used. Ask the data steward to correct the source's catalog row.";
     private const string CancelMessage = "The query was cancelled because the caller ended the request. Submit a new request if still needed.";
-    private const string UnavailableMessage = "The source's database could not run the query. If it keeps failing, the DataGateway administrator should check the source. Tell the user. Do not retry.";
+    private const string UnavailableMessage = "The source's database could not run the query. The DataGateway administrator should check the source. Tell the user, give the incidentId and stop; do not retry.";
 
     [Theory]
     [InlineData(1, true)]
@@ -172,7 +172,7 @@ public sealed class QueryRunnerTests
         Assert.Equal(code switch
         {
             "InvalidCatalog" => InvalidMessage,
-            "QueryTimeout" => "The query ran longer than the 3-second command timeout and was stopped. Narrow the filters, aggregate, or request fewer rows.",
+            "QueryTimeout" => "The query ran longer than the 3-second command timeout and was stopped. Narrow the query once (filters, an aggregate or fewer rows) and say what you narrowed; if it times out again, tell the user, give the incidentId and stop.",
             _ => UnavailableMessage
         }, failure.Message);
         Assert.Equal(1, calls);

@@ -112,7 +112,7 @@ sources and each source's exact query schema from describe source.
 The error body, every code with its status, and where `path` points are in the [README](README.md#errors), Errors. This section covers what the server does around them.
 Any other known DataGateway-side failure is logged with its own code and answered as 500 `InternalError` at `$`, with advice to contact the DataGateway administrator. The failure is still logged once the caller has disconnected, but no response body is written.
 An exception outside every known failure answers HTTP 500 `UnexpectedError` at `$`,
-with the fixed message "An unexpected error stopped DataGateway from completing the request. Report the incidentId to the DataGateway administrator. Tell the user. Do not retry."
+with the fixed message "An unexpected error stopped DataGateway from completing the request. Tell the user, give the incidentId and stop; do not retry."
 and the incident ID. Its details are only in the error log under that ID, in
 `ExceptionText`. `InternalError` stays for known faults.
 Development returns the same JSON body, never an HTML exception page.

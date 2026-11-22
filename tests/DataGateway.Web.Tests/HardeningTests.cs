@@ -165,7 +165,7 @@ public sealed class HardeningTests
         var result = await new QueryRunner(engine).RunAsync(ErrorLogTests.Contract(queryTimeoutSeconds: 1), Query(keep: 50), CancellationToken.None);
         Assert.Equal("QueryTimeout", result.Failure?.Code);
         Assert.Equal("command", result.Failure!.Step);
-        Assert.Equal("The query ran longer than the 1-second command timeout and was stopped. Narrow the filters, aggregate, or request fewer rows.", result.Failure.Message);
+        Assert.Equal("The query ran longer than the 1-second command timeout and was stopped. Narrow the query once (filters, an aggregate or fewer rows) and say what you narrowed; if it times out again, tell the user, give the incidentId and stop.", result.Failure.Message);
         Assert.InRange(watch.Elapsed, TimeSpan.FromSeconds(0.9), TimeSpan.FromSeconds(10));
         Assert.InRange(engine.RowsServed, 1, 5);
     }
@@ -236,7 +236,7 @@ public sealed class HardeningTests
         var failure = QueryRunner.Classify(new IOException("synthetic"), connected: true, cancelled: false, timedOut: false, 30, provider: null)!;
         Assert.Equal("SourceUnavailable", failure.Code);
         Assert.DoesNotContain("Try again", failure.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.EndsWith(" Tell the user. Do not retry.", failure.Message, StringComparison.Ordinal);
+        Assert.EndsWith(" Tell the user, give the incidentId and stop; do not retry.", failure.Message, StringComparison.Ordinal);
     }
 
     // describe refuses the same null fields list refuses.

@@ -102,7 +102,7 @@ public sealed class ErrorLogTests
         else expectedFailure = new(code, answer.RootElement.GetProperty("path").GetString()!, answer.RootElement.GetProperty("message").GetString()!)
             { Step = "request", ExceptionType = kind is "json" or "utf8" ? "JsonException" : null };
         if (operation == "list" && kind is "io" or "timeout" or "shape")
-            expectedFailure = new("CatalogUnavailable", "$", "Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user. Do not retry.")
+            expectedFailure = new("CatalogUnavailable", "$", "Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user, give the incidentId and stop; do not retry.")
             { Step = "catalog", ExceptionType = kind == "io" ? "IOException" : kind == "timeout" ? "TimeoutException" : "InvalidCastException" };
         else if (operation != "list" && kind == "unknown")
             expectedFailure = expectedFailure with { SourceName = "absent", Step = "catalog" };

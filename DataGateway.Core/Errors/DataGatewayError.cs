@@ -6,8 +6,8 @@ namespace DataGateway.Core.Errors;
 /// these; the private constructor means no other code can add one.</summary>
 public sealed class DataGatewayError
 {
-    internal const string UnexpectedErrorMessage = "An unexpected error stopped DataGateway from completing the request. Report the incidentId to the DataGateway administrator. Tell the user. Do not retry.";
-    internal const string InternalErrorMessage = "DataGateway could not complete the request because of a fault on its side, not in the request. Contact the DataGateway administrator. Tell the user. Do not retry.";
+    internal const string UnexpectedErrorMessage = "An unexpected error stopped DataGateway from completing the request. Tell the user, give the incidentId and stop; do not retry.";
+    internal const string InternalErrorMessage = "DataGateway could not complete the request because of a fault on its side, not in the request. Contact the DataGateway administrator. Tell the user, give the incidentId and stop; do not retry.";
 
     public static DataGatewayError UnknownSource { get; } = new(nameof(UnknownSource), 404);
     public static DataGatewayError QueryTimeout { get; } = new(nameof(QueryTimeout), 504);

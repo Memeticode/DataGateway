@@ -105,11 +105,11 @@ public sealed class SourcesListTests
         var error = Assert.Single(logs.Errors);
         Assert.Contains("CatalogUnavailable", error);
         using var expectedBody = JsonDocument.Parse(body);
-        Assert.Equal("Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user. Do not retry.", expectedBody.RootElement.GetProperty("message").GetString());
+        Assert.Equal("Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user, give the incidentId and stop; do not retry.", expectedBody.RootElement.GetProperty("message").GetString());
         if (status == 500)
         {
             using var json = JsonDocument.Parse(body);
-            Assert.Equal("DataGateway could not complete the request because of a fault on its side, not in the request. Contact the DataGateway administrator. Tell the user. Do not retry.", json.RootElement.GetProperty("message").GetString());
+            Assert.Equal("DataGateway could not complete the request because of a fault on its side, not in the request. Contact the DataGateway administrator. Tell the user, give the incidentId and stop; do not retry.", json.RootElement.GetProperty("message").GetString());
             Assert.DoesNotContain(kind == "argument" ? "CatalogConfiguration" : "InvalidCatalog", body);
         }
         AssertSafe(body + logs.Text);
@@ -253,7 +253,7 @@ public sealed class SourcesListTests
         var text = await response.Content.ReadAsStringAsync();
         AssertError(response, text, "InternalError");
         using var body = JsonDocument.Parse(text);
-        Assert.Equal("DataGateway could not complete the request because of a fault on its side, not in the request. Contact the DataGateway administrator. Tell the user. Do not retry.", body.RootElement.GetProperty("message").GetString());
+        Assert.Equal("DataGateway could not complete the request because of a fault on its side, not in the request. Contact the DataGateway administrator. Tell the user, give the incidentId and stop; do not retry.", body.RootElement.GetProperty("message").GetString());
         Assert.DoesNotContain("CatalogCancelled", text);
         Assert.Contains("CatalogCancelled", Assert.Single(logs.Errors));
         AssertSafe(text + logs.Text);

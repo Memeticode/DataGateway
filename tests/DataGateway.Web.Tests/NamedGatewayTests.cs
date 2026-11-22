@@ -1554,7 +1554,7 @@ public sealed class NamedGatewayTests
         Assert.Equal(200, (await healthy.Post("/a", "list")).Status);
     }
 
-    private const string Unavailable = "Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user. Do not retry.";
+    private const string Unavailable = "Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user, give the incidentId and stop; do not retry.";
     private static NamedGatewayHost Host(NamedGatewayState a, NamedGatewayState? b = null, NamedGatewayEngine? engine = null, NamedGatewayEngine? engineB = null)
     {
         var host = new NamedGatewayHost(builder =>

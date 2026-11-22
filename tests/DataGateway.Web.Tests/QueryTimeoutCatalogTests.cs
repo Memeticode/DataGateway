@@ -71,7 +71,7 @@ public sealed class QueryTimeoutCatalogTests
         var source = ErrorLogTests.Contract(queryTimeoutSeconds: seconds);
         var result = await new QueryRunner(engine).RunAsync(source, new CompiledQuery("SELECT id", new Dictionary<string, object>(), 3, false, [new("id", "number")]), default);
         Assert.Equal("QueryTimeout", result.Failure!.Code);
-        Assert.Equal($"The query ran longer than the {seconds}-second command timeout and was stopped. Narrow the filters, aggregate, or request fewer rows.", result.Failure.Message);
+        Assert.Equal($"The query ran longer than the {seconds}-second command timeout and was stopped. Narrow the query once (filters, an aggregate or fewer rows) and say what you narrowed; if it times out again, tell the user, give the incidentId and stop.", result.Failure.Message);
     }
 
     public static IEnumerable<object?[]> InvalidCells()

@@ -522,8 +522,8 @@ public sealed class SourceEngineTests
     {
         "QueryCancelled" => "The query was cancelled because the caller ended the request. Submit a new request if still needed.",
         "InvalidCatalog" => "The source's catalog connection string cannot be used. Ask the data steward to correct the source's catalog row.",
-        "QueryTimeout" => "The query ran longer than the 41-second command timeout and was stopped. Narrow the filters, aggregate, or request fewer rows.",
-        _ => "The source's database could not run the query. If it keeps failing, the DataGateway administrator should check the source. Tell the user. Do not retry."
+        "QueryTimeout" => "The query ran longer than the 41-second command timeout and was stopped. Narrow the query once (filters, an aggregate or fewer rows) and say what you narrowed; if it times out again, tell the user, give the incidentId and stop.",
+        _ => "The source's database could not run the query. The DataGateway administrator should check the source. Tell the user, give the incidentId and stop; do not retry."
     };
 
     [Theory]

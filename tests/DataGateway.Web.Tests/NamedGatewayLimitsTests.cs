@@ -341,7 +341,7 @@ public sealed class NamedGatewayLimitsTests
             var before = shared.Executed.Count;
             foreach (var (name, seconds) in new[] { ("a", 7), ("b", 11), ("d", 30) })
             {
-                var message = $"The query ran longer than the {seconds}-second command timeout and was stopped. Narrow the filters, aggregate, or request fewer rows.";
+                var message = $"The query ran longer than the {seconds}-second command timeout and was stopped. Narrow the query once (filters, an aggregate or fewer rows) and say what you narrowed; if it times out again, tell the user, give the incidentId and stop.";
                 await rig.Refusal(name, OrderedTwo, "$.query", message, code: "QueryTimeout", status: 504, step: "command");
             }
             Receipts(shared.Executed.Skip(before).ToArray(), rig);

@@ -348,7 +348,7 @@ public sealed class HostCompositionTests
         Assert.Equal(new[] { "code", "path", "message", "incidentId" }, body.RootElement.EnumerateObject().Select(p => p.Name));
         Assert.Equal(code, body.RootElement.GetProperty("code").GetString());
         Assert.Equal(kind == "cancel" ? "$" : operation == "list" ? "$" : "$.source", body.RootElement.GetProperty("path").GetString());
-        if (kind != "cancel") Assert.Equal("Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user. Do not retry.", body.RootElement.GetProperty("message").GetString());
+        if (kind != "cancel") Assert.Equal("Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user, give the incidentId and stop; do not retry.", body.RootElement.GetProperty("message").GetString());
         var line = Assert.Single(host.Lines());
         var incident = body.RootElement.GetProperty("incidentId").GetString();
         void AssertDiagnostics(JsonElement actualLine, string? expectedIncident, string actualText)
@@ -403,7 +403,7 @@ public sealed class HostCompositionTests
             Assert.Equal(new[] { "code", "path", "message", "incidentId" }, answer.RootElement.EnumerateObject().Select(property => property.Name));
             Assert.Equal("CatalogUnavailable", answer.RootElement.GetProperty("code").GetString());
             Assert.Equal(expectedPath, answer.RootElement.GetProperty("path").GetString());
-            Assert.Equal("Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user. Do not retry.", answer.RootElement.GetProperty("message").GetString());
+            Assert.Equal("Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user, give the incidentId and stop; do not retry.", answer.RootElement.GetProperty("message").GetString());
             Assert.DoesNotContain("planted-private-marker", actualText);
             return answer.RootElement.GetProperty("incidentId").GetString();
         }

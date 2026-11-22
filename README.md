@@ -575,8 +575,8 @@ The example host answers an unknown path or wrong method with the framework's em
 | CatalogUnavailable | 503 | Catalog cannot be reached or read. | `$`, `$.source` |
 | SourceUnavailable | 503 | Source cannot be reached or read. | `$.source` |
 | QueryTimeout | 504 | A source query timed out. | `$.query` |
-| InternalError | 500 | Known DataGateway-side fault. Fixed message: DataGateway could not complete the request because of a fault on its side, not in the request. Contact the DataGateway administrator. Tell the user. Do not retry. Details only in the log. | `$` |
-| UnexpectedError | 500 | Unexpected exception. Fixed message: An unexpected error stopped DataGateway from completing the request. Report the incidentId to the DataGateway administrator. Tell the user. Do not retry. Details only in the log. | `$` |
+| InternalError | 500 | Known DataGateway-side fault. Fixed message: DataGateway could not complete the request because of a fault on its side, not in the request. Contact the DataGateway administrator. Tell the user, give the incidentId and stop; do not retry. Details only in the log. | `$` |
+| UnexpectedError | 500 | Unexpected exception. Fixed message: An unexpected error stopped DataGateway from completing the request. Tell the user, give the incidentId and stop; do not retry. Details only in the log. | `$` |
 
 Catalog invocation exceptions are sanitized to `CatalogUnavailable`, with exception type retained internally. Cancellation is `CatalogCancelled` internally. The public envelope redacts internal codes to `InternalError`; unexpected exceptions use `UnexpectedError`. A disconnected caller receives no error body. Once a response has started, failure handling aborts the connection. [Configuration](CONFIGURATION.md) describes incident and logging behavior.
 

@@ -13,7 +13,7 @@ internal sealed class GatewayCatalog(
     IReadOnlyDictionary<string, QueryRunner> runners,
     Func<CancellationToken, Task<McpMetadata>> metadata)
 {
-    internal const string UnavailableMessage = "Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user. Do not retry.";
+    internal const string UnavailableMessage = "Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user, give the incidentId and stop; do not retry.";
     private CatalogFailure? metadataFailure;
 
     internal async Task<CatalogResult<McpMetadata>> MetadataAsync(string gateway, McpToolSettings settings, CancellationToken token)

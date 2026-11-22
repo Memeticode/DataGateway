@@ -25,7 +25,7 @@ public sealed class SourcesDescribeTests
     private const string M1 = "The request body is not valid JSON. Send {\"source\": \"<name>\"} with a name from list sources.";
     private const string M2 = "Send a JSON object with exactly one property, source: {\"source\": \"<name>\"} with a name from list sources.";
     private const string M3 = "source must be a JSON string: the name of a source from list sources.";
-    private const string M4 = "DataGateway could not complete the request because of a fault on its side, not in the request. Contact the DataGateway administrator. Tell the user. Do not retry.";
+    private const string M4 = "DataGateway could not complete the request because of a fault on its side, not in the request. Contact the DataGateway administrator. Tell the user, give the incidentId and stop; do not retry.";
 
     [Fact]
     public async Task T8_real_host_uses_canonical_metadata_verbatim_name_and_registered_limits()
