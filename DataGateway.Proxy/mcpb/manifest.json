@@ -1,0 +1,33 @@
+{
+  "manifest_version": "0.3",
+  "name": "datagateway-proxy",
+  "display_name": "DataGateway (Windows sign-in)",
+  "version": "1.0.0",
+  "description": "Connects Claude Desktop to a DataGateway server as the signed-in Windows user.",
+  "author": {
+    "name": "DataGateway"
+  },
+  "server": {
+    "type": "binary",
+    "entry_point": "server/DataGateway.Proxy.exe",
+    "mcp_config": {
+      "command": "${__dirname}/server/DataGateway.Proxy.exe",
+      "args": [
+        "${user_config.endpoint}"
+      ]
+    }
+  },
+  "user_config": {
+    "endpoint": {
+      "type": "string",
+      "title": "Gateway address",
+      "description": "The gateway's MCP address, https only, for example https://data.example.com/mcp",
+      "required": true
+    }
+  },
+  "compatibility": {
+    "platforms": [
+      "win32"
+    ]
+  }
+}
