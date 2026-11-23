@@ -2,7 +2,8 @@
 
 This net10.0 assembly is a finite, tests-only implementation of the five public
 `IDatabaseEngine` members. Product projects do not reference or ship this adapter
-or its SQLite dependencies. SQL Server and PostgreSQL remain supported production engines.
+or its SQLite dependencies. The example app in `samples/WindowsAuthSqlite` uses it to show
+Windows sign-in without a database server; it is an example, not a product. SQL Server and PostgreSQL remain supported production engines.
 
 `SqliteArchitectureTests`, `SqliteEngineTests` and `SqliteOperationsTests` run without
 live prerequisites. From the repository root:

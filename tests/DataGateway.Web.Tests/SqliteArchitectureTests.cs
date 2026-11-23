@@ -41,7 +41,10 @@ public sealed class SqliteArchitectureTests(ITestOutputHelper output)
             foreach (var reference in document.Descendants("ProjectReference"))
                 if (SqliteName((string?)reference.Attribute("Include") ?? "")) incoming.Add(Path.GetRelativePath(TestFiles.RepoRoot, path).Replace('\\', '/'));
         }
-        Assert.Equal("tests/DataGateway.Web.Tests/DataGateway.Web.Tests.csproj", Assert.Single(incoming));
+        // The tests and example apps under samples/ may use the tests-only adapter; no product project may.
+        Assert.Contains("tests/DataGateway.Web.Tests/DataGateway.Web.Tests.csproj", incoming);
+        Assert.All(incoming, path => Assert.True(path == "tests/DataGateway.Web.Tests/DataGateway.Web.Tests.csproj" ||
+            path.StartsWith("samples/", StringComparison.Ordinal), "SQLite adapter referenced by " + path));
         var assembly = typeof(SqliteEngine).Assembly;
         Assert.DoesNotContain(assembly.GetCustomAttributesData(), attr => attr.AttributeType.Name == "InternalsVisibleToAttribute");
         Assert.DoesNotContain(assembly.GetReferencedAssemblies(), name => new[] { "SqlServer", "SqlClient", "Dapper", "EntityFramework", "SqlKata.Execution" }.Any(fragment => name.Name!.Contains(fragment, StringComparison.OrdinalIgnoreCase)));

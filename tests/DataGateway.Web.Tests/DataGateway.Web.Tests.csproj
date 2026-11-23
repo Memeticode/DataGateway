@@ -16,6 +16,7 @@
     <ProjectReference Include="../../DataGateway.Data.SqlServer/DataGateway.Data.SqlServer.csproj" />
     <ProjectReference Include="../../DataGateway.Data.PostgreSql/DataGateway.Data.PostgreSql.csproj" />
     <ProjectReference Include="../../DataGateway.Data.Sqlite/DataGateway.Data.Sqlite.csproj" />
+    <ProjectReference Include="../../samples/WindowsAuthSqlite/WindowsAuthSqlite.csproj" />
     <ProjectReference Include="../../DataGateway.Demo/DataGateway.Demo.csproj" />
     <ProjectReference Include="../../DataGateway.Proxy/DataGateway.Proxy.csproj" Aliases="RegistrationProxy" />
     <Compile Include="../DataGateway.Core.Tests/TestFiles.cs" Link="TestFiles.cs" />

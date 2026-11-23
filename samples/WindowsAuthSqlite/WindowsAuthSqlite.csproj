@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <!-- Example app: Windows sign-in over the tests-only SQLite engine. Not a product and not packed. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <StartupObject>WindowsAuthSample.SampleProgram</StartupObject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="10.0.14" />
+    <ProjectReference Include="../../DataGateway/DataGateway.csproj" />
+    <ProjectReference Include="../../DataGateway.Data/DataGateway.Data.csproj" />
+    <ProjectReference Include="../../DataGateway.Data.Sqlite/DataGateway.Data.Sqlite.csproj" />
+  </ItemGroup>
+</Project>

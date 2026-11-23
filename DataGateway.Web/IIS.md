@@ -9,6 +9,8 @@ Two identities are involved, and they are different:
 - **The caller** is the person signed in to Windows. IIS checks who they are, and every request must carry their sign-in.
 - **The app pool identity** runs the app. It is the only account that reads SQL Server, and the caller's own SQL rights are never used. Whoever can sign in can read every active source in the catalog, so the catalog is the boundary. To limit who may sign in at all, see [Limit who can sign in](#limit-who-can-sign-in).
 
+To prove Windows sign-in on IIS before setting up SQL Server, start with the [SQLite sample](../samples/WindowsAuthSqlite/README.md): the same hosting steps with a database the app creates itself.
+
 The examples use `data.example.com` for the site, `EXAMPLE` for the domain, `sql01` for SQL Server and `DataGateway` for the app pool. Replace them with your own.
 
 ## Requirements

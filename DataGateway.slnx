@@ -8,6 +8,7 @@
   <Project Path="DataGateway.Web/DataGateway.Web.csproj" />
   <Project Path="DataGateway.Demo/DataGateway.Demo.csproj" />
   <Project Path="DataGateway.Proxy/DataGateway.Proxy.csproj" />
+  <Project Path="samples/WindowsAuthSqlite/WindowsAuthSqlite.csproj" />
   <Folder Name="/tests/">
     <Project Path="tests/DataGateway.Web.Tests/DataGateway.Web.Tests.csproj" />
     <Project Path="tests/DataGateway.Core.Tests/DataGateway.Core.Tests.csproj" />
