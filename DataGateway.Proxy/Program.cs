@@ -1,4 +1,6 @@
 // DataGateway.Proxy: forwards stdio MCP to a gateway's /mcp endpoint as the Windows user.
+// Why: desktop MCP clients start local stdio servers, so this small local process lets them reach an internal HTTP
+// gateway as the signed-in Windows user, and the gateway sees who is asking.
 // In server mode stdout carries only the protocol; logs go to stderr and a file.
 // Registration CLI commands return before logging or the stdio server starts.
 using DataGateway.Proxy;

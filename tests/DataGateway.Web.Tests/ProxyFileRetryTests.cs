@@ -7,9 +7,13 @@ using Xunit;
 namespace DataGateway.Web.Tests;
 
 /// <summary>Pins the proxy's retry of file operations on the client configuration file during registration.</summary>
-/// <remarks>Only a file held briefly by another process (access denied, a sharing or a lock violation) is retried, a
+/// <remarks><para>Only a file held briefly by another process (access denied, a sharing or a lock violation) is retried, a
 /// fixed number of times with a fixed pause; any other failure is thrown at once, as the same exception instance, and a
-/// retry that runs out leaves the files unchanged.</remarks>
+/// retry that runs out leaves the files unchanged.</para>
+/// <para>Another process, such as an antivirus scanner or the search indexer, can briefly hold a newly written file,
+/// so a copy, move or write can fail for a moment and then succeed. On Windows that brief hold can show up as access
+/// denied as well as a sharing or lock violation, so all three are retried, and every other error fails at
+/// once.</para></remarks>
 public sealed class ProxyFileRetryTests
 {
     [Fact]

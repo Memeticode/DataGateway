@@ -90,6 +90,9 @@ internal static class ProxyRegistration
     /// remote bridge names a tool <c>mcp__remote-devices__&lt;key&gt;__&lt;tool&gt;</c>, at most 64 characters, so
     /// the key must leave room for the longest tool name: 21 characters of prefix, the key, 2 of separator, then the
     /// tool.</para>
+    /// <para>A running Claude Desktop keeps its configuration in memory and writes it back over the file, silently
+    /// undoing any outside edit, so registration refuses while any Desktop process runs. The app must be quit from
+    /// its tray icon, because closing the window leaves it running.</para>
     /// <para>The running-Desktop check runs twice: first, before any work, and again after every file has been
     /// read and planned, just before writing, so a Desktop started meanwhile still stops the write. A plan that
     /// sets a barrier (a key owned by another program, or an <c>mcpServers</c> that is not an object) stops every

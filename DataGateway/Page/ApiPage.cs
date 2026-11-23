@@ -93,7 +93,9 @@ internal static class ApiPage
 
     /// <summary>The page settings for one request: the gateway's name as title, and the address of its document.</summary>
     /// <remarks>The document address is worked out from the page's own request path, so it stays right under any
-    /// parent group prefix the host adds.</remarks>
+    /// parent group prefix the host adds. The leading <c>/</c> is trimmed because the page script resolves the
+    /// document address against the site's base path plus <c>/</c>. A path without a leading slash therefore stays
+    /// correct under any path base or parent group, and the page does not have to add the base path itself.</remarks>
     /// <param name="options">The Scalar options.</param>
     /// <param name="registration">The gateway.</param>
     /// <param name="context">The page request.</param>

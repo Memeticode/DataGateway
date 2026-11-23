@@ -197,7 +197,9 @@ public sealed class NamedGatewayApiPageTests
     /// <summary>One host with two gateways, <c>north</c> and <c>north:archive</c>, over different catalogs, each with
     /// its own API and page prefix, plus ordinary host endpoints beside them.</summary>
     /// <remarks>The second name starts with the first, and a host endpoint is given a name that looks like a gateway
-    /// endpoint name, so a document built by matching names loosely would pick up the wrong endpoints.</remarks>
+    /// endpoint name (<c>DataGateway:north:list:pretender</c>). A gateway's endpoints are recognised by the
+    /// registration attached to them, never by parsing endpoint names, so a host endpoint whose name only looks like a
+    /// gateway's must stay out of that gateway's document.</remarks>
     private sealed class Pair : IAsyncDisposable
     {
         /// <summary>The first gateway's catalog.</summary>

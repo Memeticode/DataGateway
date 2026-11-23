@@ -74,6 +74,9 @@ internal sealed class SqliteTestCatalog : CatalogService<SqliteConnection>
     }
 
     /// <summary>Runs one catalog query and buffers its rows, checking <paramref name="token"/> around every row.</summary>
+    /// <remarks>Microsoft.Data.Sqlite runs its async calls synchronously and its <c>Cancel</c> does nothing, so
+    /// checking the token between rows is the only way a cancelled read stops early. The unbuffered reader also closes
+    /// the reader and then the command, and reads one result set, which the tests' probes check.</remarks>
     private async Task<IReadOnlyList<dynamic>> Read(DbSession<SqliteConnection> session, string sql, object? parameters, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();

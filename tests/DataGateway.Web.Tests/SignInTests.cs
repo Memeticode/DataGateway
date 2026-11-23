@@ -78,6 +78,8 @@ public sealed class SignInTests(ITestOutputHelper output)
 
     /// <summary>Every mapped endpoint, and unmapped routes, wrong methods and bad bodies, answer an unsigned call with the
     /// plain refusal, without reading the catalog or logging a sign-in failure.</summary>
+    /// <remarks>Sign-in is a fallback policy on every endpoint, including routes added later. An unsigned caller is
+    /// therefore refused before routing answers, and learns nothing about which paths or methods exist.</remarks>
     [Fact]
     public async Task T7_anonymous_calls_to_every_endpoint_and_invalid_routes_never_read_the_catalog()
     {

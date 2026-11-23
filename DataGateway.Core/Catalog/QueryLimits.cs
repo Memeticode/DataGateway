@@ -3,8 +3,11 @@ using SqlKata.JsonQuery;
 namespace DataGateway.Core.Catalog;
 
 /// <summary>The library limits shared by describe (schema) and query (validator and row cap).</summary>
-/// <remarks>Describe and query must read the same limits, or describe would advertise a maximum the validator then
-/// refuses. In the limits, <c>MaxLimit</c> holds the source's row cap.</remarks>
+/// <remarks><para>Describe and query must read the same limits, or describe would advertise a maximum the validator
+/// then refuses. In the limits, <c>MaxLimit</c> holds the source's row cap.</para>
+/// <para><see cref="ForRowCap"/> and <see cref="Create"/> built the one limits object that describe and query
+/// share, so the schema and the validator could not disagree. Since each source's row cap comes from the catalog and
+/// is set per call, nothing in production calls them; only tests do.</para></remarks>
 public static class QueryLimits
 {
     /// <summary>The largest row cap: a query without a limit asks its source for the cap plus one row.</summary>

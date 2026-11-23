@@ -19,10 +19,13 @@ namespace DataGateway.Web.Tests;
 
 /// <summary>Pins the per-source query timeout: each source's <c>query_timeout_seconds</c> in the catalog sets its
 /// deadline, its command timeout and the number its timeout message names.</summary>
-/// <remarks>The value is a required integer from 1 through 86400. A bad cell is refused with one safe correction that
-/// names the source and the column, never the cell's text; callers see InternalError while the log carries the
+/// <remarks><para>The value is a required integer from 1 through 86400. A bad cell is refused with one safe correction
+/// that names the source and the column, never the cell's text; callers see InternalError while the log carries the
 /// correction. The host's old global timeout setting is refused, so a stale configuration cannot silently stop
-/// applying.</remarks>
+/// applying.</para>
+/// <para>A catalog fault is a server-side problem the caller cannot fix by changing the request, and the public list
+/// of error codes is a fixed contract. So callers get the generic InternalError, and the specific code and details go
+/// only to the log for the operator.</para></remarks>
 public sealed class QueryTimeoutCatalogTests
 {
     /// <summary>The source name every refusal must name.</summary>

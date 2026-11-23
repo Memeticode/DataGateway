@@ -322,8 +322,12 @@ public sealed class ErrorLogTests
 
     /// <summary>The shipped logging settings are pinned field by field; the file rolls when it reaches its size limit;
     /// and a host with no file sink configured refuses to start.</summary>
-    /// <remarks>A host without the file sink would answer with incident ids that nobody can look up, so a missing sink is
-    /// a startup failure, not a silent default.</remarks>
+    /// <remarks><para>A host without the file sink would answer with incident ids that nobody can look up, so a missing
+    /// sink is a startup failure, not a silent default.</para>
+    /// <para>The sinks are named so one setting can be changed with one key. The file has no buffering, so each line is
+    /// written before the reply. The file starts at Warning, so routine framework events stay on the console. A host
+    /// with no sink refuses to start, so a missing settings file fails loudly instead of losing failure
+    /// lines.</para></remarks>
     [Fact]
     public async Task T13_settings_create_directories_roll_and_require_a_sink()
     {

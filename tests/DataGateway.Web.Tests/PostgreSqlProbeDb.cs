@@ -53,6 +53,10 @@ internal sealed class PostgreSqlProbe : IDisposable
     /// <summary>Ends the scenario and restores the previous one.</summary>
     public void Dispose() => Current.Value = previous;
     /// <summary>Throws <paramref name="error"/>, the scenario's scripted failure.</summary>
+    /// <remarks>The helper gives the injected failure a named frame, so a test can find that name in the caught stack
+    /// trace and prove the engine rethrew the original exception with its stack, not a copy or a wrapper. No test
+    /// reads this copy's frame any more; the shared engine tests do, through
+    /// <see cref="SourceProbe.ThrowAtProbe"/>.</remarks>
     internal static void ThrowAtProbe(Exception error) => throw error;
     /// <summary>A gate whose continuations run asynchronously, so releasing it never runs test code inline.</summary>
     internal static TaskCompletionSource Gate() => new(TaskCreationOptions.RunContinuationsAsynchronously);

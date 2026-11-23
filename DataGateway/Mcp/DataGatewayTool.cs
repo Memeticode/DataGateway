@@ -28,6 +28,8 @@ internal sealed class DataGatewayTool<T>(Tool definition, string operation,
     /// <summary>The tool definition clients list.</summary>
     public override Tool ProtocolTool => definition;
     /// <summary>None: the tool declares no attributes.</summary>
+    /// <remarks>The tool carries no attributes, such as authorization metadata, because the endpoint's own policy has
+    /// already signed the caller in before any tool runs.</remarks>
     public override IReadOnlyList<object> Metadata => [];
 
     /// <summary>Runs one tool call.</summary>

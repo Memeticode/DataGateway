@@ -390,6 +390,9 @@ public sealed class McpMetadataTests
 
     /// <summary>A tools/call sent as UTF-8 or UTF-16 gets the same answer with unavailable metadata as with healthy
     /// metadata, and the request body is read to its end.</summary>
+    /// <remarks>The host's HTTP JSON depth limit is set to 1. The MCP endpoint's check of the request envelope must
+    /// read the body as the MCP SDK does, not with the host's HTTP JSON settings. That limit would break an inspection
+    /// that wrongly used those settings, so the call still succeeding proves it does not.</remarks>
     [Theory]
     [InlineData(false, "describe")]
     [InlineData(true, "describe")]

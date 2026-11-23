@@ -255,6 +255,9 @@ public sealed class QueryRouteTests
     /// <summary>Each catalog failure gives its public answer, never runs the source, and writes one log line with the
     /// internal code: an unknown or inactive source lists the active names, a catalog with no usable column or a
     /// cancelled catalog read answers InternalError.</summary>
+    /// <remarks>A catalog fault is a server-side problem the caller cannot fix by changing the request, and the public
+    /// list of error codes is a fixed contract. So callers get the generic InternalError, and the specific code and
+    /// details go only to the log for the operator.</remarks>
     [Theory]
     [InlineData("unknown",404,"UnknownSource","$.source")]
     [InlineData("inactive",404,"UnknownSource","$.source")]

@@ -110,6 +110,9 @@ public sealed class ProxyRegistrationTests
     }
 
     /// <summary>A running desktop client refuses both commands before the tool list or any file is touched.</summary>
+    /// <remarks>A running Claude Desktop keeps its configuration in memory and writes it back over the file, silently
+    /// undoing any outside edit. Registration therefore refuses while any Desktop process runs. The app must be quit
+    /// from its tray icon, because closing the window leaves it running.</remarks>
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -1032,6 +1035,10 @@ public sealed class ProxyRegistrationTests
 
     /// <summary>The README shows register, the quit-first note, unregister and the manual setup in that order, and its
     /// API examples are unchanged.</summary>
+    /// <remarks>The README presents the register command as the main route, then the quit-first warning that applies
+    /// to it, then unregister, and keeps the hand-edited configuration as a fallback after them. The test runs the
+    /// existing README test unchanged, instead of copying that check, to prove the manual configuration and Claude
+    /// Code examples are still valid.</remarks>
     [Fact]
     public void T22_readme_cli_order_and_unchanged_manual_examples_are_preserved()
     {

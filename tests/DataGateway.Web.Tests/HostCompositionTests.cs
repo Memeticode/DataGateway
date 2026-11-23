@@ -18,8 +18,10 @@ namespace DataGateway.Web.Tests;
 
 /// <summary>Pins how the web host composes the library: its registration, routes, API page and MCP server info, the
 /// startup check of the whole catalog before it listens, and the safe answers when the catalog fails after start.</summary>
-/// <remarks>The host reads and validates the whole catalog once at startup; after start, each request reads the
-/// catalog fresh, so a catalog change shows on the next request.</remarks>
+/// <remarks><para>The host reads and validates the whole catalog once at startup; after start, each request reads the
+/// catalog fresh, so a catalog change shows on the next request.</para>
+/// <para>A missing or malformed catalog should stop the host before it listens, loudly, rather than show up later as
+/// failures on individual requests.</para></remarks>
 public sealed class HostCompositionTests
 {
     /// <summary>With no MCP title or description configured, the API page's document and HTML equal the frozen copies
@@ -468,6 +470,9 @@ public sealed class HostCompositionTests
 
     /// <summary>The web host's source uses only the library's public composition methods, never its internal
     /// namespaces or types.</summary>
+    /// <remarks>The web host is the library's reference application, so it is built only from what any other
+    /// application can use. A dependency on internals would hide gaps in the public API and give other hosts code they
+    /// cannot copy.</remarks>
     [Fact]
     public void T1_every_production_host_source_uses_the_public_library_surface()
     {

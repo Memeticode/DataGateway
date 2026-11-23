@@ -63,9 +63,12 @@ public partial class Program
     /// (<see cref="HostDatabaseEngine"/>) that is bound to the selected engine singleton after the build. The
     /// registration uses <c>TryAddSingleton</c>, so an engine registered earlier through
     /// <paramref name="configureBuilder"/> wins.</para>
-    /// <para>If binding or catalog-connection validation fails after the build, the half-built application is
-    /// disposed before the original exception is rethrown, so the caller sees the real refusal and no service is
-    /// left running.</para>
+    /// <para>Validation runs after the build because the database engine is only known once the container is
+    /// built: an engine the host registered earlier, or its factory, takes precedence. The check therefore runs after
+    /// the selected engine is resolved and bound.</para>
+    /// <para>If binding or catalog-connection validation fails after the build, the built application, and any
+    /// engine it created, is disposed before the original exception is rethrown, so the caller sees the real refusal
+    /// and no service is left running.</para>
     /// </remarks>
     /// <param name="options">The options for the web application builder, including the arguments.</param>
     /// <param name="configureBuilder">Optional changes to the builder, applied after logging is set up and before

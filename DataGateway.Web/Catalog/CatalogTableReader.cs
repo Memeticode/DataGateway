@@ -106,7 +106,9 @@ internal static class CatalogTableReader
 
     /// <summary>Reads one source with its columns, or null when no active source matches the name.</summary>
     /// <remarks>On a miss, the active names are read in the same connection scope and the shape of each name cell
-    /// is checked; the names themselves are not returned.</remarks>
+    /// is checked; the names themselves are not returned. The active names once supplied the unknown-source
+    /// message. When that message moved to the library's own list read, this read was kept so that behaviour stayed
+    /// the same, including a malformed name cell being reported as a catalog fault.</remarks>
     /// <param name="db">The catalog context.</param>
     /// <param name="readSql">The joined source and column query, taking <c>@source</c>.</param>
     /// <param name="availableSql">The query for the active names, run only on a miss.</param>

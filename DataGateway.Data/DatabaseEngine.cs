@@ -188,7 +188,10 @@ public abstract class DatabaseEngine<TConnection> : ICappedQueryEngine where TCo
     }
 
     /// <summary>Adds the compiled query's named parameters to the command.</summary>
-    /// <remarks>CLR integers are bound as they are; every other value goes through <see cref="PrepareParameter"/>.</remarks>
+    /// <remarks>CLR integers are bound as they are; every other value goes through <see cref="PrepareParameter"/>.
+    /// The only <see cref="int"/> values are the row-count bindings the query compiler adds for its own limit;
+    /// caller numbers arrive as <see cref="decimal"/>. Binding <see cref="int"/> values directly means no engine's
+    /// parameter hook can change the row limit.</remarks>
     /// <param name="command">The command to bind.</param>
     /// <param name="query">The compiled query.</param>
     private void BindParameters(DbCommand command, CompiledQuery query)

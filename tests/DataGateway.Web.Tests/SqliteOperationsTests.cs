@@ -43,7 +43,10 @@ public sealed class SqliteOperationsTests(ITestOutputHelper output)
     /// <paramref name="expected"/>.</summary>
     /// <remarks>On a failure it also checks that each answer's incident id has exactly one log line with the right
     /// operation, the exact request body, the source name and no exception text. When <paramref name="probe"/> is
-    /// given, it checks that each call cost exactly two catalog connections and three catalog commands.</remarks>
+    /// given, it checks that each call cost exactly two catalog connections and three catalog commands: connection
+    /// one runs the detail read and the active-name read (two commands), and connection two runs the gateway's full
+    /// list read that builds the unknown-source message (one command). The count is pinned because adding the list
+    /// read was a deliberate cost change, so any extra or missing catalog read fails the test.</remarks>
     /// <param name="host">The started host.</param>
     /// <param name="fixture">The database, whose connections the leak scan plants.</param>
     /// <param name="operation">The tool name: <c>list_sources</c>, <c>describe_source</c> or <c>query_source</c>.</param>

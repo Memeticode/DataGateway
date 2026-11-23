@@ -235,6 +235,9 @@ public sealed class ReadmeTests
 
     /// <summary>Asserts the message ends with the stop guidance exactly once when the failure is one the caller cannot fix
     /// by retrying, and never carries it otherwise.</summary>
+    /// <remarks>The stop sentence goes only on failures the caller cannot fix by changing the request: catalog,
+    /// source, internal and unexpected errors, and a catalog timeout. A query timeout can be fixed by narrowing the
+    /// query, so its message says what to change instead.</remarks>
     internal static void AssertStopGuidance(JsonElement body, Trigger trigger)
     {
         const string guidance = "Tell the user, give the incidentId and stop; do not retry.";

@@ -20,6 +20,9 @@ public sealed partial class SqlServerEngine : DatabaseEngine<SqlConnection>, IDa
     public SqlServerEngine() : base(text => new SqlConnection(text)) { }
 
     /// <summary>A SQL Server compiler with legacy pagination, which writes the row limit as <c>TOP (n)</c>.</summary>
+    /// <remarks>The gateway only ever limits rows and never skips any, so <c>TOP (n)</c> is the simplest correct
+    /// form: one parameter and no <c>ORDER BY</c>. <c>OFFSET</c>/<c>FETCH</c> would add a dummy
+    /// <c>ORDER BY (SELECT 0)</c> and an offset parameter for no benefit.</remarks>
     /// <returns>A new compiler.</returns>
     protected override Compiler CreateCompiler() => new SqlServerCompiler { UseLegacyPagination = true };
 

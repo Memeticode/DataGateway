@@ -9,10 +9,13 @@ namespace DataGateway.Web.Page;
 
 /// <summary>The example sign-in host's view of the API page's operation descriptions: the shared descriptions with
 /// the host's own sign-in error added to every operation.</summary>
-/// <remarks>The example host adds its sign-in policy to the shared operation descriptions.
+/// <remarks><para>The example host adds its sign-in policy to the shared operation descriptions.
 /// <see cref="SharedDocument"/> owns every operation description; this host adds only its own policy, so the
 /// tests that compare the README's error table and examples with the page read the codes a signed-in host
-/// actually documents.</remarks>
+/// actually documents.</para>
+/// <para>The host's own copy of the operation descriptions was removed when the host moved onto the public API. The
+/// library now owns the descriptions; only the tests still need the host's expected view of them, so this helper
+/// lives in the test assembly.</para></remarks>
 internal static class HostPolicyDocument
 {
     /// <summary>The shared query example, re-exported for tests that compare it with the README.</summary>

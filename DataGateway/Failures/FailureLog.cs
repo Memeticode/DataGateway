@@ -32,6 +32,9 @@ internal sealed class FailureLog(ILoggerFactory loggers, JsonQueryLimits limits)
     private readonly ILogger logger = loggers.CreateLogger(Category);
     /// <summary>How many characters of a request body a line keeps: the query length limit plus 1024, capped at
     /// <see cref="int.MaxValue"/>.</summary>
+    /// <remarks>The bound is the longest query the gateway accepts, plus room for the source name, the JSON envelope
+    /// and whitespace. Any request that could have been accepted is therefore logged whole and can be reproduced;
+    /// only a body that is refused anyway gets cut.</remarks>
     internal int RequestCharacters { get; } = (int)Math.Min(limits.MaxJsonLength + 1024L, int.MaxValue);
 
     /// <summary>Writes the failure's one line and returns its incident ID for the error body.</summary>
@@ -205,6 +208,9 @@ internal sealed class FailureLog(ILoggerFactory loggers, JsonQueryLimits limits)
     internal static string? CallerOf(ClaimsPrincipal user) =>
         user.Identity is { IsAuthenticated: true } identity ? identity.Name : "anonymous";
     /// <summary>The line's level: Error while the caller is connected, Warning once it has gone.</summary>
+    /// <remarks>A caller who leaves has withdrawn the request, so it is not a failure; it still gets its one line, so
+    /// aborts such as slow-query cancellations stay visible. That line is Warning, not Information, so a log filtered
+    /// at Warning still keeps it.</remarks>
     /// <param name="callerGone">Whether the caller has left.</param>
     /// <returns>The log level.</returns>
     internal static LogLevel LevelOf(bool callerGone) => callerGone ? LogLevel.Warning : LogLevel.Error;

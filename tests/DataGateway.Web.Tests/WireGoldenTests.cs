@@ -138,8 +138,9 @@ public sealed class WireGoldenTests
 /// <remarks>
 /// <para>The gateway never builds, edits or adds to a connection string: whoever writes the string decides its
 /// timeouts and retries, so there is one place to look and the gateway cannot quietly override it.</para>
-/// <para>A retired setting is refused at start, with exit code 2, rather than ignored: an operator who still sets it
-/// would otherwise believe it works.</para>
+/// <para>A retired setting is refused at start, with exit code 2, rather than ignored. A setting that is silently
+/// ignored lets an operator believe it still works; refusing it at start, with text that says what replaced it, makes
+/// the change impossible to miss.</para>
 /// </remarks>
 public sealed class ConnectionsAndErrorsTests
 {

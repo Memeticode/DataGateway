@@ -29,6 +29,10 @@ namespace DataGateway.Web.Tests;
 /// the same instance, so it is answered as an unexpected error rather than disguised as an outage.</para>
 /// <para>No failure text may carry the connection string or any part of it; every failure is scanned for the
 /// synthetic markers.</para>
+/// <para>The cancellation token is required so that no caller can forget to pass the request-aborted token and leave
+/// a cancelled request's query running. The connection string reaches the engine exactly as stored because whoever
+/// writes it decides its timeouts and retries: there is one place to look, and the gateway cannot quietly override
+/// it.</para>
 /// </remarks>
 public sealed class QueryRunnerTests
 {

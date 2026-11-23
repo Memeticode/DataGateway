@@ -184,6 +184,10 @@ internal sealed class RegistrationFiles : IRegistrationFiles
 
     /// <summary>Runs an operation, trying again after a pause while it fails with an access denial, a sharing
     /// violation (0x80070020) or a lock violation (0x80070021) and tries remain.</summary>
+    /// <remarks>Another process, such as an antivirus scanner or the search indexer, can briefly hold a newly
+    /// written file, so a copy, move or write can fail for a moment and then succeed. On Windows that brief hold can
+    /// show up as access denied as well as a sharing or lock violation, so all three are retried, and every other
+    /// error fails at once.</remarks>
     private void Retry(Action operation)
     {
         for (var attempt = 1; ; attempt++)

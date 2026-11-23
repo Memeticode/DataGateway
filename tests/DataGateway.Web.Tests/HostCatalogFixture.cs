@@ -42,7 +42,10 @@ internal sealed class HostCatalogFixture(
 /// <see cref="StartupList"/> and <see cref="StartupDetail"/>, so the host can start and warm up; after it,
 /// <see cref="List"/>, <see cref="Detail"/> and <see cref="FactoryFailure"/> take effect. This keeps a fault meant for
 /// a request from failing host startup instead.</para>
-/// <para>The service is transient, so each resolution goes through <see cref="Create"/> and is counted.</para>
+/// <para>The service is transient, so each resolution goes through <see cref="Create"/> and is counted. It follows
+/// the host's own registration, which creates a new catalog each time one is resolved. Each test catalog is built
+/// fresh around the shared test state, so every resolution can be counted and faults can be switched on after
+/// startup.</para>
 /// </remarks>
 internal sealed class HostCatalogState
 {
