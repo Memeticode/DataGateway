@@ -12,7 +12,7 @@ On Windows, with the .NET 10 SDK and PowerShell 7, from the public source root:
 pwsh -File DataGateway.Proxy/mcpb/pack.ps1
 ```
 
-It writes `publish/mcpb/datagateway-proxy.mcpb`, about 70 MB. Pass `-Out <folder>` to write elsewhere; the script refuses to overwrite an earlier package.
+It writes `publish/mcpb/datagateway-proxy.mcpb`, about 35 MB (the program inside is about 75 MB). Pass `-Out <folder>` to write elsewhere; the script refuses to overwrite an earlier package.
 
 ## Install it
 
