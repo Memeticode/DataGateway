@@ -16,14 +16,24 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the web host's catalog wiring: validating the catalog connection at startup, sharing one database
+/// engine between startup, catalog and source reads, and how catalog failures reach the route and the MCP tool.</summary>
+/// <remarks>The route and the tool must answer with the same bytes, and each failure gets its own incident and log
+/// line, so an operator can match a caller's report to one log entry whichever surface the caller used.</remarks>
 public sealed class CatalogEngineTests
 {
+    /// <summary>A synthetic catalog connection with extra spacing, for the probe database context.</summary>
     private const string Connection = "  Data Source = synthetic-host ; Initial Catalog = Other ; Connect Timeout = 7 ; ConnectRetryCount = 4 ; ";
+    /// <summary>The fix-it text that ends every startup refusal of the catalog connection.</summary>
     private const string Help = "CatalogConfiguration: supply a valid connection naming database Catalog through the DATAGATEWAY_CATALOG_CONNECTION environment variable or project user secrets. From src/, use: dotnet user-secrets set DATAGATEWAY_CATALOG_CONNECTION \"<catalog connection>\" --project DataGateway.Web";
+    /// <summary>The source columns the catalog detail query returns.</summary>
     internal static readonly string[] SourceFields = ["id", "name", "title", "description", "grain", "row_cap", "object_name", "connection_string"];
+    /// <summary>The column-metadata columns the catalog detail query returns.</summary>
     internal static readonly string[] ColumnFields = ["column_name", "ordinal", "column_title", "column_description", "data_type", "unit", "magnitude", "display_format", "can_select", "can_filter", "can_sort", "can_group", "can_aggregate"];
+    /// <summary>The columns the catalog list query returns.</summary>
     private static readonly string[] ListFields = ["name", "title", "description", "grain", "row_cap"];
 
+    /// <summary>Catalog connections with the refusal reason each must get, or null for one that is accepted.</summary>
     public static IEnumerable<object?[]> ValidationCases()
     {
         foreach (var input in new string?[] { null, "", " ", "\t\r\n" }) yield return [input, "The catalog connection is missing. "];
@@ -37,6 +47,8 @@ public sealed class CatalogEngineTests
         foreach (var alias in new[] { "Database", "Initial Catalog" }) yield return [$"Server=x;{alias}={database}", null];
     }
 
+    /// <summary>A catalog connection that is missing, unparseable, names no database or names no server is refused at
+    /// startup with its reason and the fix-it text, and nothing else.</summary>
     [Theory]
     [MemberData(nameof(ValidationCases))]
     public void T1_exact_database_validation_and_complete_startup_messages(string? input, string? reason)
@@ -57,6 +69,7 @@ public sealed class CatalogEngineTests
         }
     }
 
+    /// <summary>Validating a SQL Server or PostgreSQL catalog connection only parses it; nothing connects.</summary>
     [Fact]
     public async Task T1_validation_never_contacts_a_listener()
     {
@@ -73,6 +86,10 @@ public sealed class CatalogEngineTests
         finally { listener.Stop(); }
     }
 
+    /// <summary>Records a known gap in the data-access package: a batch query disposes its reader and connection but not
+    /// its command.</summary>
+    /// <remarks>The probe makes the gap visible without the product's catalog reader, so a package update that closes it
+    /// shows up as a failing expectation here.</remarks>
     [Fact]
     public async Task T7_independent_old_Dapper_query_confirms_the_existing_nested_command_disposal_gap()
     {
@@ -89,6 +106,8 @@ public sealed class CatalogEngineTests
         Assert.False(Assert.Single(probe.Commands).IsDisposed);
     }
 
+    /// <summary>The engine a host registers, as an instance or from a factory, is built once and serves the startup
+    /// check, the catalog and source reads; catalog changes are seen on the next request.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -135,6 +154,8 @@ public sealed class CatalogEngineTests
         Assert.Contains("Changed synthetic title", await response.Content.ReadAsStringAsync());
     }
 
+    /// <summary>When startup refuses the catalog connection, an engine built by a factory is disposed first, and the
+    /// startup refusal escapes unchanged even if disposal throws.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -153,6 +174,8 @@ public sealed class CatalogEngineTests
         Assert.Equal(0, engine.SourceReads);
     }
 
+    /// <summary>Each kind of catalog failure (bad row shape, timeout, outage, cancellation, unexpected exception, unknown
+    /// source) gets the golden route body and tool text, and each surface logs its own incident.</summary>
     [Theory]
     [InlineData("shape", 503, "CatalogUnavailable")]
     [InlineData("timeout", 503, "CatalogUnavailable")]
@@ -243,6 +266,8 @@ public sealed class CatalogEngineTests
         if (kind is "timeout" or "outage") Assert.Equal(JsonValueKind.Null, first.GetProperty("SqlNumber").ValueKind);
     }
 
+    /// <summary>List, describe and query answer with the same bytes on the route and the tool, matching independent
+    /// goldens, and a catalog change is visible on the next call with nothing logged.</summary>
     [Fact]
     public async Task T8_normal_composed_successes_have_identical_route_and_tool_bytes_and_see_fresh_metadata()
     {
@@ -300,6 +325,9 @@ public sealed class CatalogEngineTests
         Assert.Equal(4, engine.SourceReads);
     }
 
+    /// <summary>The text blocks of a tool result, each scanned for leaks.</summary>
+    /// <param name="result">The tool result.</param>
+    /// <param name="where">A label for leak-scan messages.</param>
     private static string[] T8ToolTexts(ModelContextProtocol.Protocol.CallToolResult result, string where)
     {
         var texts = Enumerable.Range(0, result.Content.Count).Select(i => McpWire.Text(result, i)).ToArray();
@@ -312,6 +340,7 @@ public sealed class CatalogEngineTests
         return texts;
     }
 
+    /// <summary>The exact success body for a route, before or after the catalog change.</summary>
     private static string T8SuccessBody(string route, bool changed)
     {
         // Independent fixture expectations: do not derive them from a response or a product mapper.
@@ -329,6 +358,7 @@ public sealed class CatalogEngineTests
         };
     }
 
+    /// <summary>One synthetic catalog detail row: a source joined with its single column.</summary>
     internal static Dictionary<string, object?> SourceRow() => new()
     {
         ["id"] = 7319, ["name"] = "synthetic", ["title"] = "Synthetic", ["description"] = "Synthetic measurements", ["grain"] = "One measurement",
@@ -337,36 +367,57 @@ public sealed class CatalogEngineTests
         ["unit"] = null, ["magnitude"] = null, ["display_format"] = null,
         ["can_select"] = true, ["can_filter"] = true, ["can_sort"] = true, ["can_group"] = true, ["can_aggregate"] = true
     };
+    /// <summary>The list-query row for the same source.</summary>
     internal static Dictionary<string, object?> ListRow() => ListFields.ToDictionary(field => field, field => SourceRow()[field]);
+    /// <summary>A probe database that allows a second result set, as the detail query returns.</summary>
     private static SourceProbe Probe() => new() { AllowNextResult = true };
+    /// <summary>Loads one row into the probe, with its keys as column names.</summary>
     internal static void Load(SourceProbe probe, Dictionary<string, object?> row) => Load(probe, [row], row.Keys.ToArray());
+    /// <summary>Loads rows into the probe, reading the named columns of each in order.</summary>
     internal static void Load(SourceProbe probe, IReadOnlyList<Dictionary<string, object?>> rows, string[] names)
     { probe.Names = names; probe.Values = rows.Select(row => names.Select(name => row[name]).ToArray()).ToArray(); }
+    /// <summary>A value whose text form throws, planted in a row to prove the reader never formats a malformed value.</summary>
     private sealed class NeverStringify
     { public override string ToString() => throw new NotSupportedException("planted ToString must never run"); }
+    /// <summary>An engine that records its asynchronous disposal and can be made to throw from it.</summary>
+    /// <param name="cleanupThrows">Whether disposal throws after recording.</param>
     private sealed class RejectingEngine(bool cleanupThrows) : CatalogTestEngine, IAsyncDisposable
     {
+        /// <summary>Whether the engine was disposed.</summary>
         internal bool Disposed;
+        /// <summary>Records disposal after a short delay, so a host that does not await it is caught.</summary>
         public async ValueTask DisposeAsync()
         { await Task.Delay(5).ConfigureAwait(false); Disposed = true; if (cleanupThrows) throw new InvalidOperationException("synthetic cleanup"); }
     }
 }
 
+/// <summary>A synthetic catalog driver exception that <see cref="CatalogTestEngine"/> recognizes, as a timeout or an
+/// outage with an error number.</summary>
 internal sealed class CatalogProvider(bool timeout, int? number, Exception inner) : Exception("synthetic provider", inner)
 { internal bool Timeout => timeout; internal int? Number => number; }
 
+/// <summary>A test engine that compiles with the SQL Server dialect, returns no rows and records each source read.</summary>
 internal class CatalogTestEngine : IDatabaseEngine
 {
+        /// <summary>The engine's provider name.</summary>
         string IDatabaseEngine.ProviderName => "synthetic";
+    /// <summary>How many source reads ran, and the row cap tests write into catalog rows.</summary>
     internal int SourceReads, Cap = 500;
+    /// <summary>The title tests write into catalog rows, changed to prove fresh metadata.</summary>
     internal string Title = "Synthetic";
+    /// <summary>The connection, timeout and token of the last source read.</summary>
     internal (string Connection, int Timeout, CancellationToken Token) LastSource;
+    /// <summary>Compiles with the SQL Server engine.</summary>
     public CompiledQuery Compile(ValidatedQuery query) => new SqlServerEngine().Compile(query);
+    /// <summary>Accepts any connection.</summary>
     public void ValidateSourceConnection(string? connection) { }
+    /// <summary>Recognizes <see cref="CatalogProvider"/> only.</summary>
     public ProviderFailure? RecognizeFailure(Exception error)
     { return error is CatalogProvider provider ? new(provider.Timeout, provider.Number) : null; }
+    /// <summary>Records the read and returns no rows.</summary>
     public Task<QueryRows> ReadSourceAsync(string connection, CompiledQuery query, int commandTimeoutSeconds, Action opened,
         Func<IAsyncEnumerable<IDictionary<string, object?>>, Task<QueryRows>> consume, CancellationToken cancellationToken)
     { SourceReads++; LastSource = (connection, commandTimeoutSeconds, cancellationToken); opened(); return consume(Empty()); }
+    /// <summary>An empty row stream.</summary>
     private static async IAsyncEnumerable<IDictionary<string, object?>> Empty() { await Task.CompletedTask; yield break; }
 }

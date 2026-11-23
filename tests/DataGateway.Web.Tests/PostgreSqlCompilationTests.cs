@@ -11,23 +11,38 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the SQL and parameters the PostgreSQL engine compiles from a validated query.</summary>
+/// <remarks>Every value reaches the server as a parameter, identifiers are quoted with the catalog's spelling, and
+/// aggregates and patterns use PostgreSQL's own functions and LIKE, with no casts. The source is synthetic and nothing
+/// connects to a server.</remarks>
 public sealed class PostgreSqlCompilationTests
 {
+    /// <summary>A synthetic PostgreSQL connection with no password, shared by the PostgreSQL tests.</summary>
     internal const string Connection = "Host=localhost;Database=dg_r5_test;Username=dg_r5_reader";
+    /// <summary>A synthetic source over view <c>synthetic.items</c> with one column of each data type.</summary>
+    /// <param name="cap">The source's row cap.</param>
+    /// <param name="queryTimeoutSeconds">The source's query timeout.</param>
     internal static SourceContract Source(int cap = 5, int queryTimeoutSeconds = 30) => CatalogMapping.Map(new CatalogRows(
         new DataSourceRow("synthetic.items", Connection) { QueryTimeoutSeconds = queryTimeoutSeconds, Id=1, Name="synthetic_items", Title="Items",
             Description="Synthetic rows.", Grain="One item.", IsActive=true, RowCap=cap },
         new[] {("id","number"),("label","text"),("MixedCase","text"),("day","date"),("flag","bool"),("amount","number")}
             .Select((c,i) => new DataSourceColumnRow(c.Item1,i+1,c.Item1,"Column.",c.Item2,null,null,null,
                 true,true,true,true,c.Item2!="bool")).ToArray())).Value;
+    /// <summary>Validates <paramref name="json"/> against <see cref="Source"/>, failing the test with the refusal's
+    /// message if it is refused.</summary>
     internal static ValidatedQuery Validate(string json, int cap=5)
     {
         var result=QueryBuilding.Validate(Source(cap),json,QueryLimits.ForRowCap(cap));
         Assert.True(result.IsSuccess, result.Failure?.Message);
         return result.Value;
     }
+    /// <summary>Validates and compiles <paramref name="json"/> with a new PostgreSQL engine.</summary>
     internal static CompiledQuery Compile(string json,int cap=5) => new PostgreSqlEngine().Compile(Validate(json,cap));
 
+    /// <summary>A small query compiles to its exact SQL, fetching one row past the limit, and compiling never
+    /// changes the validated query, even when sixteen compiles run at once.</summary>
+    /// <remarks>The engine compiles a clone of the query, so a shared validated query is safe to compile from several
+    /// threads, and editing a clone afterwards leaves the next compile unchanged.</remarks>
     [Fact]
     public async Task Small_golden_and_concurrent_clone_independence()
     {
@@ -44,6 +59,10 @@ public sealed class PostgreSqlCompilationTests
         Assert.Equal(results[0].Sql,new PostgreSqlEngine().Compile(query).Sql);
     }
 
+    /// <summary>An ungrouped aggregate compiles to the native function plus a private matched-row count; a grouped
+    /// one has no count.</summary>
+    /// <remarks>The matched-row count tells an aggregate over no rows from one over real rows; a group cannot exist
+    /// without rows, so grouped queries need none.</remarks>
     [Theory]
     [InlineData("count","COUNT")][InlineData("sum","SUM")][InlineData("avg","AVG")]
     [InlineData("min","MIN")][InlineData("max","MAX")]
@@ -57,6 +76,8 @@ public sealed class PostgreSqlCompilationTests
         Assert.DoesNotContain("CAST",result.Sql);
     }
 
+    /// <summary>Column names take the catalog's spelling, nested and/or filters keep their grouping, and every value,
+    /// including an injection attempt, is a numbered parameter; only boolean constants appear inline.</summary>
     [Fact]
     public void Canonical_names_nested_predicates_and_markers()
     {
@@ -89,6 +110,10 @@ public sealed class PostgreSqlCompilationTests
         Assert.Contains(sql+" (@p0, @p1)",result.Sql);Assert.Equal("AbC",result.Parameters["@p0"]);Assert.Equal("abc",result.Parameters["@p1"]);
     }
 
+    /// <summary>Contains and like escape PostgreSQL's LIKE metacharacters with a backslash, so only <c>%</c> is a
+    /// wildcard, and the same query compiles the same pattern every time.</summary>
+    /// <remarks>Plain <c>like</c>, never <c>ilike</c>: the column's own type and collation decide case, as they do
+    /// for equality.</remarks>
     [Theory]
     [InlineData("contains",@"A%_[]\*'z",@"%A\%\_\[]\\*'z%")]
     [InlineData("like",@"A%_[]\*'z",@"A%\_[]\\*'z")]
@@ -109,6 +134,7 @@ public sealed class PostgreSqlCompilationTests
         }
     }
 
+    /// <summary>An impossible or loosely written date is refused by validation, before any SQL exists.</summary>
     [Theory]
     [InlineData("2025-02-30")][InlineData("2025-1-01")]
     public void Invalid_dates_rejected_before_compile(string date) => Assert.False(QueryBuilding.Validate(Source(),JsonSerializer.Serialize(new{filters=new[]{new{col="day",op="eq",value=date}}}),QueryLimits.ForRowCap(5)).IsSuccess);

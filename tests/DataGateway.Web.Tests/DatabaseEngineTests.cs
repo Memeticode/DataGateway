@@ -17,18 +17,44 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the shared engine base, <see cref="DatabaseEngine{TConnection}"/>: its small set of provider hooks,
+/// the order it opens, runs and disposes resources, the row cap, match evidence, cancellation, failure mapping and
+/// the lifetime of the rows it streams.</summary>
+/// <remarks>
+/// <para>TERM keep: the number of rows a compiled query keeps. The engine fetches one row more than it keeps; that
+/// extra probe row only says whether there are more rows. TERM match evidence: the hidden matched-row count column
+/// an aggregate query carries, read from the first kept row to say whether any row matched.</para>
+/// <para>The tests run on a real SQLite database (<see cref="SqliteFixture"/>) through wrappers that record every
+/// connection, command and reader event (<see cref="History"/>), so they can assert order and cleanup, and inject a
+/// failure or a pause at any named step.</para>
+/// </remarks>
 public sealed class DatabaseEngineTests
 {
+    /// <summary>The longest any test waits on a gate, so a broken handshake fails instead of hanging the run.</summary>
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(10);
+    /// <summary>A hand-written compiled query, bypassing validation, for tests that need SQL the query language cannot
+    /// produce.</summary>
+    /// <param name="sql">The SQL to run.</param>
+    /// <param name="keep">How many rows to keep.</param>
+    /// <param name="matched">Whether the first row carries match evidence.</param>
+    /// <param name="columns">The declared output columns, which drive cell conversion.</param>
     private static CompiledQuery Raw(string sql = "SELECT id FROM proof_items ORDER BY id", int keep = 3,
         bool matched = false, params OutputColumn[] columns) => new(sql, new Dictionary<string, object>(), keep, matched, columns);
+    /// <summary>Calls the engine's raw read on the fixture database with defaults for every argument a test does not set.</summary>
     private static Task<QueryRows> Read(DatabaseEngine<SqliteConnection> engine, SqliteFixture fixture,
         CompiledQuery? query = null, Func<IAsyncEnumerable<IDictionary<string, object?>>, Task<QueryRows>>? consume = null,
         Action? opened = null, CancellationToken token = default, int timeout = 7) =>
         engine.ReadSourceAsync(fixture.Connection, query ?? Raw(), timeout, opened ?? (() => { }), consume ?? SqliteEngineTests.Collect, token);
+    /// <summary>Validates query JSON against <paramref name="source"/> with a row cap of 3.</summary>
     private static ValidatedQuery Validate(SourceContract source, string json = SqliteFixture.Detail) =>
         QueryBuilding.Validate(source, json, QueryLimits.ForRowCap(3)).Value;
 
+    /// <summary>The base class exposes exactly seven abstract hooks plus <c>Compile</c> and <c>ReadSourceAsync</c>, and
+    /// the runner reaches the base implementation even when a subclass hides those methods with <c>new</c>.</summary>
+    /// <remarks>The surface is pinned by reflection because it is the contract an engine author implements (the five
+    /// protected hooks and two public checks the engine guide lists): a change here changes what every provider must
+    /// write. The source-text checks pin that each read creates its own
+    /// connection context from the factory before running the batch.</remarks>
     [Fact]
     public async Task T1_exact_extension_surface_and_private_dispatch()
     {
@@ -86,6 +112,9 @@ public sealed class DatabaseEngineTests
         await Assert.ThrowsAsync<SentinelException>(() => ((IDatabaseEngine)engine).ReadSourceAsync(fixture.Connection, compiled, 7, () => { }, SqliteEngineTests.Collect, default));
     }
 
+    /// <summary>Compiling matches the SQLite engine's output, prepares LIKE patterns before the compiler runs, and a read
+    /// runs validate, factory, open, notify, command, execute, read and dispose in that order with the caller's token
+    /// and timeout.</summary>
     [Fact]
     public async Task T2_compilation_clones_prepares_before_compiler_and_execution_order()
     {
@@ -125,6 +154,8 @@ public sealed class DatabaseEngineTests
         Clean(history);
     }
 
+    /// <summary>Each call, serial or overlapping, gets its own connection, token and timeout; one engine instance holds no
+    /// per-call state.</summary>
     [Fact]
     public async Task T2_serial_and_overlapping_calls_have_independent_resources_tokens_and_timeouts()
     {
@@ -168,6 +199,7 @@ public sealed class DatabaseEngineTests
         Assert.Equal(7L, (await one).Rows[0]["n"]);
     }
 
+    /// <summary>Every combination of engine kind, keep count and available rows around the cap.</summary>
     public static IEnumerable<object[]> CapCases()
     {
         foreach (var leaf in new[] { false, true })
@@ -175,6 +207,8 @@ public sealed class DatabaseEngineTests
         foreach (var available in new[] { 0, keep, keep + 1, 5 }.Distinct()) yield return [leaf, keep, available];
     }
 
+    /// <summary>A capped read stops after the probe row, reads to end of data only when the rows run out first, and
+    /// reports <c>More</c> exactly when more rows exist than it keeps.</summary>
     [Theory]
     [MemberData(nameof(CapCases))]
     public async Task T3_cap_and_eof_read_counts(bool leaf, int keep, int available)
@@ -198,6 +232,8 @@ public sealed class DatabaseEngineTests
         SqliteEngineTests.Clean(probe);
     }
 
+    /// <summary>The raw read gives every row to its consumer without a cap, the rows outlive the read, and the capped
+    /// path keeps the same row objects it was given instead of copying them.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -239,6 +275,10 @@ public sealed class DatabaseEngineTests
         Assert.True((bool)seen[0]["new"]!);
     }
 
+    /// <summary>The source's timeout reaches the command, and the row-fetch parameter stays an <c>int</c> that the
+    /// provider's parameter hook never sees.</summary>
+    /// <remarks>The fetch count is the engine's own value, not caller data, so a provider hook that rewrites integers
+    /// (as the test hook here does) must not be able to change how many rows are fetched.</remarks>
     [Theory]
     [InlineData(1)]
     [InlineData(7)]
@@ -275,6 +315,8 @@ public sealed class DatabaseEngineTests
         Clean(history);
     }
 
+    /// <summary>A driver timeout while connecting is SourceUnavailable at the source; one while running the command is
+    /// QueryTimeout at the query and names the timeout. The original exception is kept.</summary>
     [Theory]
     [InlineData("open", "SourceUnavailable", "$.source", "connect")]
     [InlineData("execute", "QueryTimeout", "$.query", "command")]
@@ -295,6 +337,8 @@ public sealed class DatabaseEngineTests
         Clean(history, stage == "open" ? 0 : 1, 0);
     }
 
+    /// <summary>The connection factory runs only when a read starts, never for compile or connection checks, and bad
+    /// arguments or an already cancelled token are refused before it runs.</summary>
     [Fact]
     public async Task T5_lazy_factory_and_argument_refusals()
     {
@@ -322,6 +366,8 @@ public sealed class DatabaseEngineTests
         Assert.Equal(1, count);
     }
 
+    /// <summary>A connection factory that throws maps to the right error at the connect step with the original exception
+    /// and stack trace, and an unexpected exception type propagates unchanged.</summary>
     [Theory]
     [InlineData("argument", "InvalidCatalog")]
     [InlineData("format", "InvalidCatalog")]
@@ -349,6 +395,8 @@ public sealed class DatabaseEngineTests
         Assert.Contains(nameof(ThrowNamedFrame), error.StackTrace);
     }
 
+    /// <summary>A factory that returns <see langword="null"/> or an already open connection is refused, and the engine
+    /// neither uses nor disposes a connection it did not open.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -375,6 +423,8 @@ public sealed class DatabaseEngineTests
         finally { await connection.DisposeAsync(); }
     }
 
+    /// <summary>Match evidence must be a non-negative 64-bit integer; it sets <c>NoMatchingRows</c> and is removed from the
+    /// row. Bad or missing evidence is a gateway invariant failure, not a source outage.</summary>
     [Theory]
     [InlineData("0", false, true)]
     [InlineData("7", false, false)]
@@ -421,6 +471,8 @@ public sealed class DatabaseEngineTests
         Clean(history);
     }
 
+    /// <summary>Match evidence on the probe row and later rows is never examined, and the raw read leaves the evidence
+    /// column in place.</summary>
     [Fact]
     public async Task T6_probe_evidence_is_not_examined_and_raw_callback_keeps_it()
     {
@@ -442,6 +494,8 @@ public sealed class DatabaseEngineTests
         Assert.Null(raw.Rows[1][CompiledQuery.MatchedRowCountColumn]);
     }
 
+    /// <summary>Every step at which a read can fail, for both the capped and the raw read; the capped read has no
+    /// caller-supplied notify or consumer step.</summary>
     public static IEnumerable<object[]> PrimaryCases()
     {
         foreach (var capped in new[] { false, true })
@@ -449,6 +503,8 @@ public sealed class DatabaseEngineTests
             if (!capped || stage is not ("notified" or "consumer")) yield return [capped, stage];
     }
 
+    /// <summary>When a step fails and every disposal then fails too, the caller still gets the first failure, with its
+    /// inner exception and original stack trace, and every opened resource is still disposed.</summary>
     [Theory]
     [MemberData(nameof(PrimaryCases))]
     public async Task T7_primary_failure_survives_all_cleanup_failures(bool capped, string stage)
@@ -478,6 +534,8 @@ public sealed class DatabaseEngineTests
         Clean(history, history.Events.Contains("command-created") ? 1 : 0, history.Events.Contains("reader") ? 1 : 0);
     }
 
+    /// <summary>When the read succeeds but disposal fails, the first disposal failure is reported, and the read does not
+    /// complete until every asynchronous disposal has finished.</summary>
     [Theory]
     [InlineData(false, "reader")]
     [InlineData(false, "command")]
@@ -517,6 +575,8 @@ public sealed class DatabaseEngineTests
         Clean(history);
     }
 
+    /// <summary>Cancellation at each phase becomes QueryCancelled at the query with the step it happened in, including
+    /// cancellation that arrives after the rows were read but before the read returned.</summary>
     [Theory]
     [InlineData("pre", null, false)]
     [InlineData("open", "connect", true)]
@@ -554,6 +614,8 @@ public sealed class DatabaseEngineTests
         }
     }
 
+    /// <summary>The reader sees a token linked to both the call's token and the consumer's enumeration token, and a raw
+    /// read that reached end of data still returns its rows when cancellation arrives afterwards.</summary>
     [Fact]
     public async Task T8_distinct_enumeration_token_is_linked_and_raw_eof_keeps_its_contract()
     {
@@ -587,6 +649,9 @@ public sealed class DatabaseEngineTests
         Clean(eofHistory);
     }
 
+    /// <summary>An <see cref="OperationCanceledException"/> thrown while the caller's token is still live, and an
+    /// unexpected exception thrown after the caller cancelled, both propagate unchanged instead of becoming
+    /// QueryCancelled.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -605,6 +670,10 @@ public sealed class DatabaseEngineTests
         Clean(history, 1, 0);
     }
 
+    /// <summary>The streamed rows can be enumerated once, and the sequence and its enumerator stop working when the read
+    /// returns, however the consumer ended; the row dictionaries it handed out stay usable.</summary>
+    /// <remarks>TERM lease: the consumer's right to the open reader, which ends with the read. A row dictionary is a
+    /// detached copy and outlives it.</remarks>
     [Theory]
     [InlineData("zero")]
     [InlineData("full")]
@@ -655,6 +724,8 @@ public sealed class DatabaseEngineTests
         Clean(history);
     }
 
+    /// <summary>Duplicate column names are refused before any row is read; names are case-sensitive and keep their order,
+    /// nulls are never converted, and declared boolean columns are converted.</summary>
     [Fact]
     public async Task T9_schema_refusal_case_sensitive_order_nulls_and_metadata()
     {
@@ -682,6 +753,8 @@ public sealed class DatabaseEngineTests
         Assert.Equal(0, conversions);
     }
 
+    /// <summary>Duplicate declared output columns fail after the connection opens but before any read or consumer call,
+    /// and every resource is still disposed.</summary>
     [Fact]
     public async Task T9_duplicate_declared_columns_fail_before_reads_and_cleanup_fully()
     {
@@ -704,6 +777,8 @@ public sealed class DatabaseEngineTests
         Clean(history);
     }
 
+    /// <summary>The SQLite engine's hooks behave as specified: a fresh compiler, the count expression, LIKE escaping,
+    /// booleans bound as 0 or 1, strict boolean cell conversion, and no recognized failures.</summary>
     [Fact]
     public void T10_sqlite_hooks_are_the_seven_small_provider_differences()
     {
@@ -745,23 +820,35 @@ public sealed class DatabaseEngineTests
         Assert.Throws<ArgumentNullException>(() => engine.RecognizeFailure(null!));
     }
 
+    /// <summary>Throws <paramref name="error"/> from a named, non-inlined frame, so a test can check the original stack
+    /// trace survived.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowNamedFrame(Exception error) => throw error;
+    /// <summary>An exception type no product code catches, standing for an unexpected fault.</summary>
     private sealed class SentinelException : Exception;
 
+    /// <summary>A minimal engine over SQLite whose hooks can be traced and replaced per test.</summary>
     private class TestEngine(Func<string, SqliteConnection> factory) : DatabaseEngine<SqliteConnection>(factory), IDatabaseEngine
     {
+        /// <summary>The provider name, <c>sqlite</c>.</summary>
         string IDatabaseEngine.ProviderName => "sqlite";
+        /// <summary>Records each hook call by name.</summary>
         internal Action<string>? Trace;
+        /// <summary>Replaces parameter preparation: returns the value to bind and, optionally, its type.</summary>
         internal Func<object?, (object? Value, DbType? Type)>? Parameter;
+        /// <summary>Replaces cell conversion.</summary>
         internal Func<object, OutputColumn?, object>? Cell;
+        /// <summary>Returns a SQLite compiler.</summary>
         protected override Compiler CreateCompiler() { Trace?.Invoke("compiler"); return new SqliteCompiler(); }
+        /// <summary>The SQLite count expression.</summary>
         protected override string MatchedRowCountExpression { get { Trace?.Invoke("count-expression"); return "COUNT(*) AS \"__dg_matched_rows\""; } }
+        /// <summary>Escapes backslash and underscore with a backslash.</summary>
         protected override (string Pattern, string EscapeCharacter) PrepareLikePattern(string pattern)
         {
             Trace?.Invoke("like");
             return (pattern.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal), "\\");
         }
+        /// <summary>Binds the value as <see cref="Parameter"/> returns it, or unchanged.</summary>
         protected override void PrepareParameter(DbParameter parameter, object? value)
         {
             Trace?.Invoke("prepare");
@@ -769,45 +856,72 @@ public sealed class DatabaseEngineTests
             if (prepared.Type is { } type) parameter.DbType = type;
             parameter.Value = prepared.Value ?? DBNull.Value;
         }
+        /// <summary>Converts the cell with <see cref="Cell"/>, or returns it unchanged.</summary>
         protected override object ConvertCell(object value, OutputColumn? column)
         {
             Trace?.Invoke("convert");
             return Cell is not null ? Cell(value, column) : value;
         }
+        /// <summary>Checks the connection as the SQLite engine does.</summary>
         public override void ValidateSourceConnection(string? connection) { Trace?.Invoke("validate"); new SqliteEngine().ValidateSourceConnection(connection); }
+        /// <summary>Recognizes failures as the SQLite engine does.</summary>
         public override ProviderFailure? RecognizeFailure(Exception error) => new SqliteEngine().RecognizeFailure(error);
     }
 
+    /// <summary>An engine that hides <c>Compile</c> and <c>ReadSourceAsync</c> with throwing <c>new</c> methods and maps
+    /// the interface to them, to prove the runner calls the base class's capped path, not the interface.</summary>
     private sealed class HidingEngine(Func<string, SqliteConnection> factory) : TestEngine(factory), IDatabaseEngine
     {
+        /// <summary>The provider name, <c>sqlite</c>.</summary>
         string IDatabaseEngine.ProviderName => "sqlite";
+        /// <summary>Throws: a call here means the runner went through the hidden method.</summary>
         public new CompiledQuery Compile(ValidatedQuery query) => throw new SentinelException();
+        /// <summary>Throws: a call here means the runner went through the hidden method.</summary>
         public new Task<QueryRows> ReadSourceAsync(string connection, CompiledQuery query, int timeout, Action opened,
             Func<IAsyncEnumerable<IDictionary<string, object?>>, Task<QueryRows>> consume, CancellationToken token) => throw new SentinelException();
+        /// <summary>Routes the interface to the throwing method.</summary>
         CompiledQuery IDatabaseEngine.Compile(ValidatedQuery query) => Compile(query);
+        /// <summary>Routes the interface to the throwing method.</summary>
         Task<QueryRows> IDatabaseEngine.ReadSourceAsync(string connection, CompiledQuery query, int timeout, Action opened,
             Func<IAsyncEnumerable<IDictionary<string, object?>>, Task<QueryRows>> consume, CancellationToken token) => ReadSourceAsync(connection, query, timeout, opened, consume, token);
     }
 
+    /// <summary>The shared record of one read: every named event in order, what the command and reader received, and the
+    /// failures and pauses a test plants at named events.</summary>
     private sealed class History
     {
+        /// <summary>The named events, in the order they happened.</summary>
         internal readonly List<string> Events = [];
+        /// <summary>Exceptions to throw when the named event happens.</summary>
         internal readonly Dictionary<string, Exception> Failures = [];
+        /// <summary>The parameters as bound when the command ran.</summary>
         internal readonly List<(string Name, object? Value, DbType Type)> Parameters = [];
+        /// <summary>Completes when the read reaches the gated step.</summary>
         internal readonly TaskCompletionSource Entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        /// <summary>Completed by the test to let the gated step continue.</summary>
         internal readonly TaskCompletionSource Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        /// <summary>Called on every event, before a planted failure is thrown; tests use it to cancel at a precise step.</summary>
         internal Action<string>? OnEvent;
+        /// <summary><c>Gate</c> names the resource whose disposal pauses; <c>Original</c> is the connection text the factory received.</summary>
         internal string? Gate, Original;
+        /// <summary>Whether opening the connection pauses at the gate.</summary>
         internal bool OpenWait;
+        /// <summary>Read calls, read calls that returned a row, and the command timeout in seconds.</summary>
         internal int Reads, TrueReads, Timeout;
+        /// <summary>The tokens the connection open, command execute and last row read received.</summary>
         internal CancellationToken OpenToken, ExecuteToken, ReadToken;
+        /// <summary>The connection this history belongs to.</summary>
         internal HistoryConnection? Connection;
+        /// <summary>Records one event and throws the failure planted for it, if any.</summary>
+        /// <param name="name">The event name.</param>
         internal void Hit(string name)
         {
             Events.Add(name);
             OnEvent?.Invoke(name);
             if (Failures.TryGetValue(name, out var error)) ThrowNamedFrame(error);
         }
+        /// <summary>Pauses before disposing <paramref name="resource"/> when it is the gated resource.</summary>
+        /// <param name="resource">reader, command or connection.</param>
         internal async Task BeforeCleanup(string resource)
         {
             if (Gate != resource) return;
@@ -816,6 +930,11 @@ public sealed class DatabaseEngineTests
         }
     }
 
+    /// <summary>Asserts that the resources that were created were disposed exactly once, innermost first, and that the
+    /// connection ended closed.</summary>
+    /// <param name="history">The read to check.</param>
+    /// <param name="commands">0 when no command was created.</param>
+    /// <param name="readers">0 when no reader was created.</param>
     private static void Clean(History history, int commands = 1, int readers = 1)
     {
         var expected = new List<string>();
@@ -826,10 +945,15 @@ public sealed class DatabaseEngineTests
         Assert.Equal(ConnectionState.Closed, history.Connection!.State);
     }
 
+    /// <summary>A SQLite connection that records open, command creation and disposal in its <see cref="History"/>, and can
+    /// pause while opening.</summary>
     private sealed class HistoryConnection : SqliteConnection
     {
+        /// <summary>The record this connection writes to.</summary>
         private readonly History history;
+        /// <summary>Creates the connection and attaches it to <paramref name="history"/>.</summary>
         internal HistoryConnection(string text, History history) : base(text) { this.history = history; history.Connection = this; }
+        /// <summary>Records the open and its token, optionally pauses at the gate, then opens.</summary>
         public override async Task OpenAsync(CancellationToken cancellationToken)
         {
             history.OpenToken = cancellationToken;
@@ -843,6 +967,7 @@ public sealed class DatabaseEngineTests
             await base.OpenAsync(cancellationToken);
             history.Hit("opened");
         }
+        /// <summary>Returns a recording command.</summary>
         protected override DbCommand CreateDbCommand()
         {
             history.Hit("command");
@@ -850,6 +975,7 @@ public sealed class DatabaseEngineTests
             history.Hit("command-created");
             return command;
         }
+        /// <summary>Optionally pauses at the gate, then disposes and records it.</summary>
         public override async ValueTask DisposeAsync()
         {
             await history.BeforeCleanup("connection");
@@ -858,23 +984,41 @@ public sealed class DatabaseEngineTests
         }
     }
 
+    /// <summary>A command wrapper that records parameter creation, execution (with its timeout, token and bound
+    /// parameters) and disposal.</summary>
     private sealed class HistoryCommand(DbCommand inner, History history) : DbCommand
     {
+        /// <summary>Whether the command was disposed; a second disposal throws so a double dispose cannot go unnoticed.</summary>
         internal bool IsDisposed;
+        /// <summary>Forwards to the inner command.</summary>
+        /// <summary>Forwards to the inner command.</summary>
         [AllowNull] public override string CommandText { get => inner.CommandText; set => inner.CommandText = value!; }
         public override int CommandTimeout { get => inner.CommandTimeout; set => inner.CommandTimeout = value; }
+        /// <summary>Forwards to the inner command.</summary>
         public override CommandType CommandType { get => inner.CommandType; set => inner.CommandType = value; }
+        /// <summary>Forwards to the inner command.</summary>
         public override bool DesignTimeVisible { get => inner.DesignTimeVisible; set => inner.DesignTimeVisible = value; }
+        /// <summary>Forwards to the inner command.</summary>
         public override UpdateRowSource UpdatedRowSource { get => inner.UpdatedRowSource; set => inner.UpdatedRowSource = value; }
+        /// <summary>Forwards to the inner command.</summary>
         protected override DbConnection? DbConnection { get => inner.Connection; set => inner.Connection = value; }
+        /// <summary>Forwards to the inner command.</summary>
         protected override DbTransaction? DbTransaction { get => inner.Transaction; set => inner.Transaction = value; }
+        /// <summary>Forwards to the inner command.</summary>
         protected override DbParameterCollection DbParameterCollection => inner.Parameters;
+        /// <summary>Records the event and creates the parameter on the inner command.</summary>
         protected override DbParameter CreateDbParameter() { history.Hit("parameter"); return inner.CreateParameter(); }
+        /// <summary>Forwards to the inner command.</summary>
         public override void Cancel() => inner.Cancel();
+        /// <summary>Forwards to the inner command.</summary>
         public override int ExecuteNonQuery() => inner.ExecuteNonQuery();
+        /// <summary>Forwards to the inner command.</summary>
         public override object? ExecuteScalar() => inner.ExecuteScalar();
+        /// <summary>Forwards to the inner command.</summary>
         public override void Prepare() => inner.Prepare();
+        /// <summary>Forwards to the inner command; the engine uses only the asynchronous path.</summary>
         protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior) => inner.ExecuteReader(behavior);
+        /// <summary>Records the timeout, token and parameters, then returns a recording reader.</summary>
         protected override async Task<DbDataReader> ExecuteDbDataReaderAsync(CommandBehavior behavior, CancellationToken cancellationToken)
         {
             history.Timeout = inner.CommandTimeout;
@@ -887,6 +1031,7 @@ public sealed class DatabaseEngineTests
             history.Hit("reader");
             return reader;
         }
+        /// <summary>Optionally pauses at the gate, then disposes and records it; throws on a second disposal.</summary>
         public override async ValueTask DisposeAsync()
         {
             if (IsDisposed) throw new InvalidOperationException("Repeated outer command disposal.");
@@ -897,18 +1042,30 @@ public sealed class DatabaseEngineTests
         }
     }
 
+    /// <summary>A reader wrapper that records schema reads, row reads and disposal, and refuses a second result set.</summary>
     private sealed class HistoryReader(DbDataReader inner, History history) : DbDataReader
     {
+        /// <summary>Read calls on this reader, and those that returned a row.</summary>
         internal int ReadAttempts, SuccessfulReads;
+        /// <summary>Whether the reader was disposed; a second disposal throws.</summary>
         internal bool IsDisposed;
+        /// <summary>Forwards to the inner reader.</summary>
         public override int FieldCount => inner.FieldCount;
+        /// <summary>Forwards to the inner reader.</summary>
         public override bool HasRows => inner.HasRows;
+        /// <summary>Forwards to the inner reader.</summary>
         public override bool IsClosed => inner.IsClosed;
+        /// <summary>Forwards to the inner reader.</summary>
         public override int Depth => inner.Depth;
+        /// <summary>Forwards to the inner reader.</summary>
         public override int RecordsAffected => inner.RecordsAffected;
+        /// <summary>Forwards to the inner reader.</summary>
         public override object this[int ordinal] => inner[ordinal];
+        /// <summary>Forwards to the inner reader.</summary>
         public override object this[string name] => inner[name];
+        /// <summary>Records a schema read and forwards.</summary>
         public override string GetName(int ordinal) { history.Hit("schema"); return inner.GetName(ordinal); }
+        /// <summary>Records the read, its token and whether it returned a row.</summary>
         public override async Task<bool> ReadAsync(CancellationToken cancellationToken)
         {
             history.Reads++;
@@ -921,31 +1078,57 @@ public sealed class DatabaseEngineTests
             if (result) { history.TrueReads++; SuccessfulReads++; }
             return result;
         }
+        /// <summary>Forwards to the inner reader.</summary>
         public override bool Read() => inner.Read();
+        /// <summary>Throws: the engine must read exactly one result set.</summary>
         public override bool NextResult() => throw new SentinelException();
+        /// <summary>Throws: the engine must read exactly one result set.</summary>
         public override Task<bool> NextResultAsync(CancellationToken cancellationToken) => throw new SentinelException();
+        /// <summary>Forwards to the inner reader.</summary>
         public override object GetValue(int ordinal) => inner.GetValue(ordinal);
+        /// <summary>Forwards to the inner reader.</summary>
         public override bool GetBoolean(int ordinal) => inner.GetBoolean(ordinal);
+        /// <summary>Forwards to the inner reader.</summary>
         public override byte GetByte(int ordinal) => inner.GetByte(ordinal);
+        /// <summary>Forwards to the inner reader.</summary>
         public override char GetChar(int ordinal) => inner.GetChar(ordinal);
+        /// <summary>Forwards to the inner reader.</summary>
         public override short GetInt16(int ordinal) => inner.GetInt16(ordinal);
+        /// <summary>Forwards to the inner reader.</summary>
         public override int GetInt32(int ordinal) => inner.GetInt32(ordinal);
+        /// <summary>Forwards to the inner reader.</summary>
         public override long GetInt64(int ordinal) => inner.GetInt64(ordinal);
+        /// <summary>Forwards to the inner reader.</summary>
         public override float GetFloat(int ordinal) => inner.GetFloat(ordinal);
+        /// <summary>Forwards to the inner reader.</summary>
         public override double GetDouble(int ordinal) => inner.GetDouble(ordinal);
+        /// <summary>Forwards to the inner reader.</summary>
         public override decimal GetDecimal(int ordinal) => inner.GetDecimal(ordinal);
+        /// <summary>Forwards to the inner reader.</summary>
         public override DateTime GetDateTime(int ordinal) => inner.GetDateTime(ordinal);
+        /// <summary>Forwards to the inner reader.</summary>
         public override Guid GetGuid(int ordinal) => inner.GetGuid(ordinal);
+        /// <summary>Forwards to the inner reader.</summary>
         public override string GetString(int ordinal) => inner.GetString(ordinal);
+        /// <summary>Forwards to the inner reader.</summary>
         public override Type GetFieldType(int ordinal) => inner.GetFieldType(ordinal);
+        /// <summary>Forwards to the inner reader.</summary>
         public override string GetDataTypeName(int ordinal) => inner.GetDataTypeName(ordinal);
+        /// <summary>Forwards to the inner reader.</summary>
         public override int GetOrdinal(string name) => inner.GetOrdinal(name);
+        /// <summary>Forwards to the inner reader.</summary>
         public override int GetValues(object[] values) => inner.GetValues(values);
+        /// <summary>Forwards to the inner reader.</summary>
         public override bool IsDBNull(int ordinal) => inner.IsDBNull(ordinal);
+        /// <summary>Forwards to the inner reader.</summary>
         public override long GetBytes(int ordinal, long dataOffset, byte[]? buffer, int bufferOffset, int length) => inner.GetBytes(ordinal, dataOffset, buffer, bufferOffset, length);
+        /// <summary>Forwards to the inner reader.</summary>
         public override long GetChars(int ordinal, long dataOffset, char[]? buffer, int bufferOffset, int length) => inner.GetChars(ordinal, dataOffset, buffer, bufferOffset, length);
+        /// <summary>Forwards to the inner reader.</summary>
         public override IEnumerator GetEnumerator() => ((IEnumerable)inner).GetEnumerator();
+        /// <summary>Forwards to the inner reader.</summary>
         public override void Close() => inner.Close();
+        /// <summary>Optionally pauses at the gate, then disposes and records it; throws on a second disposal.</summary>
         public override async ValueTask DisposeAsync()
         {
             if (IsDisposed) throw new InvalidOperationException("Repeated outer reader disposal.");

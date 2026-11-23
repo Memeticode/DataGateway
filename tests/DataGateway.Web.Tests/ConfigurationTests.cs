@@ -21,14 +21,25 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins how the web host reads its configuration at startup: the catalog connection (from the environment
+/// variable or user secrets), the query limits, and the refusals for missing or invalid values.</summary>
+/// <remarks>
+/// <para>Every refusal must name the setting and the fix but never echo the value: a connection string carries a
+/// password, so each diagnostic is scanned for the planted fake input (<see cref="AssertSafe"/>).</para>
+/// <para>The tests change process environment variables, which is why this assembly turns off test parallelization
+/// (the attribute at the top of this file).</para>
+/// </remarks>
 public sealed class ConfigurationTests
 {
     // Keyword order, aliases, flags and trailing delimiter match the supplied real sample.
     // Every credential here is an obvious fake; no database connection is opened.
+    /// <summary>An obviously fake catalog connection used as the valid input.</summary>
     private const string FakeConnection =
         "Server=fake-host.invalid;User ID=fake-reader;Password=fake-pass;" +
         "TrustServerCertificate=True;Encrypt=False;Connect Timeout=5;Database=Catalog;";
 
+    /// <summary>The environment variable becomes the single <c>ConnectionStrings:Catalog</c> entry, unchanged, and the
+    /// raw variable is not left readable in configuration under its own name.</summary>
     [Fact]
     public async Task Environment_connection_starts_real_host_and_exposes_one_catalog_connection()
     {
@@ -77,6 +88,8 @@ public sealed class ConfigurationTests
             fromEnvironment.Configuration.GetConnectionString("Catalog")).UserID);
     }
 
+    /// <summary>User secrets still resolve on a machine with no <c>APPDATA</c> (Linux and macOS), from the scratch
+    /// <c>HOME</c>, never from the real user's profile.</summary>
     [Fact]
     public async Task Project_user_secrets_are_isolated_when_only_HOME_is_available()
     {
@@ -88,6 +101,8 @@ public sealed class ConfigurationTests
             app.Configuration.GetConnectionString("Catalog")).UserID);
     }
 
+    /// <summary>A connection that names a database other than the default is accepted as given, and building the host
+    /// opens no connection and binds no port.</summary>
     [Fact]
     public async Task Explicit_other_database_is_accepted_unchanged_without_startup_io()
     {
@@ -103,6 +118,8 @@ public sealed class ConfigurationTests
         Assert.Single(app.Configuration.AsEnumerable(), pair => pair.Value?.Contains("fake-pass") == true);
     }
 
+    /// <summary>Each invalid connection fails while the host is built, with the setting name and the user-secrets fix,
+    /// and with no inner exception that could carry the parser's view of the input.</summary>
     [Theory]
     [InlineData(0)] // Missing.
     [InlineData(1)] // Malformed syntax.
@@ -125,6 +142,10 @@ public sealed class ConfigurationTests
         AssertSafe(failure + logs.Text, input);
     }
 
+    /// <summary>The real executable, started as a child process, exits with code 2 and a sanitized message when the
+    /// connection is missing or invalid.</summary>
+    /// <remarks>Runs the built program rather than <c>CreateApplication</c> so the top-level error handling and exit
+    /// code are covered too. The process is killed if it hangs.</remarks>
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -165,6 +186,8 @@ public sealed class ConfigurationTests
         AssertSafe(output, input);
     }
 
+    /// <summary>With no limit settings, the shared query limits are the library defaults with no maximum row limit, and
+    /// the removed timeout and row-cap settings no longer exist.</summary>
     [Fact]
     public async Task Limits_have_required_defaults()
     {
@@ -219,6 +242,8 @@ public sealed class ConfigurationTests
             app.Configuration.GetConnectionString("Catalog"), StringComparison.Ordinal), "Catalog text changed.");
     }
 
+    /// <summary>A limit that is not an integer in range is refused with one exact message naming the setting in both its
+    /// configuration and environment-variable forms.</summary>
     [Theory]
     [InlineData("MaxJsonLength", "")]
     [InlineData("MaxJsonLength", "   ")]
@@ -271,6 +296,7 @@ public sealed class ConfigurationTests
         AssertSafe(failure + logs.Text);
     }
 
+    /// <summary>The smallest and largest allowed value of each limit is accepted.</summary>
     [Theory]
     [InlineData("MaxFilterDepth", 0)]
     [InlineData("MaxFilterDepth", 30)]
@@ -300,6 +326,7 @@ public sealed class ConfigurationTests
         Assert.Equal(expected, limits);
     }
 
+    /// <summary>A host that registers its own query limits before the gateway keeps them; configuration does not replace them.</summary>
     [Fact]
     public async Task Earlier_shared_limits_registration_wins()
     {
@@ -310,6 +337,8 @@ public sealed class ConfigurationTests
         Assert.Same(earlier, app.Services.GetRequiredService<JsonQueryLimits>());
     }
 
+    /// <summary>The connection is accepted only from the environment or user secrets, not from any other configuration
+    /// source such as an in-memory or JSON setting.</summary>
     [Fact]
     public void Connection_supplied_only_as_generic_configuration_is_refused()
     {
@@ -323,6 +352,8 @@ public sealed class ConfigurationTests
         AssertSafe(failure.ToString());
     }
 
+    /// <summary>The host accepts exactly one connection; an extra <c>ConnectionStrings</c> entry is refused without
+    /// naming its key, which could itself be sensitive.</summary>
     [Fact]
     public void Second_connection_entry_is_refused_without_disclosing_key_or_value()
     {
@@ -338,6 +369,9 @@ public sealed class ConfigurationTests
         AssertSafe(failure.ToString());
     }
 
+    /// <summary>No file in the repository, except C# test code, contains text shaped like a connection string.</summary>
+    /// <remarks>Guards against a real connection string reaching a public file. Test code is exempt because it needs
+    /// fake connection strings; the one SQL script line that uses a sqlcmd placeholder is allowed by name.</remarks>
     [Fact]
     public void Public_sources_have_no_connection_literals_outside_synthetic_test_code()
     {
@@ -356,6 +390,10 @@ public sealed class ConfigurationTests
         Assert.True(violations.Length == 0, "Connection literals in: " + string.Join(", ", violations));
     }
 
+    /// <summary>Builds the real web host in Production with recorded logs, a random local port and the synthetic catalog.</summary>
+    /// <param name="logs">Receives every log message.</param>
+    /// <param name="configure">Further changes to the builder, applied last.</param>
+    /// <returns>The built, not yet started, application.</returns>
     private static WebApplication CreateApplication(RecordedLogs logs,
         Action<WebApplicationBuilder>? configure = null) =>
         Program.CreateApplication(new WebApplicationOptions
@@ -373,6 +411,9 @@ public sealed class ConfigurationTests
             configure?.Invoke(builder);
         });
 
+    /// <summary>The connection input for a numbered scenario; the scenarios are named at the tests' InlineData.</summary>
+    /// <remarks>Each invalid input carries a <c>fake-private</c> or <c>broken-fake</c> marker, so <see cref="AssertSafe"/>
+    /// can prove the marker never reaches a diagnostic.</remarks>
     private static string? BadConnection(int scenario) => scenario switch
     {
         0 => null,
@@ -386,6 +427,9 @@ public sealed class ConfigurationTests
         _ => throw new ArgumentOutOfRangeException(nameof(scenario))
     };
 
+    /// <summary>Fails if a diagnostic contains the fake connection, the refused input, or any of the planted markers.</summary>
+    /// <param name="output">The diagnostic text: exception, logs or process output.</param>
+    /// <param name="input">The refused input, when the test supplied one.</param>
     private static void AssertSafe(string output, string? input = null)
     {
         LeakScan.Synthetic(("fake connection", FakeConnection), ("refused input", input)).Text("configuration diagnostic", output, Rule.DataGateway);
@@ -395,11 +439,19 @@ public sealed class ConfigurationTests
             Assert.True(!output.Contains(input, StringComparison.Ordinal), "The input escaped into diagnostics.");
     }
 
+    /// <summary>Points the process environment at a fresh scratch folder for one test and restores every variable it
+    /// changed on dispose.</summary>
+    /// <remarks>Redirecting <c>APPDATA</c>, <c>HOME</c> and the user-secrets fallback keeps the tests away from the
+    /// developer's real user secrets, and clearing the connection and limit variables keeps a developer's own settings
+    /// from changing the results.</remarks>
     private sealed class SettingsScope : IDisposable
     {
+        /// <summary>Each changed variable's value before the scope first changed it.</summary>
         private readonly Dictionary<string, string?> original = new();
+        /// <summary>The scratch folder, under the test project's <c>obj</c> folder.</summary>
         private readonly string scratch = TestFiles.InRepo("tests/DataGateway.Web.Tests/obj/settings/" + Guid.NewGuid());
 
+        /// <summary>Creates the scratch folder and clears the settings the host reads.</summary>
         public SettingsScope()
         {
             Directory.CreateDirectory(scratch);
@@ -413,12 +465,18 @@ public sealed class ConfigurationTests
             }
         }
 
+        /// <summary>Sets one environment variable for the scope, remembering its original value the first time.</summary>
+        /// <param name="name">The variable name.</param>
+        /// <param name="value">The new value, or <see langword="null"/> to remove it.</param>
         public void Set(string name, string? value)
         {
             original.TryAdd(name, Environment.GetEnvironmentVariable(name));
             Environment.SetEnvironmentVariable(name, value);
         }
 
+        /// <summary>Writes a user-secrets file holding <paramref name="connection"/> at both the Windows and the Unix
+        /// user-secrets location under the scratch folder.</summary>
+        /// <param name="connection">The connection to store.</param>
         public void WriteSecrets(string connection)
         {
             foreach (var relative in new[] { "Microsoft/UserSecrets", ".microsoft/usersecrets" })
@@ -432,6 +490,7 @@ public sealed class ConfigurationTests
             }
         }
 
+        /// <summary>Restores every changed variable and deletes the scratch folder.</summary>
         public void Dispose()
         {
             foreach (var pair in original)
@@ -443,17 +502,26 @@ public sealed class ConfigurationTests
         }
     }
 
+    /// <summary>A logger provider that keeps every message, with any exception appended, for leak checks.</summary>
     private sealed class RecordedLogs : ILoggerProvider
     {
+        /// <summary>The recorded messages, in arrival order.</summary>
         private readonly ConcurrentQueue<string> messages = new();
+        /// <summary>All recorded messages, one per line.</summary>
         public string Text => string.Join("\n", messages);
+        /// <summary>Returns a logger that records into this provider.</summary>
         public ILogger CreateLogger(string categoryName) => new Recorder(messages);
+        /// <summary>Nothing to release.</summary>
         public void Dispose() { }
 
+        /// <summary>A logger that records every message at every level.</summary>
         private sealed class Recorder(ConcurrentQueue<string> messages) : ILogger
         {
+            /// <summary>Scopes are not recorded.</summary>
             public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            /// <summary>Every level is recorded.</summary>
             public bool IsEnabled(LogLevel logLevel) => true;
+            /// <summary>Records the formatted message followed by the exception's text.</summary>
             public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
                 Func<TState, Exception?, string> formatter) => messages.Enqueue(formatter(state, exception) + exception);
         }

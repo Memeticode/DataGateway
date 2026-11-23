@@ -8,8 +8,16 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the library's documentation to code that compiles and runs: every C# fence in the documents is a
+/// region of the compiled quickstart sample, byte for byte, and the library README's examples match the host
+/// README's.</summary>
+/// <remarks>A code sample in a README is copied by readers as is; one that drifted from the compiled sample would
+/// teach code that no longer builds or behaves as shown.</remarks>
 public sealed class LibraryDocumentationTests
 {
+    /// <summary>Each C# fence sits at column 0 under a canonical sample marker and equals its quickstart region exactly;
+    /// the library and host READMEs carry the same examples and terms; and the quickstart sample, run on a fresh
+    /// SQLite file, serves list, describe and query as documented.</summary>
     [Fact]
     public async Task T1_fences_compile_and_the_sample_serves_list_describe_and_query()
     {

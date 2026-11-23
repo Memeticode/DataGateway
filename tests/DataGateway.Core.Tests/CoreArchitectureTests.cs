@@ -4,8 +4,14 @@ using Xunit;
 
 namespace DataGateway.Core.Tests;
 
+/// <summary>Keeps DataGateway.Core pure: its catalog, validation and query rules reference no database driver, data
+/// access, logging, web host, MCP or API-page package.</summary>
+/// <remarks>The check reads the restore graph (<c>obj/project.assets.json</c>) and the project files rather than the
+/// loaded assemblies, so a reference that is declared but not yet used still fails the test.</remarks>
 public class CoreArchitectureTests
 {
+    /// <summary>No library in Core's restore graph, no framework reference and no explicit assembly reference, in Core
+    /// or in any project it references, is forbidden by <see cref="IsForbidden"/>.</summary>
     [Fact]
     public void Core_has_no_direct_or_transitive_io_references()
     {
@@ -32,6 +38,10 @@ public class CoreArchitectureTests
             "DataGateway.Core must stay pure. Forbidden references: " + string.Join("; ", violations));
     }
 
+    /// <summary>Adds a project's forbidden framework references and explicit assembly references to
+    /// <paramref name="violations"/>.</summary>
+    /// <param name="project">The project file to check.</param>
+    /// <param name="violations">Collects each forbidden name with the file it came from.</param>
     private static void CheckProject(string project, ISet<string> violations)
     {
         using var assets = ReadAssets(project);
@@ -56,10 +66,12 @@ public class CoreArchitectureTests
         }
     }
 
+    /// <summary>Reads the restore output that sits beside a project; the caller disposes it.</summary>
     private static JsonDocument ReadAssets(string project) =>
         JsonDocument.Parse(File.ReadAllBytes(TestFiles.InRepo(
             Path.Combine(Path.GetDirectoryName(project)!, "obj/project.assets.json"))));
 
+    /// <summary>Records <paramref name="name"/> with its origin when it is forbidden.</summary>
     private static void Check(string name, string origin, ISet<string> violations)
     {
         if (IsForbidden(name))
@@ -67,6 +79,10 @@ public class CoreArchitectureTests
             violations.Add($"{name} ({origin})");
         }
     }
+    /// <summary>The packages and projects Core must never reference: DataGateway's data layer, MCP, logging, ASP.NET
+    /// Core, the SQL Server driver, Dapper, and the API page's packages.</summary>
+    /// <remarks>Names match without regard to case and by package prefix, so a new package in a forbidden family is
+    /// caught; <see cref="Forbidden_names_are_pinned"/> pins the edges, such as a lookalike name that must pass.</remarks>
     internal static bool IsForbidden(string name) =>
             name.Equals("DataGateway.Data", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith("DataGateway.Data.", StringComparison.OrdinalIgnoreCase) ||
@@ -82,6 +98,8 @@ public class CoreArchitectureTests
             name.Equals("Microsoft.OpenApi", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith("Microsoft.OpenApi.", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Pins which names <see cref="IsForbidden"/> catches, including lookalikes (a longer word that only starts
+    /// like a forbidden prefix) that must pass and the query builder Core is allowed to use.</summary>
     [Theory]
     [InlineData("ModelContextProtocol", true)]
     [InlineData("ModelContextProtocol.Core", true)]

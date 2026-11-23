@@ -23,12 +23,30 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the API page of named gateways: <c>MapDataGatewayApiPage</c> serves one gateway's OpenAPI document and
+/// Scalar page, built from that gateway alone, under the prefix the host chooses.</summary>
+/// <remarks>
+/// <para>Each document describes only its own gateway's operations, carries no sign-in or server details (sign-in is
+/// the host's, not the library's), and is identical to its neighbours apart from the title and paths. A document
+/// that leaked another gateway's name, paths or policy would send a reader to the wrong endpoint.</para>
+/// <para>The page loads only assets packaged with the library, so it works without internet access and sends
+/// nothing to a third party.</para>
+/// <para>Building a document reads no catalog: the counters on <see cref="NamedGatewayState"/> stay unchanged.</para>
+/// </remarks>
 public sealed class NamedGatewayApiPageTests
 {
+    /// <summary>The Scalar assets the library serves next to every page.</summary>
     private static readonly string[] Assets = ["scalar.js", "scalar.aspnetcore.js", "favicon.svg"];
+    /// <summary>The three operation ids every document must carry.</summary>
     private static readonly string[] Operations = ["list", "describe", "query"];
+    /// <summary>Creates the deadline that bounds one test.</summary>
     private static CancellationTokenSource Deadline() => new(TimeSpan.FromSeconds(90));
 
+    /// <summary>Creates a catalog with one source under <paramref name="name"/>, whose row ids are shifted by
+    /// <paramref name="offset"/>, so answers from two fixtures can be told apart.</summary>
+    /// <param name="name">The source name.</param>
+    /// <param name="offset">The amount added to every row id.</param>
+    /// <returns>The fixture; the caller disposes it.</returns>
     private static SqliteFixture Fixture(string name = "synthetic_items", int offset = 0)
     {
         var fixture = new SqliteFixture();
@@ -36,12 +54,23 @@ public sealed class NamedGatewayApiPageTests
         return fixture;
     }
 
+    /// <summary>Registers a named gateway over the fixture's catalog with the real SQLite engine.</summary>
+    /// <param name="services">The host's services.</param>
+    /// <param name="name">The gateway name.</param>
+    /// <param name="state">The catalog state.</param>
+    /// <param name="title">The MCP server title, or null for the default.</param>
+    /// <param name="about">The MCP server description, or null for the default.</param>
     private static void Register(IServiceCollection services, string name, NamedGatewayState state, string? title = null, string? about = null)
     {
         state.Metadata = McpMetadataFixture.Seed with { Title = title ?? "DataGateway", About = about ?? McpMetadataFixture.Seed.About };
         services.AddDataGateway(name, gateway => gateway.UseCatalog<SqliteConnection>(_ => new NamedGatewayCatalog(state, Guid.Empty)).AddEngine(new SqliteEngine()));
     }
 
+    /// <summary>Gets a path, asserts 200 and, when given, the content type, and returns the body bytes.</summary>
+    /// <param name="client">The client to send with.</param>
+    /// <param name="path">The path to get.</param>
+    /// <param name="contentType">The expected content type, or null to skip that check.</param>
+    /// <returns>The body bytes.</returns>
     private static async Task<byte[]> Get(HttpClient client, string path, string? contentType = null)
     {
         using var response = await client.GetAsync(path);
@@ -52,18 +81,25 @@ public sealed class NamedGatewayApiPageTests
         return bytes;
     }
 
+    /// <summary>Parses bytes into a JSON element that outlives its document.</summary>
     private static JsonElement Json(byte[] bytes)
     {
         using var json = JsonDocument.Parse(bytes);
         return json.RootElement.Clone();
     }
 
+    /// <summary>Finds the POST operation with the given operation id in an OpenAPI document.</summary>
     private static JsonElement Operation(JsonElement document, string operation) =>
         Assert.Single(document.GetProperty("paths").EnumerateObject().Select(path => path.Value.GetProperty("post")), value => value.GetProperty("operationId").GetString() == operation);
 
+    /// <summary>Asserts that two name sets are equal, ignoring order.</summary>
     private static void Names(IEnumerable<string> expected, IEnumerable<string> actual) =>
         Assert.Equal(expected.Order(StringComparer.Ordinal), actual.Order(StringComparer.Ordinal));
 
+    /// <summary>Asserts that every <c>$ref</c> in an OpenAPI document points to an object that exists in the same
+    /// document.</summary>
+    /// <param name="document">The whole document, to resolve references against.</param>
+    /// <param name="value">The part to search.</param>
     private static void References(JsonElement document, JsonElement value)
     {
         if (value.ValueKind == JsonValueKind.Object)
@@ -87,6 +123,7 @@ public sealed class NamedGatewayApiPageTests
                 References(document, item);
     }
 
+    /// <summary>Follows <c>$ref</c> links from a schema until it reaches a schema without one.</summary>
     private static JsonElement Resolve(JsonElement document, JsonElement schema)
     {
         while (schema.TryGetProperty("$ref", out var reference))
@@ -99,6 +136,14 @@ public sealed class NamedGatewayApiPageTests
         return schema;
     }
 
+    /// <summary>Asserts the shape every named gateway document shares and returns it parsed.</summary>
+    /// <remarks>The document must list exactly the gateway's three POST operations under its own prefix, carry the
+    /// gateway name as its title, and say nothing about sign-in, servers or absolute URLs: host policy is added by the
+    /// host, never by the library.</remarks>
+    /// <param name="bytes">The document as served.</param>
+    /// <param name="prefix">The prefix the gateway's operations are mapped under.</param>
+    /// <param name="title">The expected title, which is the gateway name.</param>
+    /// <returns>The parsed document.</returns>
     private static JsonElement Document(byte[] bytes, string prefix, string title)
     {
         var document = Json(bytes);
@@ -117,6 +162,12 @@ public sealed class NamedGatewayApiPageTests
         return document;
     }
 
+    /// <summary>Calls each operation at the path the document gives and asserts that the answer matches the documented
+    /// response schema and comes from the expected source.</summary>
+    /// <param name="client">The client to send with.</param>
+    /// <param name="document">The gateway's document.</param>
+    /// <param name="source">The source the gateway's catalog holds.</param>
+    /// <param name="first">The first row id that source returns.</param>
     private static async Task Witness(HttpClient client, JsonElement document, string source, int first)
     {
         foreach (var operation in Operations)
@@ -143,13 +194,23 @@ public sealed class NamedGatewayApiPageTests
         }
     }
 
+    /// <summary>One host with two gateways, <c>north</c> and <c>north:archive</c>, over different catalogs, each with
+    /// its own API and page prefix, plus ordinary host endpoints beside them.</summary>
+    /// <remarks>The second name starts with the first, and a host endpoint is given a name that looks like a gateway
+    /// endpoint name, so a document built by matching names loosely would pick up the wrong endpoints.</remarks>
     private sealed class Pair : IAsyncDisposable
     {
+        /// <summary>The first gateway's catalog.</summary>
         internal readonly SqliteFixture North = Fixture("north_items");
+        /// <summary>The second gateway's catalog, with ids shifted by 100.</summary>
         internal readonly SqliteFixture South = Fixture("south_items", 100);
+        /// <summary>The first gateway's catalog state.</summary>
         internal readonly NamedGatewayState A;
+        /// <summary>The second gateway's catalog state.</summary>
         internal readonly NamedGatewayState B;
+        /// <summary>The host that serves both gateways.</summary>
         internal readonly NamedGatewayHost Host;
+        /// <summary>Registers and maps both gateways, their pages and the ordinary endpoints.</summary>
         internal Pair()
         {
             A = new(North);
@@ -166,6 +227,7 @@ public sealed class NamedGatewayApiPageTests
             Host.App.MapGet("/ordinary", () => "ordinary");
             Host.App.MapPost("/ordinary-post", () => "ordinary").WithName("DataGateway:north:list:pretender");
         }
+        /// <summary>Stops the host and releases both catalogs.</summary>
         public async ValueTask DisposeAsync()
         {
             await Host.DisposeAsync();
@@ -174,6 +236,8 @@ public sealed class NamedGatewayApiPageTests
         }
     }
 
+    /// <summary>A minimal host, written without any test helper, serves the JSON routes, the MCP endpoint and the API
+    /// page for one named gateway.</summary>
     [Fact]
     public async Task T01_twenty_line_host_serves_routes_mcp_and_page()
     {
@@ -204,6 +268,8 @@ public sealed class NamedGatewayApiPageTests
         await Page(client, "/docs/scalar/", "/docs/openapi/v1.json", await Get(client, "/docs/openapi/v1.json"));
     }
 
+    /// <summary>Each page serves its own gateway's document, the same bytes on every request, and the two documents
+    /// differ only in title and paths.</summary>
     [Fact]
     public async Task T02_documents_select_exact_gateway_metadata()
     {
@@ -218,6 +284,8 @@ public sealed class NamedGatewayApiPageTests
         Assert.Equal(Normalize(north, "/north", "north"), Normalize(south, "/south", "north:archive"));
     }
 
+    /// <summary>Replaces a document's title and operation paths with fixed placeholders, after checking each occurs
+    /// exactly once, so two gateways' documents can be compared.</summary>
     private static string Normalize(byte[] bytes, string prefix, string title)
     {
         var text = Encoding.UTF8.GetString(bytes);
@@ -230,6 +298,8 @@ public sealed class NamedGatewayApiPageTests
         return text;
     }
 
+    /// <summary>A named gateway's operations, components, examples and error responses match the example host's golden
+    /// document exactly.</summary>
     [Fact]
     public async Task T03_named_operations_preserve_the_shared_contract()
     {
@@ -285,6 +355,9 @@ public sealed class NamedGatewayApiPageTests
         await Witness(pair.Host.Client, document, "north_items", 1);
     }
 
+    /// <summary>The error codes each operation documents, by HTTP status.</summary>
+    /// <param name="operation">The operation id.</param>
+    /// <returns>Comma-separated codes keyed by status; only describe and query can answer 404.</returns>
     private static Dictionary<string, string> Table(string operation)
     {
         var table = new Dictionary<string, string>
@@ -299,6 +372,8 @@ public sealed class NamedGatewayApiPageTests
         return table;
     }
 
+    /// <summary>Gateway names that differ only by case or whitespace, or that hold route and non-ASCII characters, each
+    /// get their own document and page, titled with the exact name; the MCP description stays out of both.</summary>
     [Fact]
     public async Task T04_names_titles_and_prefixes_do_not_collide()
     {
@@ -336,8 +411,10 @@ public sealed class NamedGatewayApiPageTests
         Assert.Empty(host.Logs.Failures);
     }
 
+    /// <summary>The arguments the Scalar page passes to its initializer script.</summary>
     private sealed record Initializer(string Path, bool Dynamic, JsonElement Configuration, string Module);
 
+    /// <summary>Extracts the initializer arguments from a Scalar page's HTML.</summary>
     private static Initializer InitializeArguments(string html)
     {
         var match = Regex.Match(html, "initialize\\(\\s*'(?<path>[^']*)',\\s*(?<dynamic>true|false),\\s*(?<configuration>\\{.*\\}),\\s*'(?<module>[^']*)'\\)", RegexOptions.Singleline | RegexOptions.CultureInvariant);
@@ -345,6 +422,13 @@ public sealed class NamedGatewayApiPageTests
         return new(match.Groups["path"].Value, bool.Parse(match.Groups["dynamic"].Value), Json(Encoding.UTF8.GetBytes(match.Groups["configuration"].Value)), match.Groups["module"].Value);
     }
 
+    /// <summary>Runs the packaged Scalar initializer in Node with a stubbed browser window and returns the configuration
+    /// it hands to Scalar.</summary>
+    /// <remarks>The page gives a relative document URL; only running the real script shows the absolute URL a browser
+    /// would fetch, which must point back at the gateway's own document.</remarks>
+    /// <param name="page">The page's address, used as the stubbed window location.</param>
+    /// <param name="arguments">The initializer arguments read from the page.</param>
+    /// <returns>The configuration the initializer produced.</returns>
     private static async Task<JsonElement> ExecuteInitializer(Uri page, Initializer arguments)
     {
         const string script = """
@@ -387,6 +471,12 @@ public sealed class NamedGatewayApiPageTests
         }
     }
 
+    /// <summary>Asserts that a Scalar page loads only same-origin packaged assets and resolves to its own document.</summary>
+    /// <param name="client">The client to send with.</param>
+    /// <param name="path">The page path.</param>
+    /// <param name="documentPath">The path of the document the page must load.</param>
+    /// <param name="expected">The document bytes the resolved URL must return.</param>
+    /// <param name="pathBase">The host's path base, which must not appear twice in the resolved URL.</param>
     private static async Task Page(HttpClient client, string path, string documentPath, byte[] expected, string pathBase = "")
     {
         using var response = await client.GetAsync(path);
@@ -426,6 +516,8 @@ public sealed class NamedGatewayApiPageTests
         Assert.Equal(expected, await Get(client, url));
     }
 
+    /// <summary>Pages use only local assets and their own document under every prefix shape: root, trailing slash,
+    /// nested and parameterised parent groups, and a host path base.</summary>
     [Fact]
     public async Task T05_scalar_uses_only_local_resources_and_its_own_document()
     {
@@ -475,6 +567,12 @@ public sealed class NamedGatewayApiPageTests
         }
     }
 
+    /// <summary>Asserts the Scalar options the library sets for one page: the gateway title, no fonts, telemetry, agent,
+    /// proxy, authentication or servers, no absolute bundle URL, and the expected relative document route.</summary>
+    /// <param name="title">The gateway name.</param>
+    /// <param name="path">The page request path.</param>
+    /// <param name="document">The document name in the route, or null when the path has none.</param>
+    /// <param name="expected">The expected document route pattern.</param>
     private static void Configure(string title, string path, string? document, string expected)
     {
         var context = new DefaultHttpContext();
@@ -501,6 +599,7 @@ public sealed class NamedGatewayApiPageTests
         }
     }
 
+    /// <summary>Asserts that a page path without its trailing slash redirects to the path with it.</summary>
     private static async Task Redirect(HttpClient client, string path)
     {
         using var redirects = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { BaseAddress = client.BaseAddress, Timeout = TimeSpan.FromSeconds(15) };
@@ -509,6 +608,8 @@ public sealed class NamedGatewayApiPageTests
         Assert.Equal(new Uri(client.BaseAddress!, path + "/"), new Uri(new Uri(client.BaseAddress!, path), response.Headers.Location!));
     }
 
+    /// <summary>Policy set on the returned group or on a parent group covers the document, both page forms, the redirect
+    /// and every asset; the page cannot serve another gateway's document.</summary>
     [Fact]
     public async Task T06_returned_group_and_parent_policy_cover_all_page_endpoints()
     {
@@ -574,9 +675,15 @@ public sealed class NamedGatewayApiPageTests
         }
     }
 
+    /// <summary>Asserts that an action throws the library's refusal message for a gateway.</summary>
+    /// <param name="action">The action that must throw.</param>
+    /// <param name="name">The gateway name the message must name.</param>
+    /// <param name="reason">The expected reason.</param>
     private static void Refusal(Action action, string name, string reason) =>
         Assert.Equal($"Gateway '{name}'. {reason}", Assert.Throws<InvalidOperationException>(action).Message);
 
+    /// <summary>Mapping a page refuses a null or blank name, an unregistered name, a wrong-case name, an invalid prefix
+    /// and a second mapping, each with its exact message, and a refused mapping adds no endpoint.</summary>
     [Fact]
     public async Task T07_page_mapping_refusals_are_exact_and_do_not_claim_invalid_maps()
     {
@@ -617,6 +724,7 @@ public sealed class NamedGatewayApiPageTests
         Assert.Equal("The API document has no entry for operation 'extra'.", Assert.Throws<InvalidOperationException>(() => DataGateway.Page.OperationDocument.Of("extra")).Message);
     }
 
+    /// <summary>The example host with two extra named gateways, each with its own API and page prefix.</summary>
     private static LoggedHost Mixed(NamedGatewayState north, NamedGatewayState south)
     {
         var host = new LoggedHost(environment: "Development", configure: builder =>
@@ -631,6 +739,8 @@ public sealed class NamedGatewayApiPageTests
         return host;
     }
 
+    /// <summary>Asserts that the example host's own document and page match their golden bytes, including the sign-in
+    /// response the host adds to every operation.</summary>
     private static async Task ExampleBytes(LoggedHost host)
     {
         var document = await Get(host.Client, "/openapi/v1.json", "application/json; charset=utf-8");
@@ -653,6 +763,8 @@ public sealed class NamedGatewayApiPageTests
         }
     }
 
+    /// <summary>Adding named gateways beside the example host leaves its document and page byte for byte unchanged, and
+    /// their documents are not reachable through the host's document route.</summary>
     [Fact]
     public async Task T08_example_document_and_page_match_prechange_bytes_with_named_neighbors()
     {
@@ -685,6 +797,8 @@ public sealed class NamedGatewayApiPageTests
         Assert.Equal("DataGateway.Page", typeof(DataGateway.Page.OperationDocument).Namespace);
     }
 
+    /// <summary>A named host endpoint stays out of the example host's document, and the named gateway documents keep
+    /// working beside it.</summary>
     [Fact]
     public async Task T09_unknown_example_endpoint_still_fails_while_named_documents_work()
     {
@@ -704,6 +818,9 @@ public sealed class NamedGatewayApiPageTests
         Assert.Empty(host.Lines());
     }
 
+    /// <summary>Registering gateways maps no endpoint and reads no catalog; mapping the JSON routes alone serves no page;
+    /// and a host's own OpenAPI document lists gateway routes without being replaced by the gateway documents.</summary>
+    /// <remarks>A failed or duplicate registration leaves the service collection unchanged.</remarks>
     [Fact]
     public async Task T10_service_registration_maps_nothing_and_keeps_host_openapi_independent()
     {
@@ -779,6 +896,8 @@ public sealed class NamedGatewayApiPageTests
         }
     }
 
+    /// <summary>Two gateways whose page routes collide, by case, by route parameter or through the same parent group,
+    /// fail when endpoints are built, before the host serves anything.</summary>
     [Fact]
     public async Task T11_duplicate_effective_page_routes_fail_before_serving()
     {
@@ -853,6 +972,8 @@ public sealed class NamedGatewayApiPageTests
         }
     }
 
+    /// <summary>Concurrent document requests return the same bytes and read no catalog, both for gateways in one host and
+    /// for same-named gateways in two hosts.</summary>
     [Fact]
     public async Task T12_concurrent_documents_do_not_share_gateway_or_host_policy()
     {

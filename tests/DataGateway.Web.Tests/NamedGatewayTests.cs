@@ -33,13 +33,32 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins named gateways over the JSON routes: <c>AddDataGateway</c> registers a gateway under a name with its
+/// own catalog factory and engines, <c>MapDataGateway</c> maps its list, describe, query and MCP endpoints under a
+/// prefix, and each gateway answers only from its own catalog and engines.</summary>
+/// <remarks>
+/// <para>Registration is checked at once and commits nothing when it fails; startup then reads every registered
+/// catalog, mapped or not, and refuses to listen when one is unreadable or invalid. A gateway that started on a bad
+/// catalog would fail on its first caller instead of on deploy.</para>
+/// <para>Each request creates its own catalog from its own request scope and reads the list and detail afresh, so
+/// catalog edits apply to the next request and concurrent requests never share an instance.</para>
+/// <para>Answers and error bodies match the example host byte for byte, and failures log one line scoped to the
+/// gateway, without exception text, driver messages or secrets.</para>
+/// </remarks>
 public sealed class NamedGatewayTests
 {
+    /// <summary>The three JSON operations.</summary>
     private static readonly string[] Operations = ["list", "describe", "query"];
+    /// <summary>The expected answer to the default query against an unchanged fixture.</summary>
     private const string QueryGolden = """{"source":"synthetic_items","columns":[{"name":"id","dataType":"number"}],"rows":[{"id":1},{"id":2}],"rowCount":2,"more":true,"hint":"The result set was capped at 2 rows."}""";
+    /// <summary>The default for the expected logged request: it means the log must record the request that was
+    /// sent.</summary>
     private const string DefaultLoggedRequest = "<use submitted request>";
+    /// <summary>Text carried by synthetic faults; it must never reach a caller, a log field or a startup error.</summary>
     private const string Secret = "synthetic-catalog-private-sentinel";
 
+    /// <summary>Two gateways on different catalogs give different answers, and a source from one gateway's catalog is
+    /// unknown to the other without reading the first.</summary>
     [Fact]
     public async Task T01_two_gateways_are_isolated()
     {
@@ -70,6 +89,8 @@ public sealed class NamedGatewayTests
         Assert.Equal(baseline, sa.Counts);
     }
 
+    /// <summary>Each source's provider name selects the engine registered under it, ignoring case, and another gateway's
+    /// engine is never used.</summary>
     [Fact]
     public async Task T02_each_provider_selects_its_registered_engine()
     {
@@ -116,6 +137,8 @@ public sealed class NamedGatewayTests
         Assert.Single(other.Executed);
     }
 
+    /// <summary>A gateway needs no configuration settings, and an empty catalog lists no sources and refuses a query with
+    /// a message saying no source is active.</summary>
     [Fact]
     public async Task T03_empty_configuration_and_empty_catalog_are_supported()
     {
@@ -193,6 +216,8 @@ public sealed class NamedGatewayTests
         Assert.Equal(QueryGolden, (await named.Post("/a", "query")).Text);
     }
 
+    /// <summary>Authorization required on the returned group answers 401 before any catalog is created or any engine
+    /// runs.</summary>
     [Fact]
     public async Task T05_returned_group_policy_blocks_unsigned_catalog_access()
     {
@@ -219,6 +244,8 @@ public sealed class NamedGatewayTests
         Assert.Equal(200, (await host.Post("/a", "list")).Status);
     }
 
+    /// <summary>Host endpoints beside a gateway keep the host's own error handling and log without a gateway
+    /// scope.</summary>
     [Fact]
     public async Task T06_neighboring_host_endpoints_keep_host_behavior()
     {
@@ -251,6 +278,8 @@ public sealed class NamedGatewayTests
         await Error(host, "/a", "list", "[]", "InvalidStructure", "$", "Send an empty JSON object, {}: list sources takes no parameters.", 400);
     }
 
+    /// <summary>Each endpoint is named <c>DataGateway:&lt;gateway&gt;:&lt;operation&gt;</c>, accepts only POST, declares
+    /// its response type, and logs failures under its own gateway and operation.</summary>
     [Fact]
     public async Task T07_endpoint_names_and_operation_fields_are_distinct()
     {
@@ -304,6 +333,8 @@ public sealed class NamedGatewayTests
         await GoldenError(host, "/a", "query", "UnexpectedError/route", "UnexpectedError");
     }
 
+    /// <summary>Every request reads the list or detail afresh, so title, column flag and provider edits apply at once;
+    /// the requested source name reaches the catalog unchanged.</summary>
     [Fact]
     public async Task T08_requests_read_fresh_list_and_detail_records()
     {
@@ -347,6 +378,8 @@ public sealed class NamedGatewayTests
         Assert.Same(alternate.Compiled.Single(), Assert.Single(alternate.Executed).Query);
     }
 
+    /// <summary>Concurrent requests to two gateways each get their own catalog instance and scope, run on their own
+    /// engine and database, and log their own failures with their own caller.</summary>
     [Fact]
     public async Task T09_concurrent_requests_use_separate_catalog_adapters()
     {
@@ -421,6 +454,8 @@ public sealed class NamedGatewayTests
         }
     }
 
+    /// <summary>Startup reads every registered catalog, including an unmapped one, before the host listens or starts
+    /// other hosted services, and compiles nothing.</summary>
     [Fact]
     public async Task T10_startup_finishes_validation_before_listening()
     {
@@ -478,6 +513,8 @@ public sealed class NamedGatewayTests
         Assert.Equal(2, state.Lists);
     }
 
+    /// <summary>A catalog read that throws at startup stops the host with a message that names the gateway, the step and
+    /// the exception type, never its text.</summary>
     [Fact]
     public async Task T11_startup_rejects_unreadable_catalog()
     {
@@ -501,6 +538,8 @@ public sealed class NamedGatewayTests
         }
     }
 
+    /// <summary>Each kind of invalid source list stops startup with the same failure the catalog validator
+    /// reports.</summary>
     [Fact]
     public async Task T12_startup_rejects_invalid_list()
     {
@@ -517,6 +556,8 @@ public sealed class NamedGatewayTests
         }
     }
 
+    /// <summary>Each kind of invalid source detail stops startup with the same failure the catalog validator or mapping
+    /// reports.</summary>
     [Fact]
     public async Task T13_startup_rejects_invalid_detail()
     {
@@ -535,6 +576,8 @@ public sealed class NamedGatewayTests
         }
     }
 
+    /// <summary>A source whose provider has no engine in its own gateway stops startup, even when another gateway has an
+    /// engine with that name.</summary>
     [Fact]
     public async Task T14_startup_rejects_missing_provider_engine()
     {
@@ -557,6 +600,8 @@ public sealed class NamedGatewayTests
         Assert.Empty(eb.Executed);
     }
 
+    /// <summary>Two engines with the same name, compared ignoring case and including the engine's own provider name,
+    /// fail registration and register nothing.</summary>
     [Fact]
     public void T15_registration_rejects_duplicate_engine_names()
     {
@@ -577,6 +622,8 @@ public sealed class NamedGatewayTests
         }
     }
 
+    /// <summary>A second registration under the same name is refused without running its configuration, and names that
+    /// differ only by case are different gateways.</summary>
     [Fact]
     public async Task T16_registration_rejects_duplicate_gateway_names()
     {
@@ -631,6 +678,7 @@ public sealed class NamedGatewayTests
         }
     }
 
+    /// <summary>A gateway without a catalog factory fails registration and registers nothing.</summary>
     [Fact]
     public void T19_registration_requires_a_catalog()
     {
@@ -639,6 +687,8 @@ public sealed class NamedGatewayTests
         Assert.DoesNotContain(services, descriptor => descriptor.ServiceType == typeof(GatewayRegistration));
     }
 
+    /// <summary>A gateway without an engine fails registration, registers nothing and never runs its catalog
+    /// factory.</summary>
     [Fact]
     public void T20_registration_requires_an_engine()
     {
@@ -650,6 +700,7 @@ public sealed class NamedGatewayTests
         Assert.Equal(0, state.Factories);
     }
 
+    /// <summary>Null and blank gateway names, and null arguments, are refused by both registration and mapping.</summary>
     [Fact]
     public async Task T21_registration_and_mapping_reject_blank_gateway_names()
     {
@@ -683,6 +734,8 @@ public sealed class NamedGatewayTests
         Assert.Equal("configure", Assert.Throws<ArgumentNullException>(() => new ServiceCollection().AddDataGateway("a", null!)).ParamName);
     }
 
+    /// <summary>A null or blank engine name, given directly or as the engine's own provider name, is refused, and null
+    /// engines and factories throw at the call.</summary>
     [Fact]
     public void T22_engine_registration_rejects_blank_names()
     {
@@ -718,6 +771,8 @@ public sealed class NamedGatewayTests
         });
     }
 
+    /// <summary>A refused prefix maps nothing and leaves the gateway free to map later; empty, slash and nested prefixes
+    /// work.</summary>
     [Fact]
     public async Task T23_invalid_prefix_does_not_claim_the_mapping()
     {
@@ -755,6 +810,8 @@ public sealed class NamedGatewayTests
         }
     }
 
+    /// <summary>Startup reads the detail of every active source in the list and stops when one is missing or inactive;
+    /// inactive sources are not read.</summary>
     [Fact]
     public async Task T24_startup_requires_active_detail_for_each_active_name()
     {
@@ -779,6 +836,8 @@ public sealed class NamedGatewayTests
         Assert.DoesNotContain("synthetic_hidden", healthy.Names);
     }
 
+    /// <summary>A catalog factory that throws or returns null, and a catalog read that returns a null task, are catalog
+    /// failures at startup and per request, never unexpected errors.</summary>
     [Fact]
     public async Task T25_factory_failures_are_catalog_failures()
     {
@@ -838,6 +897,8 @@ public sealed class NamedGatewayTests
         await Error(healthy, "/a", "describe", NamedGatewayHost.Body("describe"), "CatalogUnavailable", "$.source", Unavailable, 503);
     }
 
+    /// <summary>A source that is missing or inactive is unknown, and the message lists only active names; when the list
+    /// needed for that message is empty, invalid or unreadable, the answer says so instead.</summary>
     [Fact]
     public async Task T26_missing_detail_lists_only_active_names()
     {
@@ -872,6 +933,8 @@ public sealed class NamedGatewayTests
         }
     }
 
+    /// <summary>A cancelled catalog read is reported as CatalogCancelled with the existing wire answer, including a token
+    /// cancelled during the read; when the caller has left, nothing is written and one warning is logged.</summary>
     [Fact]
     public async Task T27_catalog_cancellation_preserves_existing_wire_rules()
     {
@@ -932,6 +995,8 @@ public sealed class NamedGatewayTests
         Assert.True(state.Tokens.Last().IsCancellationRequested);
     }
 
+    /// <summary>Any exception from a catalog read becomes CatalogUnavailable, and neither the answer nor any log keeps its
+    /// message, which may hold a connection string.</summary>
     [Fact]
     public async Task T28_catalog_exceptions_are_sanitized_unavailable_failures()
     {
@@ -963,6 +1028,8 @@ public sealed class NamedGatewayTests
         Assert.DoesNotContain(Secret, string.Join("\n", host.Logs.Events.Select(item => item.Text + item.Exception + string.Join(";", item.Fields.Select(field => field.Key + "=" + field.Value)))));
     }
 
+    /// <summary>An invalid source list read at request time answers as an internal error, logging the validator's precise
+    /// failure.</summary>
     [Fact]
     public async Task T29_invalid_runtime_list_projects_internal_error()
     {
@@ -984,6 +1051,8 @@ public sealed class NamedGatewayTests
         }
     }
 
+    /// <summary>An invalid source detail read at request time answers as an internal error, logging the precise failure,
+    /// and the engine is never reached.</summary>
     [Fact]
     public async Task T30_invalid_runtime_detail_projects_internal_error()
     {
@@ -1010,6 +1079,8 @@ public sealed class NamedGatewayTests
         Assert.Empty(engine.Executed);
     }
 
+    /// <summary>A provider changed at run time to one without an engine fails as an invalid catalog; the gateway never
+    /// falls back to another engine.</summary>
     [Fact]
     public async Task T31_runtime_provider_change_never_falls_back_to_an_engine()
     {
@@ -1029,6 +1100,8 @@ public sealed class NamedGatewayTests
         Assert.Empty(engine.Executed);
     }
 
+    /// <summary>A fault in the request handler is answered once as an unexpected error with stack frames logged, and the
+    /// next request succeeds.</summary>
     [Fact]
     public async Task T32_unexpected_handler_fault_is_answered_once()
     {
@@ -1048,6 +1121,8 @@ public sealed class NamedGatewayTests
         Assert.Single(host.Logs.Failures);
     }
 
+    /// <summary>A fault while writing the answer is handled by the same boundary; once the response has started, the
+    /// gateway logs the fault and does not try to write an error body over it.</summary>
     [Fact]
     public async Task T33_serialization_fault_uses_the_same_boundary()
     {
@@ -1101,6 +1176,8 @@ public sealed class NamedGatewayTests
         Assert.Equal(1, errorWrites.Attempts);
     }
 
+    /// <summary>A request body that cannot be read answers with the fixed body for its status and logs no request; a
+    /// caller who leaves mid-read gets nothing written and no log.</summary>
     [Fact]
     public async Task T34_body_read_refusals_keep_fixed_bodies()
     {
@@ -1141,6 +1218,8 @@ public sealed class NamedGatewayTests
         Assert.Equal(counts, cancellationState.Counts);
     }
 
+    /// <summary>Request shape rules, error codes, paths and messages are the same on a named gateway as on the example
+    /// host.</summary>
     [Fact]
     public async Task T35_request_rules_and_error_goldens_match_example()
     {
@@ -1216,6 +1295,8 @@ public sealed class NamedGatewayTests
         }
     }
 
+    /// <summary>The source's row cap bounds every query and a larger limit is refused before compiling; the gateway keeps
+    /// the library's default limits and the default 30-second command timeout.</summary>
     [Fact]
     public async Task T36_defaults_and_row_caps_reach_the_selected_runner()
     {
@@ -1257,6 +1338,8 @@ public sealed class NamedGatewayTests
         Assert.Equal(before, engine.Compiled.Count);
     }
 
+    /// <summary>A named gateway runs inside the real example host beside its root routes and MCP endpoint, with no API
+    /// page mapped by default, and each logs failures with its own gateway scope.</summary>
     [Fact]
     public async Task T37_named_gateway_can_coexist_with_example_routes_and_mcp()
     {
@@ -1329,6 +1412,9 @@ public sealed class NamedGatewayTests
         }
     }
 
+    /// <summary>A failed configuration leaves the builder frozen; the last catalog factory given wins; the same
+    /// registration can serve several hosts, each creating its own catalogs; and a nested registration of the same name
+    /// cannot leave a partial one behind.</summary>
     [Fact]
     public async Task T38_registration_is_atomic_frozen_and_host_local()
     {
@@ -1375,6 +1461,9 @@ public sealed class NamedGatewayTests
         Assert.Single(nested, descriptor => descriptor.ServiceType == typeof(GatewayRegistration));
     }
 
+    /// <summary>The library's public types, members, signatures, parameter names and nullability, and each engine's
+    /// provider name constant, are exactly as published.</summary>
+    /// <remarks>A change here is a breaking change for library users, so it must be deliberate.</remarks>
     [Fact]
     public void T39_public_surface_and_provider_constants_are_exact()
     {
@@ -1509,6 +1598,8 @@ public sealed class NamedGatewayTests
         Assert.Equal(" a ", Assert.IsType<GatewayRegistration>(services.Single(descriptor => descriptor.ServiceType == typeof(GatewayRegistration)).ImplementationInstance).Name);
     }
 
+    /// <summary>The startup catalog and every request catalog are disposed with their scopes, and cancelling startup
+    /// during a catalog read stops the host with a clear message.</summary>
     [Fact]
     public async Task T40_startup_and_request_scopes_observe_cancellation_and_cleanup()
     {
@@ -1554,7 +1645,15 @@ public sealed class NamedGatewayTests
         Assert.Equal(200, (await healthy.Post("/a", "list")).Status);
     }
 
+    /// <summary>The CatalogUnavailable message a caller receives.</summary>
     private const string Unavailable = "Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user, give the incidentId and stop; do not retry.";
+    /// <summary>Creates a host with gateway <c>a</c> under <c>/a</c> and, when given, gateway <c>b</c> under
+    /// <c>/b</c>.</summary>
+    /// <param name="a">Gateway <c>a</c>'s catalog state.</param>
+    /// <param name="b">Gateway <c>b</c>'s catalog state, or null for one gateway only.</param>
+    /// <param name="engine">Gateway <c>a</c>'s engine, or null for a fresh one.</param>
+    /// <param name="engineB">Gateway <c>b</c>'s engine, or null for a fresh one.</param>
+    /// <returns>The host, not yet started.</returns>
     private static NamedGatewayHost Host(NamedGatewayState a, NamedGatewayState? b = null, NamedGatewayEngine? engine = null, NamedGatewayEngine? engineB = null)
     {
         var host = new NamedGatewayHost(builder =>
@@ -1569,7 +1668,10 @@ public sealed class NamedGatewayTests
         return host;
     }
 
+    /// <summary>Creates a signal whose continuations run asynchronously, so releasing it never runs a test's code on the
+    /// releasing thread.</summary>
     private static TaskCompletionSource Gate() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+    /// <summary>Waits up to five seconds for a condition that is set after the response, such as scope disposal.</summary>
     private static async Task Until(Func<bool> done)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -1577,7 +1679,12 @@ public sealed class NamedGatewayTests
             await Task.Delay(10, timeout.Token);
     }
 
+    /// <summary>Replaces the incident id in an error body with <c>INCIDENT</c>.</summary>
     private static string Normalize(string body) => Regex.Replace(body, "(?<=\"incidentId\":\")[0-9a-f]{32}(?=\")", "INCIDENT");
+    /// <summary>Posts a request that must fail and asserts the status, the body and its one log line.</summary>
+    /// <remarks>InvalidCatalog and CatalogCancelled reach the caller as the fixed internal-error body; the precise code,
+    /// path and message appear only in the log.</remarks>
+    /// <returns>The log line.</returns>
     private static async Task<NamedGatewayEvent> Error(NamedGatewayHost host, string prefix, string operation, string body, string code, string path, string message, int status, string? expectedLoggedRequest = DefaultLoggedRequest)
     {
         var before = host.Logs.Failures.Length;
@@ -1599,6 +1706,8 @@ public sealed class NamedGatewayTests
         return line;
     }
 
+    /// <summary>Posts a request that must fail with a wire golden answer and asserts its one log line.</summary>
+    /// <returns>The log line.</returns>
     private static async Task<NamedGatewayEvent> GoldenError(NamedGatewayHost host, string prefix, string operation, string golden, string code, string? body = null, string? expectedLoggedRequest = DefaultLoggedRequest)
     {
         var before = host.Logs.Failures.Length;
@@ -1613,6 +1722,8 @@ public sealed class NamedGatewayTests
         return line;
     }
 
+    /// <summary>Asserts the fields every failure log line shares: the incident id and code the caller received, the
+    /// operation, the gateway scope, the caller, the logged request, and no exception object.</summary>
     private static void CheckLine(NamedGatewayEvent line, NamedGatewayReply response, string prefix, string operation, string? expectedLoggedRequest, string caller = "anonymous")
     {
         using var json = JsonDocument.Parse(response.Bytes);
@@ -1632,6 +1743,7 @@ public sealed class NamedGatewayTests
         Assert.Null(line.Exception);
     }
 
+    /// <summary>Asserts that a call throws the library's refusal for a gateway, with no inner exception.</summary>
     private static void Refusal(Action call, string name, string reason)
     {
         var error = Assert.Throws<InvalidOperationException>(call);
@@ -1639,6 +1751,9 @@ public sealed class NamedGatewayTests
         Assert.Null(error.InnerException);
     }
 
+    /// <summary>Starts a one-gateway host that must fail, and asserts the host never became ready, no engine ran and no
+    /// secret leaked.</summary>
+    /// <returns>The startup error, for its message.</returns>
     private static async Task<InvalidOperationException> StartupError(NamedGatewayState state)
     {
         var engine = new NamedGatewayEngine();
@@ -1655,8 +1770,12 @@ public sealed class NamedGatewayTests
         return error;
     }
 
+    /// <summary>The startup error message expected for a catalog failure.</summary>
     private static string StartupText(string gateway, CatalogFailure failure) => $"Gateway '{gateway}'. {(failure.SourceName is null ? "" : $"Source '{failure.SourceName}'. ")}{failure.Path} {failure.Message}";
+    /// <summary>The fixture's source list as the catalog returns it.</summary>
     private static IReadOnlyList<SourceListRow> ValidList() => [new("synthetic_items", "Synthetic", "Invented SQLite proof data.", "One item", true, 3), new("synthetic_other", "Synthetic", "Invented SQLite proof data.", "One item", true, 3), new("synthetic_hidden", "Synthetic", "Invented SQLite proof data.", "One item", false, 3)];
+    /// <summary>One kind of invalid source list: null, a null entry, a blank name, a duplicate name by case, a zero row
+    /// cap, or an inactive source with a zero row cap.</summary>
     private static IReadOnlyList<SourceListRow> InvalidList(IReadOnlyList<SourceListRow> rows, int variant) => variant switch
     {
         0 => null!,
@@ -1687,6 +1806,8 @@ public sealed class NamedGatewayTests
 
         ]
     };
+    /// <summary>One kind of invalid source detail, from a blank provider to a bad column, chosen by
+    /// <paramref name="variant"/>.</summary>
     private static CatalogDetail InvalidDetail(CatalogDetail detail, int variant) => variant switch
     {
         0 => new(" ", detail.Rows),
@@ -1698,12 +1819,15 @@ public sealed class NamedGatewayTests
         6 => new(detail.Provider, new CatalogRows(detail.Rows.Source, [detail.Rows.Columns[0] with { ColumnName = "bad name" }])),
         7 => new(detail.Provider, new CatalogRows(detail.Rows.Source, [detail.Rows.Columns[0] with { DataType = "bogus" }])),
         _ => new(" ", WithSource(detail, active: false).Rows)};
+    /// <summary>Copies a catalog detail with some source fields replaced.</summary>
     private static CatalogDetail WithSource(CatalogDetail detail, string? name = null, string? connection = null, int? cap = null, bool? active = null)
     {
         var row = detail.Rows.Source;
         return new(detail.Provider, new CatalogRows(new DataSourceRow(row.ObjectName, connection ?? row.ConnectionString) { QueryTimeoutSeconds = row.QueryTimeoutSeconds, Id = row.Id, Name = name ?? row.Name, Title = row.Title, Description = row.Description, Grain = row.Grain, IsActive = active ?? row.IsActive, RowCap = cap ?? row.RowCap }, detail.Rows.Columns));
     }
 
+    /// <summary>The failure the gateway must report for a detail: the validator's first failure, or else the mapping
+    /// failure.</summary>
     private static CatalogFailure DetailFailure(CatalogDetail detail)
     {
         var validation = CatalogValidator.ValidateDetail("synthetic_items", detail);
@@ -1713,6 +1837,7 @@ public sealed class NamedGatewayTests
         };
     }
 
+    /// <summary>Asserts a method's return type and parameter types, with no optional parameters.</summary>
     private static void Signature(MethodInfo method, Type result, Type[] parameters)
     {
         Assert.Equal(result, method.ReturnType);
@@ -1724,6 +1849,9 @@ public sealed class NamedGatewayTests
         });
     }
 
+    /// <summary>Calls an endpoint's request delegate directly with a given abort token and request body, and returns the
+    /// bytes written.</summary>
+    /// <remarks>Lets a test cancel the request at an exact point, which a real client cannot do reliably.</remarks>
     private static async Task<byte[]> Invoke(NamedGatewayHost host, string name, string operation, CancellationToken token, Stream? body = null)
     {
         var endpoint = host.Endpoints.Single(endpoint => endpoint.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName == $"DataGateway:{name}:{operation}");

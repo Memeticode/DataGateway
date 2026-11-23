@@ -13,12 +13,26 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the host error boundary, <c>UseDataGatewayErrors</c>: the middleware a host installs outermost so
+/// that a failure or sign-in refusal anywhere in its pipeline still gets the gateway's JSON error and one log record.</summary>
+/// <remarks>
+/// <para>TERM refusal: a sign-in failure the host records on the request with <c>TryRecordDataGatewayRefusal</c>; the
+/// boundary turns it into the NotAuthenticated answer once the response is a bare 401. The first refusal recorded
+/// wins.</para>
+/// <para>TERM effective registration: the gateway whose settings and log scope apply to a request, which is the
+/// gateway of the matched endpoint when there is one, else the gateway named when the boundary was installed.</para>
+/// </remarks>
 public sealed class HostBoundaryTests
 {
+    /// <summary>The name of the gateway the boundary is installed for.</summary>
     private const string Root = "DataGateway.Web";
+    /// <summary>A NotAuthenticated refusal at the sign-in step.</summary>
+    /// <param name="message">The message; tests use the gateway name to tell which gateway's refusal was used.</param>
     private static CatalogFailure Refusal(string message = "Sign in.") =>
         new(DataGatewayError.NotAuthenticated.Code, "$", message) { Step = "sign-in", ExceptionType = "SyntheticFault" };
 
+    /// <summary>Services with two registered gateways, the root and <c>foreign</c>, whose limits and default refusal
+    /// differ, logging into <paramref name="logs"/>.</summary>
     private static ServiceProvider Services(NamedGatewayLogs logs)
     {
         var services = new ServiceCollection();
@@ -33,12 +47,15 @@ public sealed class HostBoundaryTests
         return services.BuildServiceProvider();
     }
 
+    /// <summary>A bare request context with a readable response body.</summary>
     private static DefaultHttpContext Context(IServiceProvider services) => new()
     {
         RequestServices = services,
         Response = { Body = new MemoryStream() }
     };
 
+    /// <summary>Installing the boundary checks its arguments and that the gateway is registered, by exact name, at once
+    /// rather than on the first request, and returns the same builder.</summary>
     [Fact]
     public async Task T4_guards_resolve_immediately_and_return_the_same_builder()
     {
@@ -57,6 +74,8 @@ public sealed class HostBoundaryTests
             Assert.Throws<InvalidOperationException>(() => app.UseDataGatewayErrors("datagateway.web")).Message);
     }
 
+    /// <summary>A recorded refusal becomes one answer and one log record, even when the boundary is installed more than
+    /// once; the first refusal wins, the host's challenge header is kept, and the record carries the effective gateway.</summary>
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
@@ -98,6 +117,8 @@ public sealed class HostBoundaryTests
         Assert.Equal(LogLevel.Error, line.Level);
     }
 
+    /// <summary>An exception from the pipeline becomes one UnexpectedError answer and one record under the effective
+    /// gateway, after which no refusal can be recorded.</summary>
     [Theory]
     [InlineData("before-routing", false)]
     [InlineData("routing", false)]
@@ -129,6 +150,8 @@ public sealed class HostBoundaryTests
         Assert.False(context.TryRecordDataGatewayRefusal(Refusal()));
     }
 
+    /// <summary>A 401 challenge with no recorded refusal gets the gateway's default refusal body but no incident id and no
+    /// log record, since a challenge is the normal first step of sign-in.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -152,6 +175,8 @@ public sealed class HostBoundaryTests
         Assert.Empty(logs.Failures);
     }
 
+    /// <summary>A recorded refusal is dropped, with no body and no record, when the response is not a 401 or the host
+    /// has already set its own content length or content type.</summary>
     [Theory]
     [InlineData(200, false, false)]
     [InlineData(403, false, false)]
@@ -177,6 +202,7 @@ public sealed class HostBoundaryTests
         Assert.Empty(((MemoryStream)context.Response.Body).ToArray());
     }
 
+    /// <summary>The boundary installed without a gateway name leaves requests outside the gateway's endpoints to the host.</summary>
     [Fact]
     public async Task T4_existing_overload_still_ignores_unselected_host_requests()
     {
@@ -187,6 +213,8 @@ public sealed class HostBoundaryTests
         await Assert.ThrowsAsync<IOException>(() => app.Build()(Context(provider)));
     }
 
+    /// <summary>In a real ASP.NET Core host, failures before routing, in authentication, in a refused handshake and in a
+    /// host handler all get the gateway's answer and one record, while a wrong-method 405 is left untouched.</summary>
     [Theory]
     [InlineData("before-routing")]
     [InlineData("authentication")]
@@ -237,16 +265,20 @@ public sealed class HostBoundaryTests
         if (stage == "refused-handshake") Assert.Equal("Negotiate synthetic-refusal", response.Headers.WwwAuthenticate.ToString());
     }
 
+    /// <summary>An authentication handler that records two refusals and fails, then challenges with a continuation
+    /// header, to model a handshake the server refuses.</summary>
     private sealed class RefusedSignIn(Microsoft.Extensions.Options.IOptionsMonitor<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions> options,
         ILoggerFactory logger, System.Text.Encodings.Web.UrlEncoder encoder)
         : Microsoft.AspNetCore.Authentication.AuthenticationHandler<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions>(options, logger, encoder)
     {
+        /// <summary>Records a first and a second refusal, asserting only the first is kept, and fails authentication.</summary>
         protected override Task<Microsoft.AspNetCore.Authentication.AuthenticateResult> HandleAuthenticateAsync()
         {
             Assert.True(Context.TryRecordDataGatewayRefusal(Refusal("First handshake refusal.")));
             Assert.False(Context.TryRecordDataGatewayRefusal(Refusal("Second handshake refusal.")));
             return Task.FromResult(Microsoft.AspNetCore.Authentication.AuthenticateResult.Fail("Synthetic refused handshake."));
         }
+        /// <summary>Answers 401 with a Negotiate continuation header.</summary>
         protected override Task HandleChallengeAsync(Microsoft.AspNetCore.Authentication.AuthenticationProperties properties)
         {
             Response.StatusCode = 401;
@@ -255,6 +287,7 @@ public sealed class HostBoundaryTests
         }
     }
 
+    /// <summary>Marks the request as matched to an endpoint of the gateway named <paramref name="name"/>.</summary>
     private static void Select(HttpContext http, IServiceProvider services, string name) =>
         http.SetEndpoint(new Endpoint(_ => Task.CompletedTask,
             new EndpointMetadataCollection(services.GetServices<GatewayRegistration>().Single(r => r.Name == name)), name));

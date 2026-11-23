@@ -19,22 +19,46 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins how a database engine runs one source query: the shared <see cref="DatabaseEngine{TConnection}"/>
+/// base opens one connection, executes one command, streams the rows to the consumer and cleans up, and
+/// <see cref="QueryRunner"/> turns driver failures into the gateway's errors.</summary>
+/// <remarks>
+/// <para>Most tests drive the real base class against the fake driver in SourceProbeDb.cs, so the order of open,
+/// execute, read and disposal, the tokens passed and the parameters bound can be checked without a database.</para>
+/// <para>The failure tests guard three rules: the first failure wins over later cleanup failures and keeps its
+/// identity and stack; every acquired resource is still disposed; and only failures the engine recognizes, or known
+/// transient types, become gateway errors, while anything else propagates as a bug.</para>
+/// </remarks>
 public sealed class SourceEngineTests
 {
+    /// <summary>A synthetic source connection string that parses but names a host that cannot resolve.</summary>
     private const string Connection = "Server=synthetic.invalid;Database=Synthetic;User ID=synthetic;Password=synthetic;Encrypt=False;Connect Timeout=17;ConnectRetryCount=0";
+    /// <summary>How long a test waits for a gated stage before it fails instead of hanging.</summary>
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(5);
+    /// <summary>A compiled query with two parameters that keeps <paramref name="keep"/> rows.</summary>
+    /// <param name="keep">The number of rows the answer keeps.</param>
+    /// <param name="matched">Whether the query carries the matched-row count column.</param>
     private static CompiledQuery Query(int keep = 3, bool matched = false) =>
         new("select @p0, @p1", new Dictionary<string, object> { ["@p0"] = keep + 1, ["@p1"] = "value" }, keep, matched, []);
+    /// <summary>An empty answer, for consumers that read nothing.</summary>
     private static QueryRows Empty() => new([], false);
+    /// <summary>The plain consumer: reads every row into an answer.</summary>
     private static async Task<QueryRows> Collect(IAsyncEnumerable<IDictionary<string, object?>> source)
     {
         var rows = new List<IDictionary<string, object?>>();
         await foreach (var row in source) rows.Add(row);
         return new(rows, false);
     }
+    /// <summary>Runs <see cref="DatabaseEngine{TConnection}.ReadSourceAsync"/> on a <see cref="LifecycleEngine"/> against
+    /// the current probe scenario, with defaults for every argument a test does not care about.</summary>
     private static Task<QueryRows> Read(Func<IAsyncEnumerable<IDictionary<string, object?>>, Task<QueryRows>>? consume = null,
         Action? opened = null, CancellationToken token = default, CompiledQuery? query = null, int timeout = 41) =>
         new LifecycleEngine().ReadSourceAsync(Connection, query ?? Query(), timeout, opened ?? (() => { }), consume ?? Collect, token);
+    /// <summary>Calls one of <see cref="SqlServerEngine"/>'s non-public hooks by name and rethrows its own exception,
+    /// not the reflection wrapper.</summary>
+    /// <param name="name">The hook's method name.</param>
+    /// <param name="arguments">The hook's arguments.</param>
+    /// <returns>What the hook returned.</returns>
     private static object? Hook(string name, params object?[] arguments)
     {
         var method = typeof(SqlServerEngine).GetMethod(name,
@@ -47,7 +71,11 @@ public sealed class SourceEngineTests
         }
     }
 
-    // The sealed SqlConnection has no probe subtype. Exercise the real base and invoke the leaf's real hooks.
+    /// <summary>The real engine base class over <see cref="ProbeConnection"/>, with the SQL Server engine's own hooks
+    /// for parameters, cells, validation and failure recognition.</summary>
+    /// <remarks>The SQL Server engine cannot run over the fake driver: <see cref="SqlConnection"/> is sealed, so no probe
+    /// can stand in for it. This engine keeps the base's lifecycle code real and forwards each hook to the production
+    /// SQL Server implementation, so the tests still exercise both.</remarks>
     private sealed class LifecycleEngine() : DatabaseEngine<ProbeConnection>(
         text => new ProbeConnection { ConnectionString = text })
     {
@@ -65,6 +93,11 @@ public sealed class SourceEngineTests
             new SqlServerEngine().RecognizeFailure(error);
     }
 
+    /// <summary>Asserts the scenario ended clean: each acquired resource disposed exactly once, the connection always,
+    /// and no extra result set read.</summary>
+    /// <param name="probe">The scenario to check.</param>
+    /// <param name="reader">Whether a reader was acquired and so must have been disposed.</param>
+    /// <param name="command">Whether a command was acquired and so must have been disposed.</param>
     private static void Clean(SourceProbe probe, bool reader = true, bool command = true)
     {
         Assert.Equal(reader ? 1 : 0, probe.ReaderDisposals);
@@ -74,6 +107,8 @@ public sealed class SourceEngineTests
         Assert.Equal(0, probe.NextResults);
     }
 
+    /// <summary>The SQL Server engine adds only its hooks: compiling and reading are inherited from the base, and each
+    /// hook gives the exact SQL Server form.</summary>
     [Fact]
     public void T13_source_methods_are_inherited_and_sql_server_hooks_are_exact()
     {
@@ -100,6 +135,8 @@ public sealed class SourceEngineTests
         Assert.Equal(("a[[][_]%", ""), Hook("PrepareLikePattern", "a[_%"));
     }
 
+    /// <summary>The SQL Server parameter hook binds every value unchanged and marks only dates as <c>DateTime2</c>, and the
+    /// cell hook returns every value as read, so no precision or scale is lost.</summary>
     [Fact]
     public void T13_parameter_and_cell_hooks_preserve_values()
     {
@@ -120,6 +157,8 @@ public sealed class SourceEngineTests
         Assert.Equal(4, (decimal.GetBits((decimal)values[6]!)[3] >> 16) & 0xff);
     }
 
+    /// <summary>Open, the opened callback, the consumer and cleanup each finish before the next starts, and the call does
+    /// not complete until cleanup has.</summary>
     [Fact]
     public async Task T5_open_consumer_and_cleanup_are_awaited_in_order()
     {
@@ -157,6 +196,8 @@ public sealed class SourceEngineTests
         Assert.All(probe.AssignedConnections, s => Assert.Equal(Connection, s, StringComparer.Ordinal));
     }
 
+    /// <summary>A failure at any stage reaches the caller as the same exception object, with its inner exception and
+    /// original stack, even when every cleanup step fails too.</summary>
     [Theory]
     [InlineData("open")]
     [InlineData("opened")]
@@ -190,6 +231,8 @@ public sealed class SourceEngineTests
         Clean(probe, stage is "schema" or "read" or "consumer-before" or "consumer-after", stage != "open" && stage != "opened");
     }
 
+    /// <summary>When only cleanup fails, the first cleanup failure surfaces, and the remaining resources are still
+    /// disposed.</summary>
     [Theory]
     [InlineData("reader", false)]
     [InlineData("command", false)]
@@ -210,6 +253,8 @@ public sealed class SourceEngineTests
         Clean(probe);
     }
 
+    /// <summary>The rows given to the consumer are a borrow that ends with the call: enumerating them later, or moving an
+    /// abandoned enumerator, throws <see cref="ObjectDisposedException"/> instead of touching a disposed reader.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -244,6 +289,8 @@ public sealed class SourceEngineTests
         Assert.Equal(attempts, probe.Reads);
     }
 
+    /// <summary>Through <see cref="QueryRunner"/>, the engine reads at most one row past the kept rows, which is how the
+    /// answer knows there is more without reading the whole result.</summary>
     [Theory]
     [InlineData(0, 0, false, 1)]
     [InlineData(2, 2, false, 3)]
@@ -271,6 +318,8 @@ public sealed class SourceEngineTests
         for (var i = 0; i < kept; i++) Assert.Same(materialized[i], result.Value.Rows[i]);
         Assert.Single(probe.Commands); Clean(probe);
     }
+    /// <summary>Passes rows through unchanged while recording each one, so a test can check the answer holds the same
+    /// row objects the reader produced.</summary>
     private static async IAsyncEnumerable<IDictionary<string, object?>> RecordRows(
         IAsyncEnumerable<IDictionary<string, object?>> source, List<IDictionary<string, object?>> seen,
         [EnumeratorCancellation] CancellationToken token = default)
@@ -278,6 +327,8 @@ public sealed class SourceEngineTests
         await foreach (var row in source.WithCancellation(token)) { seen.Add(row); yield return row; }
     }
 
+    /// <summary>Each row is its own dictionary with the source's column order, exact-case keys and the provider's value
+    /// types, and changing one row changes no other.</summary>
     [Fact]
     public async Task T8_materialized_rows_have_order_ordinal_comparison_independent_mutability_and_provider_values()
     {
@@ -311,6 +362,8 @@ public sealed class SourceEngineTests
         Assert.False(first.ContainsKey("after")); Clean(probe);
     }
 
+    /// <summary>Column names that are equal exactly are refused before the first read, even with no rows; names that
+    /// differ only by case are allowed.</summary>
     [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
@@ -333,6 +386,8 @@ public sealed class SourceEngineTests
         Clean(probe);
     }
 
+    /// <summary>The command carries the compiled SQL, the source's timeout and the caller's token, and binds the parameters
+    /// in order with their values unchanged.</summary>
     [Theory]
     [InlineData(1)]
     [InlineData(41)]
@@ -362,6 +417,7 @@ public sealed class SourceEngineTests
         Clean(probe);
     }
 
+    /// <summary>Two calls get separate connections and commands, so a setting from one call never leaks into the next.</summary>
     [Fact]
     public async Task T6_calls_do_not_share_execution_state()
     {
@@ -382,6 +438,7 @@ public sealed class SourceEngineTests
         Assert.Null(engine.RecognizeFailure(new IOException()));
     }
 
+    /// <summary>Cancelling the caller's token stops the driver during open, execute or read, and cleanup still runs.</summary>
     [Theory]
     [InlineData("open")]
     [InlineData("execute")]
@@ -404,6 +461,8 @@ public sealed class SourceEngineTests
         Clean(probe, phase == "read", phase != "open");
     }
 
+    /// <summary>A token passed to the row enumerator is linked with the caller's token, cancels the read on its own, and
+    /// its registration ends with the call.</summary>
     [Fact]
     public async Task T4_separate_enumerator_token_is_linked_and_expires()
     {
@@ -425,6 +484,8 @@ public sealed class SourceEngineTests
         Assert.Equal(1, probe.Reads);
     }
 
+    /// <summary>A request already cancelled ends as QueryCancelled without validating the source, creating a connection
+    /// or asking the engine to recognize a failure.</summary>
     [Fact]
     public async Task T4_pre_cancel_does_not_validate_read_recognize_or_construct_a_connection()
     {
@@ -438,6 +499,8 @@ public sealed class SourceEngineTests
         Assert.Empty(probe.Connections);
     }
 
+    /// <summary>Cancellation seen after the read ends as QueryCancelled with no invented driver exception, and a
+    /// cancellation after the answer is built changes nothing.</summary>
     [Fact]
     public async Task T4_post_scope_cancel_has_no_fabricated_driver_and_late_cancel_is_inert()
     {
@@ -454,6 +517,8 @@ public sealed class SourceEngineTests
         late.Cancel(); Assert.True(success.IsSuccess);
     }
 
+    /// <summary>Every combination of connected or not, cancelled or not, and exception kind for
+    /// <see cref="T3_source_policy_matrix_is_derived_independently"/>.</summary>
     public static IEnumerable<object[]> Matrix()
     {
         foreach (var phase in new[] { false, true })
@@ -464,6 +529,10 @@ public sealed class SourceEngineTests
             yield return [phase, cancelled, kind];
     }
 
+    /// <summary>The source failure policy: which exception kinds become QueryCancelled, InvalidCatalog, QueryTimeout or
+    /// SourceUnavailable at which step, and which propagate as bugs.</summary>
+    /// <remarks>The expected answer is computed here from the policy's own rules, not copied from the product, so a
+    /// change to the product's table cannot pass by changing both sides at once.</remarks>
     [Theory]
     [MemberData(nameof(Matrix))]
     public async Task T3_source_policy_matrix_is_derived_independently(bool connected, bool cancelled, string kind)
@@ -516,8 +585,11 @@ public sealed class SourceEngineTests
         Assert.Null(sql.RecognizeFailure(error)); Assert.Null(sql.RecognizeFailure(new Exception("wrapper", error)));
     }
 
+    /// <summary>Throws <paramref name="error"/> from a named frame that tests look for in the stack trace.</summary>
+    /// <remarks>Not inlined, so the frame stays in the trace and proves the original exception was kept.</remarks>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowSourceFailure(Exception error) => throw error;
+    /// <summary>The message the caller receives for each failure code in these tests.</summary>
     private static string Message(string code) => code switch
     {
         "QueryCancelled" => "The query was cancelled because the caller ended the request. Submit a new request if still needed.",
@@ -526,6 +598,8 @@ public sealed class SourceEngineTests
         _ => "The source's database could not run the query. The DataGateway administrator should check the source. Tell the user, give the incidentId and stop; do not retry."
     };
 
+    /// <summary>When the row enumerator fails and then fails again on disposal, the first failure is the one reported,
+    /// and the enumerator is disposed exactly once.</summary>
     [Theory]
     [InlineData("move")]
     [InlineData("unknown-move")]
@@ -563,6 +637,8 @@ public sealed class SourceEngineTests
         Assert.Equal(1, rows.Disposals);
     }
 
+    /// <summary>The matched-row count column is removed from the kept rows only; rows past the cap are not examined or
+    /// changed.</summary>
     [Fact]
     public async Task T11_probe_match_evidence_is_not_examined_or_removed()
     {
@@ -581,6 +657,8 @@ public sealed class SourceEngineTests
         Assert.Null(observed[1][CompiledQuery.MatchedRowCountColumn]); Clean(probe);
     }
 
+    /// <summary>A source connection string that is missing, has no server or cannot be parsed is refused before any
+    /// connection is made, and the refusal never echoes the text, which could hold a password.</summary>
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -611,6 +689,8 @@ public sealed class SourceEngineTests
         Assert.Empty(probe.Connections);
     }
 
+    /// <summary>Validation accepts usable connection strings, including a server given as whitespace in quotes, without
+    /// creating a connection.</summary>
     [Fact]
     public void T2_valid_source_text_with_omitted_explicit_and_whitespace_server_parses_without_io()
     {
@@ -621,6 +701,8 @@ public sealed class SourceEngineTests
         Assert.Throws<ArgumentNullException>(() => engine.RecognizeFailure(null!));
     }
 
+    /// <summary>The engine registered in the host is the one that runs the query, and a source failure writes exactly one
+    /// error log line, with the driver's error number when it has one.</summary>
     [Theory]
     [InlineData(null)]
     [InlineData(913)]
@@ -650,6 +732,7 @@ public sealed class SourceEngineTests
         Assert.Equal(2, engine.Validations); Assert.Equal(2, engine.Reads); Assert.Equal(2, engine.Recognitions);
     }
 
+    /// <summary>The stored connection string reaches the driver unchanged, character for character.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -665,6 +748,8 @@ public sealed class SourceEngineTests
         Clean(probe);
     }
 
+    /// <summary>A real connect timeout against a listener that never answers is recognized as a timeout, but the same
+    /// error wrapped in another exception is not.</summary>
     [Fact]
     public async Task T3_genuine_silent_listener_timeout_is_recognized_but_its_wrapper_is_not()
     {
@@ -685,28 +770,44 @@ public sealed class SourceEngineTests
         finally { listener.Stop(); }
     }
 
+    /// <summary>A stand-in driver exception that <see cref="NeutralEngine"/> recognizes, with a timeout flag and an
+    /// optional error number.</summary>
     private sealed class ProviderProbeException(bool timeout, int? number, Exception inner) : Exception("synthetic provider", inner)
     { internal bool Timeout => timeout; internal int? Number => number; }
+    /// <summary>A <see cref="DbException"/> no engine recognizes, to show the type alone does not make a source failure.</summary>
     private sealed class UnrecognizedDbException(Exception inner) : DbException("synthetic unrecognized", inner);
 
+    /// <summary>A scriptable <see cref="IDatabaseEngine"/> that counts each call and records its arguments, so
+    /// <see cref="QueryRunner"/> can be tested apart from any real driver.</summary>
     private sealed class NeutralEngine : IDatabaseEngine
     {
         string IDatabaseEngine.ProviderName => "synthetic";
+        /// <summary>Call counts, and the command timeout the runner passed.</summary>
         internal int Validations, Reads, Recognitions, Timeout;
+        /// <summary>The connection string the runner passed.</summary>
         internal string? Connection;
+        /// <summary>The token the runner passed.</summary>
         internal CancellationToken Token;
+        /// <summary>The query this engine compiled, and the query the runner asked it to read.</summary>
         internal CompiledQuery? Output, ReadQuery;
+        /// <summary>The last exception the runner asked this engine to recognize.</summary>
         internal Exception? Recognized;
+        /// <summary>The connection validation to run; by default it refuses blank text.</summary>
         internal Action<string?> Validate = s => ArgumentException.ThrowIfNullOrWhiteSpace(s);
+        /// <summary>What a read does; by default it honours cancellation, reports the connection open and returns no rows.</summary>
         internal Func<string, CompiledQuery, int, Action, Func<IAsyncEnumerable<IDictionary<string, object?>>, Task<QueryRows>>, CancellationToken, Task<QueryRows>> Execute =
             (_, _, _, opened, consume, token) => { token.ThrowIfCancellationRequested(); opened(); return consume(Sequence()); };
+        /// <summary>Compiles with the SQL Server engine and remembers the result.</summary>
         public CompiledQuery Compile(ValidatedQuery query) => Output = new SqlServerEngine().Compile(query);
+        /// <summary>Counts the call and runs <see cref="Validate"/>.</summary>
         public void ValidateSourceConnection(string? connection) { Validations++; Validate(connection); }
+        /// <summary>Counts the call and recognizes only <see cref="ProviderProbeException"/>.</summary>
         public ProviderFailure? RecognizeFailure(Exception error)
         {
             Recognitions++; Recognized = error;
             return error is ProviderProbeException p ? new(p.Timeout, p.Number) : null;
         }
+        /// <summary>Records the arguments and runs <see cref="Execute"/>.</summary>
         public Task<QueryRows> ReadSourceAsync(string connection, CompiledQuery query, int commandTimeoutSeconds, Action opened,
             Func<IAsyncEnumerable<IDictionary<string, object?>>, Task<QueryRows>> consume, CancellationToken cancellationToken)
         {
@@ -714,18 +815,30 @@ public sealed class SourceEngineTests
             return Execute(connection, query, commandTimeoutSeconds, opened, consume, cancellationToken);
         }
     }
+    /// <summary>An empty row stream.</summary>
     private static async IAsyncEnumerable<IDictionary<string, object?>> Sequence() { await Task.CompletedTask; yield break; }
+    /// <summary>A row stream that fails on move, on disposal or both, as <paramref name="kind"/> says, for
+    /// <see cref="T10_neutral_enumerator_preserves_primary_failure_over_disposal"/>.</summary>
+    /// <param name="kind">The scenario: move, unknown-move, match, dispose, normal or early.</param>
+    /// <param name="primary">The failure thrown on move.</param>
+    /// <param name="cleanup">The failure thrown on disposal.</param>
     private sealed class FaultSequence(string kind, Exception primary, Exception cleanup) : IAsyncEnumerable<IDictionary<string, object?>>, IAsyncEnumerator<IDictionary<string, object?>>
     {
+        /// <summary>The number of moves so far.</summary>
         private int reads;
+        /// <summary>The number of disposals.</summary>
         internal int Disposals;
+        /// <summary>Returns this stream as its own enumerator.</summary>
         public IAsyncEnumerator<IDictionary<string, object?>> GetAsyncEnumerator(CancellationToken cancellationToken = default) => this;
+        /// <summary>A fresh one-column row.</summary>
         public IDictionary<string, object?> Current => new Dictionary<string, object?> { ["amount"] = 1 };
+        /// <summary>Throws the primary failure for the move scenarios, else yields as many rows as the scenario needs.</summary>
         public ValueTask<bool> MoveNextAsync()
         {
             if (kind is "move" or "unknown-move") ThrowSourceFailure(primary);
             return ValueTask.FromResult(++reads <= (kind == "early" ? 2 : kind is "normal" or "match" ? 1 : 0));
         }
+        /// <summary>Counts the disposal and throws the cleanup failure unless the scenario ends normally.</summary>
         public ValueTask DisposeAsync()
         {
             Disposals++;

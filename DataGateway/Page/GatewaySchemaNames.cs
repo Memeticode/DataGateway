@@ -16,9 +16,16 @@ namespace DataGateway.Page;
 /// the response types have no structs or polymorphism.</remarks>
 internal static class GatewaySchemaNames
 {
+    /// <summary>The renames collected for each document under construction.</summary>
+    /// <remarks>Weakly keyed, so a document that never reaches <see cref="Apply"/> does not keep its renames
+    /// alive.</remarks>
     private static readonly ConditionalWeakTable<OpenApiDocument, List<Action>> Pending = new();
 
     /// <summary>Schema transformer: records how one object schema's properties are named on the wire.</summary>
+    /// <param name="schema">The generated schema.</param>
+    /// <param name="context">The generator's context, with the host's type info for the schema.</param>
+    /// <param name="token">Unused.</param>
+    /// <returns>A completed task.</returns>
     internal static Task Collect(OpenApiSchema schema, OpenApiSchemaTransformerContext context, CancellationToken token)
     {
         // Object schemas arrive both on their own and through a property (then JsonPropertyInfo is set); both count.
@@ -41,6 +48,7 @@ internal static class GatewaySchemaNames
     }
 
     /// <summary>Document transformer: applies the collected renames once every schema exists.</summary>
+    /// <param name="document">The finished document.</param>
     internal static void Apply(OpenApiDocument document)
     {
         if (!Pending.TryGetValue(document, out var pending)) return;
@@ -48,6 +56,9 @@ internal static class GatewaySchemaNames
         foreach (var rename in pending) rename();
     }
 
+    /// <summary>Renames one schema's properties and required names to their wire names.</summary>
+    /// <param name="schema">The schema.</param>
+    /// <param name="names">Host property name to wire name; names not listed stay.</param>
     private static void Rename(OpenApiSchema schema, Dictionary<string, string> names)
     {
         var renamed = new Dictionary<string, IOpenApiSchema>(schema.Properties!.Count, StringComparer.Ordinal);

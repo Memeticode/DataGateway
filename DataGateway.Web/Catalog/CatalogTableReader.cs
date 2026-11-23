@@ -5,8 +5,34 @@ using DataGateway.Data.Catalog;
 
 namespace DataGateway.Web.Catalog;
 
+/// <summary>The row mapping shared by the two example catalog readers, <see cref="SqlServerCatalog"/> and
+/// <see cref="PostgreSqlCatalog"/>: it runs their SQL and turns the rows into the library's catalog types.</summary>
+/// <remarks>
+/// <para>The mapping is strict. Every expected cell must be present and of the expected type; a missing cell, a
+/// wrong type or an out-of-range number throws instead of being guessed or defaulted. A damaged catalog then fails
+/// the request loudly, as CatalogUnavailable, rather than serving made-up metadata.</para>
+/// <para>A bad cell throws an <see cref="InvalidCastException"/> with the fixed message <see cref="InvalidCell"/>,
+/// which names neither the cell nor its value: a catalog row holds the source's connection string, credentials
+/// included. Two faults have exceptions of their own: <see cref="InvalidMcpMetadataException"/> names the MCP field
+/// at fault, and <see cref="InvalidQueryTimeoutException"/> becomes an InvalidCatalog answer that tells the steward
+/// what to set.</para>
+/// <para>Every read follows the catalog-reader contract of <see cref="CatalogService{TConnection}"/>: results are
+/// buffered and copied before they are returned, nothing is kept between calls, and cancellation is checked after
+/// each await so a cancelled request never returns a result.</para>
+/// </remarks>
 internal static class CatalogTableReader
 {
+    /// <summary>Reads the MCP presentation text: the server's title and about text, and each tool's title and
+    /// description.</summary>
+    /// <remarks>The server projection must hold exactly one row, with id 1; anything else is a fault in
+    /// <c>mcpserver.id</c>. Both queries run in one connection scope. Which tool names must be present is checked
+    /// by the gateway, not here.</remarks>
+    /// <param name="db">The catalog context.</param>
+    /// <param name="serverSql">The query for the server row.</param>
+    /// <param name="toolsSql">The query for the tool rows.</param>
+    /// <param name="timeout">The command timeout, in seconds.</param>
+    /// <param name="token">Cancels the read.</param>
+    /// <returns>The presentation text, detached from the reader.</returns>
     internal static async Task<McpMetadata> MetadataAsync<TConnection>(DbContext<TConnection> db,
         string serverSql, string toolsSql, int timeout, CancellationToken token)
         where TConnection : DbConnection, new()
@@ -31,6 +57,10 @@ internal static class CatalogTableReader
         return result;
     }
 
+    /// <summary>One required text cell of an MCP projection row.</summary>
+    /// <param name="row">The row.</param>
+    /// <param name="field">The cell's column name.</param>
+    /// <param name="table">The projection's name, for the fault's field path.</param>
     private static string MetadataText(IDictionary<string, object?> row, string field, string table)
     {
         if (!row.TryGetValue(field, out var value) || value is not string text)
@@ -38,19 +68,29 @@ internal static class CatalogTableReader
         return text;
     }
 
+    /// <summary>The server row's id; a malformed id is an MCP metadata fault rather than a bad cell.</summary>
     private static int MetadataId(IDictionary<string, object?> row)
     {
         try { return Integer(Value(row, "id")); }
         catch (InvalidCastException) { throw new InvalidMcpMetadataException("mcpserver.id"); }
     }
 
+    /// <summary>The message of every bad-cell exception; deliberately the same for every cell.</summary>
     internal const string InvalidCell = "The catalog cell shape is invalid.";
+    /// <summary>The column cells of a detail row; all null when the source has no column row (the LEFT JOIN
+    /// sentinel, see <see cref="MapDetail"/>).</summary>
     private static readonly string[] ColumnFields =
     [
         "column_name", "ordinal", "column_title", "column_description", "data_type", "unit",
         "magnitude", "display_format", "can_select", "can_filter", "can_sort", "can_group", "can_aggregate"
     ];
 
+    /// <summary>Reads the list of active sources.</summary>
+    /// <param name="db">The catalog context.</param>
+    /// <param name="sql">The list query.</param>
+    /// <param name="timeout">The command timeout, in seconds.</param>
+    /// <param name="token">Cancels the read.</param>
+    /// <returns>One row per active source, in the order the query returns them.</returns>
     internal static async Task<IReadOnlyList<SourceListRow>> ListAsync<TConnection>(
         DbContext<TConnection> db, string sql, int timeout, CancellationToken token)
         where TConnection : DbConnection, new()
@@ -64,6 +104,18 @@ internal static class CatalogTableReader
         return result;
     }
 
+    /// <summary>Reads one source with its columns, or null when no active source matches the name.</summary>
+    /// <remarks>On a miss, the active names are read in the same connection scope and the shape of each name cell
+    /// is checked; the names themselves are not returned.</remarks>
+    /// <param name="db">The catalog context.</param>
+    /// <param name="readSql">The joined source and column query, taking <c>@source</c>.</param>
+    /// <param name="availableSql">The query for the active names, run only on a miss.</param>
+    /// <param name="sourceName">The requested name, as the caller sent it.</param>
+    /// <param name="provider">The provider name the detail carries, which selects the engine for its queries.</param>
+    /// <param name="allowIntegralFlags">Whether a flag cell may be the integer 0 or 1 as well as a boolean.</param>
+    /// <param name="timeout">The command timeout, in seconds.</param>
+    /// <param name="token">Cancels the read.</param>
+    /// <returns>The detail, or null for an unknown source.</returns>
     internal static async Task<CatalogDetail?> DetailAsync<TConnection>(
         DbContext<TConnection> db, string readSql, string availableSql, string sourceName,
         string provider, bool allowIntegralFlags, int timeout, CancellationToken token)
@@ -89,11 +141,17 @@ internal static class CatalogTableReader
         return result;
     }
 
-    // The database may match more loosely than DataGateway does (SQL Server ignores trailing spaces and folds accents
-    // under its collation); a row for another name is an unknown source, not a catalog fault.
+    /// <summary>Keeps a detail only when its source name equals the requested name, ignoring case.</summary>
+    /// <remarks>The database may match more loosely than DataGateway does (SQL Server ignores trailing spaces and folds accents
+    /// under its collation); a row for another name is an unknown source, not a catalog fault.</remarks>
+    /// <param name="detail">The detail the database matched, or null.</param>
+    /// <param name="sourceName">The requested name.</param>
+    /// <returns>The detail, or null when it is for another name.</returns>
     internal static CatalogDetail? Matching(CatalogDetail? detail, string sourceName) =>
         detail is not null && StringComparer.OrdinalIgnoreCase.Equals(detail.Rows.Source.Name, sourceName) ? detail : null;
 
+    /// <summary>Maps list rows to <see cref="SourceListRow"/> values.</summary>
+    /// <remarks>Every row is marked active: the list query reads active sources only.</remarks>
     internal static IReadOnlyList<SourceListRow> MapList(IReadOnlyList<dynamic> rows)
     {
         var result = new List<SourceListRow>(rows.Count);
@@ -106,12 +164,21 @@ internal static class CatalogTableReader
         return result.AsReadOnly();
     }
 
+    /// <summary>Checks that every active-name row has a text <c>name</c> cell.</summary>
     internal static void ValidateAvailable(IReadOnlyList<dynamic> rows)
     {
         foreach (object? raw in rows)
             _ = Text(Row(raw), "name");
     }
 
+    /// <summary>Maps the joined source and column rows to a <see cref="CatalogDetail"/>.</summary>
+    /// <remarks>TERM: the LEFT JOIN sentinel. A source with no column row still yields one joined row, with every
+    /// column cell null. That row adds no column. A row with a null column name but any other column cell set is a
+    /// bad cell: it is neither a column nor the sentinel. The source cells are checked on every row, not only on the
+    /// first.</remarks>
+    /// <param name="rows">The joined rows, at least one.</param>
+    /// <param name="provider">The provider name the detail carries.</param>
+    /// <param name="allowIntegralFlags">Whether a flag cell may be the integer 0 or 1.</param>
     internal static CatalogDetail MapDetail(
         IReadOnlyList<dynamic> rows, string provider, bool allowIntegralFlags)
     {
@@ -141,6 +208,8 @@ internal static class CatalogTableReader
         return new CatalogDetail(provider, new CatalogRows(source, columns));
     }
 
+    /// <summary>The source part of a detail row, active by construction: the detail query reads active sources
+    /// only.</summary>
     private static DataSourceRow Source(IDictionary<string, object?> row) =>
         new(Text(row, "object_name"), Text(row, "connection_string"))
         {
@@ -154,9 +223,11 @@ internal static class CatalogTableReader
             QueryTimeoutSeconds = QueryTimeoutSeconds(row)
         };
 
+    /// <summary>One row as the name-to-value map Dapper returns for an untyped query.</summary>
     private static IDictionary<string, object?> Row(object? raw) =>
         raw is IDictionary<string, object?> row ? row : throw BadCell();
 
+    /// <summary>A cell that must be present, with a database null read as null.</summary>
     private static object? Value(IDictionary<string, object?> row, string field)
     {
         if (!row.TryGetValue(field, out var value))
@@ -164,9 +235,11 @@ internal static class CatalogTableReader
         return value is DBNull ? null : value;
     }
 
+    /// <summary>A required, non-null text cell.</summary>
     private static string Text(IDictionary<string, object?> row, string field) =>
         Value(row, field) is string text ? text : throw BadCell();
 
+    /// <summary>An optional text cell: null, or text.</summary>
     private static string? NullableText(IDictionary<string, object?> row, string field)
     {
         var value = Value(row, field);
@@ -175,6 +248,7 @@ internal static class CatalogTableReader
         return value is string text ? text : throw BadCell();
     }
 
+    /// <summary>The source's <c>row_cap</c>: an integer from 1 to <see cref="QueryLimits.MaxRowCap"/>.</summary>
     private static int RowCap(IDictionary<string, object?> row)
     {
         var cap = Integer(Value(row, "row_cap"));
@@ -183,6 +257,10 @@ internal static class CatalogTableReader
         return cap;
     }
 
+    /// <summary>The source's <c>query_timeout_seconds</c>: an integer from 1 through 86400.</summary>
+    /// <remarks>Every fault here, a missing cell included, throws <see cref="InvalidQueryTimeoutException"/> rather
+    /// than a bad cell, because the gateway turns only that exception into the answer that tells the steward to set
+    /// the value.</remarks>
     private static int QueryTimeoutSeconds(IDictionary<string, object?> row)
     {
         if (!row.TryGetValue("query_timeout_seconds", out var value))
@@ -195,6 +273,7 @@ internal static class CatalogTableReader
         return seconds;
     }
 
+    /// <summary>One capability flag: a boolean, or 0 or 1 when <paramref name="allowIntegralFlags"/> is true.</summary>
     private static bool Flag(IDictionary<string, object?> row, string field, bool allowIntegralFlags)
     {
         var value = Value(row, field);
@@ -210,6 +289,7 @@ internal static class CatalogTableReader
         };
     }
 
+    /// <summary>An integer cell of any integral type a driver returns, which must fit an <see cref="int"/>.</summary>
     private static int Integer(object? value)
     {
         try
@@ -233,5 +313,6 @@ internal static class CatalogTableReader
         }
     }
 
+    /// <summary>The bad-cell exception, carrying only <see cref="InvalidCell"/>.</summary>
     private static InvalidCastException BadCell() => new(InvalidCell);
 }

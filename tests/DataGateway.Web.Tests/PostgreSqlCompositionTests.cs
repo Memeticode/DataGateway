@@ -18,8 +18,15 @@ using Microsoft.Extensions.Options;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins how the example host picks its database engine from <c>DataGateway:DatabaseEngine</c>.</summary>
+/// <remarks>The setting selects SQL Server (the default) or PostgreSQL, ignoring case; anything else stops startup
+/// with a fixed message. An engine the app registers itself wins over the setting.</remarks>
 public sealed class PostgreSqlCompositionTests
 {
+    /// <summary>The selector registers exactly one engine of the chosen kind, and its matching catalog, without
+    /// opening a connection.</summary>
+    /// <remarks>On SQL Server the query runner reaches the selected engine through the host's forwarding engine, which
+    /// keeps the <c>sqlserver</c> provider name, so source aliases resolve unchanged.</remarks>
     [Theory]
     [InlineData(null,false)][InlineData("SqlServer",false)][InlineData("sqlserver",false)]
     [InlineData("PostgreSql",true)][InlineData("pOsTgReSqL",true)]
@@ -41,6 +48,8 @@ public sealed class PostgreSqlCompositionTests
             Assert.Same(selected, typeof(HostDatabaseEngine).GetField("selected", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(forwarding));
         }
     }
+    /// <summary>An empty, blank or unknown selector fails startup with one fixed message that names both
+    /// choices.</summary>
     [Theory]
     [InlineData("")][InlineData(" ")][InlineData("unknown")]
     public void Invalid_selector_fixed_message(string value)
@@ -49,6 +58,8 @@ public sealed class PostgreSqlCompositionTests
         var error=Assert.Throws<OptionsValidationException>(()=>new LoggedHost(settings:new Dictionary<string,string?>{["DataGateway:DatabaseEngine"]=value}));
         Assert.Equal("InvalidConfiguration: DataGateway:DatabaseEngine must be SqlServer or PostgreSql.",Assert.Single(error.Failures));
     }
+    /// <summary>An engine the app registered before the host's setup, as an instance or a factory, is kept, and the
+    /// selector adds no second one.</summary>
     [Theory]
     [InlineData(false)][InlineData(true)]
     public async Task Earlier_instance_or_factory_has_precedence(bool factory)

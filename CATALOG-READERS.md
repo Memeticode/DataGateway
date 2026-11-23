@@ -70,10 +70,26 @@ namespace GatewaySample
     using DataGateway.Data.Catalog;
     using Microsoft.Data.Sqlite;
 
+    /// <summary>The app's catalog reader: it answers the gateway's three catalog questions (the MCP text, the list of
+    /// sources, and one source in detail) from the <c>catalog_source</c> table.</summary>
+    /// <remarks>
+    /// <para>The catalog schema is the app's own; the library needs only these three answers. Here the MCP text
+    /// and each source's columns are fixed in code, and every source's connection is the one
+    /// <paramref name="sourceConnection"/> the app passes in, because every source table lives in the same
+    /// file.</para>
+    /// <para>Each read runs inside <c>Db.BatchAsync</c>, which opens a connection for the callback and closes it
+    /// afterwards, and copies its rows into new objects before returning, so nothing outlives the connection. The
+    /// cancellation token is passed to every asynchronous call and checked before returning.</para>
+    /// </remarks>
+    /// <param name="db">Creates the catalog connections; see <c>SampleProgram.CreateApplication</c>.</param>
+    /// <param name="sourceConnection">The connection every source's queries use.</param>
     public sealed class SampleCatalog(
         DbContext<SqliteConnection> db, string sourceConnection)
         : CatalogService<SqliteConnection>(db)
     {
+        /// <summary>Returns the MCP server title and about text and each tool's title and description.</summary>
+        /// <remarks>These are the texts a catalog database is seeded with, fixed in code; an app can read them from
+        /// its own storage instead. All three tools must be present, under these names.</remarks>
         public override Task<global::DataGateway.Core.Catalog.McpMetadata> QueryMcpMetadataAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -85,6 +101,9 @@ namespace GatewaySample
             ]));
         }
 
+        /// <summary>Returns every source in the catalog, with its row cap.</summary>
+        /// <remarks>Inactive rows are returned too, with <c>is_active</c> as stored; the gateway leaves them out of
+        /// its list answer.</remarks>
         public override async Task<IReadOnlyList<SourceListRow>> QueryCatalogAsync(
             CancellationToken cancellationToken)
         {
@@ -108,6 +127,16 @@ namespace GatewaySample
             }, cancellationToken);
         }
 
+        /// <summary>Returns one source's detail: its row, the object its queries read, its connection, and its
+        /// columns; null when no row has that name.</summary>
+        /// <remarks>
+        /// <para>The name arrives as the caller sent it, and the app decides how to match it: here SQLite's
+        /// <c>NOCASE</c>, which ignores case for ASCII letters only. A null answer makes the gateway report an
+        /// unknown source. The name travels as a parameter, never inside the SQL text.</para>
+        /// <para>The query timeout (30 seconds) and the one <c>id</c> column, open to every operation, are fixed
+        /// here because the sample's catalog table has no place for them. The provider name <c>sqlite</c> selects
+        /// the engine that runs this source's queries.</para>
+        /// </remarks>
         public override async Task<CatalogDetail?> QueryCatalogDetailAsync(
             string sourceName, CancellationToken cancellationToken)
         {

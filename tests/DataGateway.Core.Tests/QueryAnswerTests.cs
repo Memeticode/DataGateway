@@ -7,12 +7,22 @@ using Xunit;
 
 namespace DataGateway.Core.Tests;
 
+/// <summary>Pins <see cref="QueryAnswer"/>: parsing the query request body, rooting a library refusal's path under
+/// <c>$.query</c>, and turning rows into the public answer with its hint.</summary>
+/// <remarks>The hint is the last member of the answer and a plain fact a caller or model can act on: capped,
+/// nothing found, complete, or a warning that an in filter's unmatched values are left out. An answer with an in
+/// filter must never claim a complete set, because the values that matched no row are silently missing.</remarks>
 public sealed class QueryAnswerTests
 {
+    /// <summary>The refusal message for a body that is not valid JSON.</summary>
     private const string M1 = "The request body is not valid JSON. Send {\"source\": \"<name>\", \"query\": {...}} with a name from list sources.";
+    /// <summary>The refusal message for a body that is not exactly the two members source and query.</summary>
     private const string M2 = "Send a JSON object with exactly two properties, source and query: {\"source\": \"<name>\", \"query\": {...}}. Take the name from list sources and the query vocabulary from describe source.";
+    /// <summary>The refusal message for a source member that is not a string.</summary>
     private const string M3 = "source must be a JSON string: the name of a source from list sources.";
 
+    /// <summary>A body that is not an object with exactly source and query, each once and lowercase, is refused at the
+    /// root; a source that is not a string is refused at <c>$.source</c>.</summary>
     [Theory]
     [InlineData("[]", "$")]
     [InlineData("null", "$")]
@@ -36,6 +46,8 @@ public sealed class QueryAnswerTests
         Failure(QueryAnswer.ParseRequest(body.RootElement).Failure!, "InvalidStructure", path, path == "$" ? M2 : M3);
     }
 
+    /// <summary>Comments, trailing commas, empty and concatenated bodies fail the body parser, and the answer to such a
+    /// body is the fixed invalid-JSON refusal.</summary>
     [Theory]
     [InlineData("")]
     [InlineData("/*comment*/{}")]
@@ -47,6 +59,8 @@ public sealed class QueryAnswerTests
         Failure(QueryAnswer.InvalidJson, "InvalidJson", "$", M1);
     }
 
+    /// <summary>Nesting beyond the body parser's depth of 65 fails to parse, and is answered with the invalid-JSON
+    /// refusal.</summary>
     [Fact]
     public void T7_body_depth_above_65_is_invalid_json()
     {
@@ -54,6 +68,8 @@ public sealed class QueryAnswerTests
         Failure(QueryAnswer.InvalidJson,"InvalidJson","$",M1);
     }
 
+    /// <summary>Invalid UTF-8 in the source or query value is invalid JSON; in a member name it makes the body's
+    /// structure invalid.</summary>
     [Fact]
     public void T7_invalid_utf8_values_and_name()
     {
@@ -70,6 +86,8 @@ public sealed class QueryAnswerTests
         }
     }
 
+    /// <summary>The query member's exact text and the source name pass through unchanged, whatever their order or
+    /// content, so the query library sees the caller's own query.</summary>
     [Theory]
     [InlineData("{}")]
     [InlineData("[]")]
@@ -91,6 +109,8 @@ public sealed class QueryAnswerTests
         }
     }
 
+    /// <summary>A library refusal's path is prefixed with <c>$.query</c> and nothing else changes; any other failure is
+    /// returned as the same instance.</summary>
     [Theory]
     [InlineData("$", "$.query")]
     [InlineData("", "$.query")]
@@ -117,6 +137,8 @@ public sealed class QueryAnswerTests
         }
     }
 
+    /// <summary>Row values keep their exact JSON form: large integers and decimals are not rounded, text is escaped, and
+    /// a midnight date is written as a plain date a follow-up filter accepts.</summary>
     [Fact]
     public void T9_exact_web_json_values_names_order_and_dates()
     {
@@ -135,6 +157,7 @@ public sealed class QueryAnswerTests
         Assert.Same(input, answer.Rows[0]);
     }
 
+    /// <summary>Without an in filter, the hint follows only from <c>more</c> and the row count, and is written last.</summary>
     [Theory]
     [InlineData(true, 1, "The result set was capped at 1 row.")]
     [InlineData(true, 2, "The result set was capped at 2 rows.")]
@@ -152,6 +175,10 @@ public sealed class QueryAnswerTests
             + ",\"more\":" + (more ? "true" : "false") + ",\"hint\":\"" + hint + "\"}", JsonSerializer.Serialize(answer, JsonSerializerOptions.Web));
     }
 
+    /// <summary>Aggregate output columns carry their own names and types, and a row whose members differ from the
+    /// output columns, even only in case, throws.</summary>
+    /// <remarks>A mismatched row means the engine returned something other than what was validated; that is a defect,
+    /// so it throws rather than answering with wrong columns.</remarks>
     [Fact]
     public void T9_aggregate_empty_and_mismatch()
     {
@@ -170,6 +197,7 @@ public sealed class QueryAnswerTests
         }
     }
 
+    /// <summary>A row whose members are in a different order from the output columns throws.</summary>
     [Fact]
     public void T12_reordered_first_row_is_refused()
     {
@@ -221,6 +249,8 @@ public sealed class QueryAnswerTests
         Assert.Equal(new[] { "source", "columns", "rows", "rowCount", "more", "hint" }, wire.RootElement.EnumerateObject().Select(property => property.Name));
     }
 
+    /// <summary>With an in filter, an empty answer still says nothing was found and a capped answer still says it was
+    /// capped; a not-in filter leaves the complete-set hint alone.</summary>
     [Theory]
     [InlineData("{}", false, false, false, QueryResponse.CompleteSet)]
     [InlineData("""{"filters":[{"col":"region","op":"not_in","value":["North","Nowhere"]}]}""", false, false, false, QueryResponse.CompleteSet)]
@@ -238,6 +268,7 @@ public sealed class QueryAnswerTests
         Assert.Equal(hint, answer.Hint);
     }
 
+    /// <summary>No uncapped, non-empty answer to a query with an in filter, in any query shape, claims a complete set.</summary>
     [Fact]
     public void T5_D5_2_no_uncapped_nonempty_in_filter_answer_claims_complete_set()
     {
@@ -266,11 +297,13 @@ public sealed class QueryAnswerTests
         }
     }
 
+    /// <summary>A synthetic source whose text columns have the given names and every flag on.</summary>
     private static SourceContract Contract(string[] names) => CatalogMapping.Map(new(new DataSourceRow("hidden_schema.order_lines", "fixture-removed")
     { QueryTimeoutSeconds = 30, Id = 7319,
         Name = "synthetic_sales", Title = "Synthetic", Description = "Synthetic rows", Grain = "One line", RowCap = 500, IsActive = true
     }, names.Select((n,i) => new DataSourceColumnRow(n,i+1,n,"Meaning", "text",null,null,null,true,true,true,true,true)).ToArray())).Value;
 
+    /// <summary>Asserts a request refusal's code, path and message, and that it is logged at step <c>request</c>.</summary>
     private static void Failure(CatalogFailure failure, string code, string path, string message) =>
         Assert.Equal((code, path, message, "request"), (failure.Code, failure.Path, failure.Message, failure.Step));
 }

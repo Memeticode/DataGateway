@@ -11,11 +11,25 @@ using Xunit.Abstractions;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>The SQLite engine (<see cref="SqliteEngine"/>) on its own: connection validation, SQL compilation,
+/// LIKE escaping, boolean conversion and the open-read-dispose lifecycle, against a real SQLite file.</summary>
+/// <remarks>
+/// <para>The engine is a tests-only proof that a new database plugs in through the five public engine members
+/// alone. These tests pin that it keeps the same contract as the production engines: refuse bad input before opening
+/// anything, pass the caller's token and timeout through, hand back detached rows, and close every resource in order
+/// even when something fails.</para>
+/// <para>Lifecycle tests run through <see cref="SqliteProbe"/>, which records each real provider call.</para>
+/// </remarks>
 public sealed class SqliteEngineTests(ITestOutputHelper output)
 {
+    /// <summary>A compiled query with hand-written SQL, no parameters and a keep of 3, for tests that skip
+    /// validation.</summary>
+    /// <param name="sql">The SQL to run as is.</param>
+    /// <param name="columns">The output columns the engine converts cells by.</param>
     internal static CompiledQuery Raw(string sql, params OutputColumn[] columns) => new(sql,
         new Dictionary<string, object>(), 3, false, columns);
 
+    /// <summary>The plain row consumer: reads every row into a list.</summary>
     internal static async Task<QueryRows> Collect(IAsyncEnumerable<IDictionary<string, object?>> rows)
     {
         var result = new List<IDictionary<string, object?>>();
@@ -23,11 +37,24 @@ public sealed class SqliteEngineTests(ITestOutputHelper output)
         return new QueryRows(result, false);
     }
 
+    /// <summary>Runs <paramref name="query"/> through the engine against the fixture's read-only file, with a 7-second
+    /// command timeout.</summary>
+    /// <param name="engine">The engine under test.</param>
+    /// <param name="fixture">The database to read.</param>
+    /// <param name="query">The compiled query.</param>
+    /// <param name="consume">The row consumer; <see cref="Collect"/> when null.</param>
+    /// <param name="opened">Called once the connection is open; a no-op when null.</param>
+    /// <param name="token">The caller's cancellation token.</param>
     internal static Task<QueryRows> Read(SqliteEngine engine, SqliteFixture fixture, CompiledQuery query,
         Func<IAsyncEnumerable<IDictionary<string, object?>>, Task<QueryRows>>? consume = null,
         Action? opened = null, CancellationToken token = default) =>
         engine.ReadSourceAsync(fixture.Connection, query, 7, opened ?? (() => { }), consume ?? Collect, token);
 
+    /// <summary>Asserts that one read left nothing open: every reader closed and disposed before its command, every
+    /// command disposed, the single connection closed and disposed last, and no second result set read.</summary>
+    /// <param name="probe">The probe that recorded the read.</param>
+    /// <param name="readers">How many readers the read should have created.</param>
+    /// <param name="commands">How many commands the read should have created.</param>
     internal static void Clean(SqliteProbe probe, int readers = 1, int commands = 1)
     {
         Assert.Equal(readers, probe.Readers.Count);
@@ -45,6 +72,9 @@ public sealed class SqliteEngineTests(ITestOutputHelper output)
         Assert.Equal(0, probe.NextResults);
     }
 
+    /// <summary>A missing or unparseable source connection is refused with a fixed message that neither quotes the
+    /// text nor wraps the parser's exception, and no connection is created.</summary>
+    /// <remarks>The parser's own message can quote a password fragment; the fixed message cannot.</remarks>
     [Theory]
     [InlineData(null, "A read-only SQLite file with pooling disabled is required.")]
     [InlineData(" ", "A read-only SQLite file with pooling disabled is required.")]
@@ -58,6 +88,10 @@ public sealed class SqliteEngineTests(ITestOutputHelper output)
         Assert.Null(error.InnerException);
     }
 
+    /// <summary>Only a named, read-only file with pooling off is accepted: no data source, <c>:memory:</c>, memory
+    /// mode, writable modes and pooling on are all refused.</summary>
+    /// <remarks>Read-only at the connection is the engine's guard against writes; pooling off keeps a handle from
+    /// outliving the read.</remarks>
     [Theory]
     [InlineData("Mode=ReadOnly;Pooling=false")]
     [InlineData("Data Source=:memory:;Mode=ReadOnly;Pooling=false")]
@@ -72,6 +106,9 @@ public sealed class SqliteEngineTests(ITestOutputHelper output)
         Assert.Equal("A read-only SQLite file with pooling disabled is required.", Assert.Throws<ArgumentException>(() => engine.ValidateSourceConnection(text)).Message);
     }
 
+    /// <summary>A cancelled token or a zero timeout is refused before anything opens; the caller's token and timeout
+    /// reach open, execute and read; a write fails with SQLite's own read-only error, which the engine recognizes by
+    /// its code; validating a missing file does not create it.</summary>
     [Fact]
     public async Task T2_guards_read_only_and_real_failure_facts()
     {
@@ -114,6 +151,10 @@ public sealed class SqliteEngineTests(ITestOutputHelper output)
         Assert.False(File.Exists(missingFile));
     }
 
+    /// <summary>Compiled SQL and parameters match fixed goldens (quoted names, LIMIT of the row cap plus one), and
+    /// compiling never changes the validated query another engine compiles.</summary>
+    /// <remarks>A count without group_by also selects the private matched-row count; with group_by it does
+    /// not.</remarks>
     [Fact]
     public async Task T3_compilation_goldens_and_clone_independence()
     {
@@ -155,6 +196,10 @@ public sealed class SqliteEngineTests(ITestOutputHelper output)
         Assert.Equal(new[] { new OutputColumn("flag", "bool"), new OutputColumn("count_id", "number") }, grouped.Columns);
     }
 
+    /// <summary>Each <c>contains</c> and <c>like</c> value binds with the expected escapes and finds exactly the
+    /// expected rows in the real file.</summary>
+    /// <remarks>Under the gateway's rules <c>%</c> is the only wildcard in <c>like</c>, so <c>_</c> and backslash
+    /// must be escaped for SQLite; <c>[</c> is already plain there.</remarks>
     [Theory]
     [InlineData("contains", @"50%_[x]\end", "2", @"%50\%\_\[x]\\end%")]
     [InlineData("like", @"50%_[x]\end", "2", @"50%\_[x]\\end")]
@@ -179,6 +224,8 @@ public sealed class SqliteEngineTests(ITestOutputHelper output)
         output.WriteLine(compiled.Sql + " | " + binding + " -> " + ids);
     }
 
+    /// <summary>Patterns inside nested and/or groups are escaped one by one, editing a clone of the query changes
+    /// nothing compiled from the original, and injected SQL text stays a bound value.</summary>
     [Fact]
     public async Task T4_nested_clone_and_bound_injection()
     {
@@ -214,6 +261,9 @@ public sealed class SqliteEngineTests(ITestOutputHelper output)
         Assert.Equal(5L, (await Read(engine, fixture, Raw("SELECT COUNT(*) AS n FROM proof_items", new OutputColumn("n", "number")))).Rows[0]["n"]);
     }
 
+    /// <summary>Only a column declared <c>bool</c> in the compiled output turns 0/1 into booleans, whatever the
+    /// column is called; rows are separate dictionaries with the declared names; any other integer in a bool column
+    /// is refused.</summary>
     [Fact]
     public async Task T7_metadata_controls_detached_rows_and_boolean_refusal()
     {
@@ -234,6 +284,11 @@ public sealed class SqliteEngineTests(ITestOutputHelper output)
         Assert.Equal("The source boolean cell is invalid.", error.Message);
     }
 
+    /// <summary>For a full read, an early stop, a consumer fault, a read fault, an execute fault and duplicate column
+    /// names: the right exception comes out, the caller is told the source opened before any command, rows can be
+    /// enumerated only once, and every resource closes.</summary>
+    /// <remarks>Rows already handed out stay usable after disposal, while the row stream itself refuses further
+    /// use.</remarks>
     [Theory]
     [InlineData("full")]
     [InlineData("early")]
@@ -297,6 +352,9 @@ public sealed class SqliteEngineTests(ITestOutputHelper output)
         output.WriteLine(scenario + ": " + string.Join(" -> ", probe.Events));
     }
 
+    /// <summary>The read does not complete until the consumer and each asynchronous cleanup (reader, command,
+    /// connection) have finished.</summary>
+    /// <remarks>Fire-and-forget disposal would let the gateway answer while a connection is still open.</remarks>
     [Theory]
     [InlineData("reader")]
     [InlineData("command")]
@@ -335,6 +393,8 @@ public sealed class SqliteEngineTests(ITestOutputHelper output)
         output.WriteLine(gate + ": " + string.Join(" -> ", probe.Events));
     }
 
+    /// <summary>When cleanups fail too, the first fault wins: the consumer's if it threw, else the reader's cleanup
+    /// fault; every resource is still disposed.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -355,6 +415,8 @@ public sealed class SqliteEngineTests(ITestOutputHelper output)
         output.WriteLine(string.Join(" -> ", probe.Events));
     }
 
+    /// <summary>Column names that differ only by case stay separate keys, and the token given to the row enumerator
+    /// cancels the read.</summary>
     [Fact]
     public async Task T10_ordinal_names_and_enumeration_cancellation()
     {
@@ -376,6 +438,7 @@ public sealed class SqliteEngineTests(ITestOutputHelper output)
         Clean(probe);
     }
 
+    /// <summary>Missing arguments, a bad connection and blank SQL are refused before the connection factory runs, and validating a good connection opens nothing.</summary>
     [Fact]
     public async Task T2_arguments_refuse_before_factory_and_catalog_validations_are_local()
     {

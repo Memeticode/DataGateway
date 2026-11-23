@@ -19,8 +19,15 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the host and library READMEs to the product: every worked example is replayed against a running host
+/// and must match, the error table must list exactly the codes and paths the operations can return, and the setup
+/// commands, links, settings and licence text must name things that exist.</summary>
+/// <remarks>Documentation that is not tested drifts the first time the code changes. Here a changed answer, a renamed
+/// setting or a moved file fails the build instead of leaving the README wrong.</remarks>
 public sealed class ReadmeTests
 {
+    /// <summary>Each catalog SQL script picks its database only through the <c>CatalogDatabase</c> variable, with no
+    /// default of its own, and the README's setup commands pass that variable.</summary>
     [Fact]
     public void T14_catalog_database_variable_and_default_setup_commands_agree()
     {
@@ -53,11 +60,17 @@ public sealed class ReadmeTests
         Assert.Contains("the scripts define no default", Markdown);
     }
 
+    /// <summary>The host README's text.</summary>
     internal static string Markdown => File.ReadAllText(TestFiles.InRepo("DataGateway.Web/README.md"));
+    /// <summary>The library README's text.</summary>
     internal static string LibraryMarkdown => File.ReadAllText(TestFiles.InRepo("README.md"));
+    /// <summary>The host README's worked examples.</summary>
     internal static IReadOnlyList<ReadmeExample> Examples => ReadmeExamples.Parse(Markdown);
+    /// <summary>The documented answer of the named example, which other tests reuse as their synthetic catalog data.</summary>
     internal static JsonElement Example(string name) => Examples.Single(e => e.Name == name).Answer!.Value;
 
+    /// <summary>The MCP client configuration is shown as plain text, not a marked JSON example, and registers one server
+    /// named for its data that runs the proxy against the local endpoint.</summary>
     [Fact]
     public void T12_client_registration_names_the_data_and_is_not_an_API_example()
     {
@@ -79,6 +92,7 @@ public sealed class ReadmeTests
             ReadmeExamples.Parse(markdown).Select(e => e.Name).Order());
     }
 
+    /// <summary>The library README opens with the one-sentence description of what the library is.</summary>
     [Fact]
     public void T13_opening_describes_the_relational_data_window()
     {
@@ -86,6 +100,10 @@ public sealed class ReadmeTests
         Assert.Equal("""DataGateway is a read-only library for relational data. An ASP.NET Core app supplies a catalog reader and database engines, then maps JSON and MCP endpoints.""", opening);
     }
 
+    /// <summary>Every README example, sent to a running host, gets the documented status and the same JSON, with numbers
+    /// spelled the same way.</summary>
+    /// <remarks>The query example must also equal the API page's query example, and the listed source must equal the
+    /// described one, so the three places that show these answers cannot disagree.</remarks>
     [Fact]
     public async Task T3_examples_match_real_routes_in_order_and_number_spelling()
     {
@@ -106,7 +124,13 @@ public sealed class ReadmeTests
         EqualAnswer(Example("list").GetProperty("sources")[0], Example("describe").GetProperty("source"));
     }
 
+    /// <summary>The value as compact JSON, for exact text comparison.</summary>
     internal static string Compact(JsonElement value) => JsonSerializer.Serialize(value);
+    /// <summary>Asserts an answer equals the documented one, ignoring what cannot be fixed in a README.</summary>
+    /// <remarks>The incident id is random, so both sides need only be a 32-character hex id. The documented query schema
+    /// may show a part of the real one, so it must be a subset, not equal.</remarks>
+    /// <param name="expected">The documented answer.</param>
+    /// <param name="actual">The host's answer.</param>
     internal static void EqualAnswer(JsonElement expected, JsonElement actual)
     {
         var left = JsonNode.Parse(expected.GetRawText())!.AsObject();
@@ -127,6 +151,8 @@ public sealed class ReadmeTests
         Assert.Equal(Compact(JsonSerializer.SerializeToElement(left)), Compact(JsonSerializer.SerializeToElement(right)));
     }
 
+    /// <summary>Asserts every property in <paramref name="expected"/> is in <paramref name="actual"/> with the same value;
+    /// scalars and arrays must be equal.</summary>
     private static void Subset(JsonNode expected, JsonNode actual)
     {
         if (expected is JsonObject obj)
@@ -139,10 +165,26 @@ public sealed class ReadmeTests
         else Assert.True(JsonNode.DeepEquals(expected, actual), "Schema subset scalar or array differs.");
     }
 
+    /// <summary>One way to make the host return a documented error: the request to send and the code, status and path
+    /// expected back.</summary>
+    /// <param name="Code">The expected error code.</param>
+    /// <param name="Status">The expected HTTP status.</param>
+    /// <param name="Path">The expected JSON path.</param>
+    /// <param name="Route">The route to post to.</param>
+    /// <param name="Body">The request body.</param>
+    /// <param name="Mode">How <see cref="ReadmeWire"/> sets up the host to fail, such as <c>io</c>, <c>timeout</c> or
+    /// <c>anonymous</c>.</param>
+    /// <param name="Setting">A <c>DataGateway:Limits</c> setting to change, or null.</param>
+    /// <param name="Value">The value for <paramref name="Setting"/>.</param>
     public sealed record Trigger(string Code, int Status, string Path, string Route, string Body, string Mode = "ok", string? Setting = null, string? Value = null);
+    /// <summary>Adjusts a trigger for this host: a catalog timeout reaches the caller as CatalogUnavailable with 503.</summary>
+    /// <remarks>The error table still lists QueryTimeout on the catalog paths as declared vocabulary, but the host maps
+    /// every catalog failure, a timeout included, to CatalogUnavailable.</remarks>
     public static Trigger ForHost(Trigger trigger) => trigger.Mode == "timeout"
         ? trigger with { Code = "CatalogUnavailable", Status = 503 } : trigger;
+    /// <summary>A 400 trigger on the query route against the example source, with a path under <c>$.query</c>.</summary>
     private static Trigger Q(string code, string path, string query) => new(code, 400, "$.query" + path, "/query", "{\"source\":\"sales_by_line\",\"query\":" + query + "}");
+    /// <summary>One trigger for every code and path pair the README's error table documents.</summary>
     public static IEnumerable<object[]> Triggers()
     {
         yield return [new Trigger("InvalidJson", 400, "$", "/query", "not json")];
@@ -178,6 +220,8 @@ public sealed class ReadmeTests
         yield return [new Trigger("UnexpectedError", 500, "$", "/sources/describe", """{"source":"sales_by_line"}""", "unexpected")];
     }
 
+    /// <summary>The error table lists exactly the codes the operations can return, each with its real status, and every
+    /// code and path pair in it has a trigger in <see cref="Triggers"/>.</summary>
     [Fact]
     public void T4_error_table_matches_operation_codes_statuses_and_all_trigger_pairs()
     {
@@ -189,6 +233,8 @@ public sealed class ReadmeTests
         Assert.Equal(30, pairs.Length);
     }
 
+    /// <summary>Asserts the message ends with the stop guidance exactly once when the failure is one the caller cannot fix
+    /// by retrying, and never carries it otherwise.</summary>
     internal static void AssertStopGuidance(JsonElement body, Trigger trigger)
     {
         const string guidance = "Tell the user, give the incidentId and stop; do not retry.";
@@ -200,6 +246,8 @@ public sealed class ReadmeTests
             Assert.EndsWith(" " + guidance, message, StringComparison.Ordinal);
     }
 
+    /// <summary>Each documented error really happens: the host returns its code, status and path, and logs exactly one
+    /// line with the same incident id, except an unsigned call, which is answered before anything is logged.</summary>
     [Theory]
     [MemberData(nameof(Triggers))]
     public async Task T4_each_documented_code_path_and_incident_is_observed(Trigger trigger)
@@ -227,6 +275,9 @@ public sealed class ReadmeTests
         }
     }
 
+    /// <summary>Every relative link in the READMEs and guides points to a file inside the repository, every setting the
+    /// host README names is in its configuration guide, every path it names exists, and both READMEs carry the
+    /// attribution.</summary>
     [Fact]
     public void T5_links_paths_settings_and_attribution_stay_inside_public_root()
     {
@@ -254,8 +305,11 @@ public sealed class ReadmeTests
         Assert.Contains(Attribution, readme);
         Assert.Contains(Attribution, LibraryMarkdown);
     }
+    /// <summary>The attribution line the READMEs and the NOTICE file must carry word for word.</summary>
     internal const string Attribution = "Designed and directed by Maxim Konstantinovski. Built with AI models (Anthropic's Claude and OpenAI's GPT) under his direction and review.";
 
+    /// <summary>The demo project has no package or project references and reads no configuration or connection strings,
+    /// and the LICENSE and NOTICE files are exactly the published text.</summary>
     [Fact]
     public void T9_T10_demo_is_independent_and_licence_bytes_are_canonical()
     {
@@ -274,6 +328,8 @@ public sealed class ReadmeTests
         Assert.Contains("Apache License 2.0: [LICENSE](LICENSE), [NOTICE](NOTICE).", Markdown);
     }
 
+    /// <summary>The example seed script only merges rows, never deletes or bulk-loads them, and takes the source connection
+    /// string from one variable; the catalog DDL's comment on the connection column says it includes credentials.</summary>
     [Fact]
     public void T11_seed_preserves_auditing_and_ddl_comments_state_the_credential_rule()
     {
@@ -293,12 +349,27 @@ public sealed class ReadmeTests
     public void Parser_rejects_unmarked_or_ambiguous_examples(string text, string problem) => Assert.Contains(problem, Assert.Throws<FormatException>(() => ReadmeExamples.Parse(text)).Message);
 }
 
+/// <summary>The running hosts the README tests talk to, built from the README's own list and describe examples, with
+/// one client that routes each request to the right host.</summary>
+/// <remarks>The list route is served by a host without a source engine and every other route by a host with one; a
+/// third host has no synthetic sign-in, to answer the unsigned examples.</remarks>
 internal sealed class ReadmeWire : IAsyncDisposable
 {
+    /// <summary>The host that answers <c>/sources/list</c>.</summary>
     internal LoggedHost ListHost { get; }
+    /// <summary>The host that answers describe, query and every other route, with the source engine.</summary>
     internal LoggedHost SourceHost { get; }
+    /// <summary>A host with the real sign-in in place, for requests sent without credentials.</summary>
     internal LoggedHost Anonymous { get; } = new(synthetic: false);
 
+    /// <summary>Builds the hosts from catalog rows made from the given answers, failing as <paramref name="mode"/> says.</summary>
+    /// <param name="listed">The list answer to build the catalog from; the README's list example by default.</param>
+    /// <param name="described">The describe answers by source name; the README's describe example by default.</param>
+    /// <param name="engine">The source engine; by default a fake that returns the README's query rows for a grouped query.</param>
+    /// <param name="mode">How the hosts fail: <c>io</c> and <c>timeout</c> in the catalog, <c>off</c> for a source with
+    /// every operation off, <c>runner-io</c> and <c>runner-timeout</c> in the source, <c>body</c> for a small request
+    /// limit, <c>unexpected</c> for a fault while writing the answer; <c>ok</c> for none.</param>
+    /// <param name="settings">Extra configuration for both hosts.</param>
     internal ReadmeWire(JsonElement? listed = null, IReadOnlyDictionary<string, JsonElement>? described = null,
         DataGateway.Data.IDatabaseEngine? engine = null, string mode = "ok", IDictionary<string, string?>? settings = null)
     {
@@ -345,16 +416,20 @@ internal sealed class ReadmeWire : IAsyncDisposable
         SourceHost = new(Catalog(), engine, settings, configure: Configure);
     }
 
+    /// <summary>Throws the catalog failure that <paramref name="mode"/> names, if any.</summary>
     private static void Throw(string mode)
     {
         if (mode == "io") throw new IOException();
         if (mode == "timeout") throw new TimeoutException();
     }
+    /// <summary>Turns a flat JSON object into a row of scalar values, with numbers as <see cref="decimal"/>.</summary>
     internal static Dictionary<string, object?> Fields(JsonElement element) => element.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.ValueKind switch
     {
         JsonValueKind.String => (object?)p.Value.GetString(), JsonValueKind.Number => p.Value.GetDecimal(),
         JsonValueKind.True => true, JsonValueKind.False => false, JsonValueKind.Null => null, _ => throw new FormatException("Synthetic field is not scalar.")
     });
+    /// <summary>Turns a listed source into a catalog row, renaming the wire's <c>rowCap</c> to the column <c>row_cap</c>
+    /// and adding a one-second query timeout.</summary>
     private static Dictionary<string, object?> SourceFields(JsonElement source)
     {
         var row = Fields(source);
@@ -364,6 +439,10 @@ internal sealed class ReadmeWire : IAsyncDisposable
         return row;
     }
 
+    /// <summary>Turns a describe answer into the catalog's detail rows, one per column, with the wire's camel-case names
+    /// mapped back to the catalog's column names.</summary>
+    /// <param name="describe">The describe answer.</param>
+    /// <param name="off">Whether to turn every column operation off.</param>
     internal static IReadOnlyList<dynamic> SourceRows(JsonElement describe, bool off = false) => describe.GetProperty("querySchema").GetProperty("columns").EnumerateArray().Select((c, i) =>
     {
         var row = SourceFields(describe.GetProperty("source"));
@@ -379,7 +458,10 @@ internal sealed class ReadmeWire : IAsyncDisposable
         }
         return (dynamic)row;
     }).ToArray();
+    /// <summary>Starts the three hosts.</summary>
     internal async Task Start() { await ListHost.Start(); await SourceHost.Start(); await Anonymous.Start(); }
+    /// <summary>A client that sends each request to the host that serves its route.</summary>
+    /// <param name="mutation">An optional handler that changes requests before they are routed.</param>
     internal HttpClient Client(DelegatingHandler? mutation = null)
     {
         var route = new RouteHandler(ListHost.Client, SourceHost.Client);
@@ -387,8 +469,10 @@ internal sealed class ReadmeWire : IAsyncDisposable
         mutation.InnerHandler = route;
         return new(mutation) { BaseAddress = SourceHost.Client.BaseAddress };
     }
+    /// <summary>Forwards a list request to the list host and everything else to the source host.</summary>
     private sealed class RouteHandler(HttpClient list, HttpClient source) : DelegatingHandler
     {
+        /// <summary>Copies the request to the chosen host and returns its response.</summary>
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             var client = request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath == "/sources/list" ? list : source;
@@ -397,6 +481,7 @@ internal sealed class ReadmeWire : IAsyncDisposable
             return await client.SendAsync(forwarded, token);
         }
     }
+    /// <summary>Posts a JSON body and returns the answer, after scanning it for leaked synthetic secrets.</summary>
     internal static async Task<DemoAnswer> Send(HttpClient client, string path, string body)
     {
         using var response = await client.PostAsync(path, new StringContent(body, Encoding.UTF8, "application/json"));
@@ -404,5 +489,6 @@ internal sealed class ReadmeWire : IAsyncDisposable
         LoggedHost.Scan.Response("README answer", response, text);
         return new((int)response.StatusCode, response.Content.Headers.ContentType?.ToString(), string.Join(", ", response.Headers.WwwAuthenticate), text);
     }
+    /// <summary>Stops and disposes the three hosts.</summary>
     public async ValueTask DisposeAsync() { await ListHost.DisposeAsync(); await SourceHost.DisposeAsync(); await Anonymous.DisposeAsync(); }
 }

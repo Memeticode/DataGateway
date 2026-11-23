@@ -11,8 +11,11 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins how the host wires its database engine: SQL Server by default, a registered engine otherwise, and
+/// that the query runner and the query operation use that engine for both compiling and reading.</summary>
 public sealed class EngineCompositionTests
 {
+    /// <summary>With no engine registered, the host resolves one shared SQL Server engine.</summary>
     [Fact]
     public async Task T1_default_engine_is_one_sql_server_instance()
     {
@@ -24,6 +27,8 @@ public sealed class EngineCompositionTests
         Assert.Single(host.App.Services.GetServices<IDatabaseEngine>());
     }
 
+    /// <summary>An engine the host registers is the one the runner compiles with and reads through, receiving the
+    /// source's connection, its timeout and a deadline token of its own.</summary>
     [Fact]
     public async Task T2_composition_passes_the_registered_engine_to_the_runner()
     {
@@ -50,6 +55,8 @@ public sealed class EngineCompositionTests
         DeadlineToken.Passed(caller.Token, engine.Token);
     }
 
+    /// <summary>The query operation compiles through the runner's engine and, when the read fails, still records the
+    /// compiled query and the source in the request trail for the error log.</summary>
     [Fact]
     public async Task T3_operation_uses_runner_compilation_and_preserves_the_diagnostic_trail()
     {
@@ -75,18 +82,30 @@ public sealed class EngineCompositionTests
         Assert.NotNull(trail.Source);
     }
 
+    /// <summary>An engine that records each call's arguments, compiles as SQL Server does and returns no rows.</summary>
     private sealed class RecordingEngine : IDatabaseEngine
     {
+        /// <summary>The provider name, <c>synthetic</c>.</summary>
         string IDatabaseEngine.ProviderName => "synthetic";
+        /// <summary>How many times <see cref="Compile"/> ran.</summary>
         internal int Calls { get; private set; }
+        /// <summary>The last query given to <see cref="Compile"/>.</summary>
         internal ValidatedQuery? Input { get; private set; }
+        /// <summary>The last query <see cref="Compile"/> returned.</summary>
         internal CompiledQuery? Output { get; private set; }
+        /// <summary>Connection checks, reads, and the last read's command timeout in seconds.</summary>
         internal int Validations, Reads, Timeout;
+        /// <summary>The last connection checked or read from.</summary>
         internal string? Connection;
+        /// <summary>The last query read.</summary>
         internal CompiledQuery? ReadQuery;
+        /// <summary>The last read's token.</summary>
         internal CancellationToken Token;
+        /// <summary>Counts the check and records the connection; accepts any value.</summary>
         public void ValidateSourceConnection(string? connection) { Validations++; Connection = connection; }
+        /// <summary>Recognizes no failure.</summary>
         public ProviderFailure? RecognizeFailure(Exception error) => null;
+        /// <summary>Records the read, reports the connection as opened and hands the consumer no rows.</summary>
         public Task<QueryRows> ReadSourceAsync(string connection, CompiledQuery query, int commandTimeoutSeconds,
             Action opened, Func<IAsyncEnumerable<IDictionary<string, object?>>, Task<QueryRows>> consume, CancellationToken cancellationToken)
         {
@@ -95,8 +114,10 @@ public sealed class EngineCompositionTests
             opened();
             return consume(Empty());
         }
+        /// <summary>An empty asynchronous row sequence.</summary>
         private static async IAsyncEnumerable<IDictionary<string, object?>> Empty() { await Task.CompletedTask; yield break; }
 
+        /// <summary>Records the input and output of a SQL Server compilation.</summary>
         public CompiledQuery Compile(ValidatedQuery query)
         {
             Calls++;

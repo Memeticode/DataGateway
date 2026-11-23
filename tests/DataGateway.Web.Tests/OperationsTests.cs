@@ -3,8 +3,14 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins where each step of the three operations (list, describe, query) lives in the gateway's source.</summary>
+/// <remarks>Each step (read the catalog, parse the request, validate, compile, run, map the answer) must appear in
+/// exactly one operation file, so the HTTP routes and the MCP tools share one flow instead of each keeping a copy that
+/// can drift. For the same reason, routes and tools parse no JSON themselves.</remarks>
 public sealed class OperationsTests
 {
+    /// <summary>Each step's call text is found only in its expected file, and no route or MCP tool parses JSON
+    /// itself.</summary>
     [Fact]
     public void T14_operation_flow_has_one_home()
     {

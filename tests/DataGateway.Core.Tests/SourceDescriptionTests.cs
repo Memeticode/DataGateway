@@ -8,8 +8,18 @@ using Xunit;
 
 namespace DataGateway.Core.Tests;
 
+/// <summary>Pins <see cref="SourceDescription"/>: the describe-source answer (the source's metadata and its query
+/// schema) and its request check.</summary>
+/// <remarks>
+/// <para>The query schema is what a caller or model reads to write a query, so it must agree with the validator
+/// exactly: every column, function and limit the schema offers is accepted, and everything it leaves out is
+/// refused. The tests probe the query library directly against the schema to prove that agreement.</para>
+/// <para>The answer never carries the connection string, object name or other internal contract fields.</para>
+/// </remarks>
 public sealed class SourceDescriptionTests
 {
+    /// <summary>The answer has exactly its documented members, columns in ordinal order, null metadata written as null,
+    /// and a documentation-only column listed with every flag false.</summary>
     [Fact]
     public void T2_exact_shape_order_nulls_and_documented_only_column()
     {
@@ -33,6 +43,8 @@ public sealed class SourceDescriptionTests
         Assert.Equal(JsonValueKind.Object, body.GetProperty("querySchema").ValueKind);
     }
 
+    /// <summary>For every type and flag combination, each schema clause lists exactly the columns whose flag allows it,
+    /// with type-appropriate aggregate functions and the configured row cap as the limit maximum.</summary>
     [Fact]
     public void T3_all_128_flag_combinations_match_every_schema_clause_and_configured_cap()
     {
@@ -44,6 +56,8 @@ public sealed class SourceDescriptionTests
             Assert.DoesNotContain(JsonSerializer.Serialize(c.Name), schema.GetRawText());
     }
 
+    /// <summary>Every column, aggregate function and limit bound the schema offers is accepted by the validator, and
+    /// everything else is refused with the matching code.</summary>
     [Fact]
     public void T4_schema_and_validator_agree_for_all_columns_functions_and_limit_bounds()
     {
@@ -55,6 +69,7 @@ public sealed class SourceDescriptionTests
         AssertLimit(contract, limits, unbounded, JsonQueryErrorCode.StructuralLimitExceeded);
     }
 
+    /// <summary>No part of the connection string, object name or internal contract field names appears in the answer.</summary>
     [Fact]
     public void T5_internal_object_connection_and_contract_fields_never_escape()
     {
@@ -72,6 +87,8 @@ public sealed class SourceDescriptionTests
             Assert.DoesNotContain(fragment, body.GetRawText(), StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>The requested source name is passed on exactly as sent, case and spaces included; matching it is the
+    /// catalog's job.</summary>
     [Theory]
     [InlineData("{\"source\":\"synthetic_sales\"}", "synthetic_sales")]
     [InlineData("{\"source\":\"SYNTHETIC_SALES\"}", "SYNTHETIC_SALES")]
@@ -85,6 +102,8 @@ public sealed class SourceDescriptionTests
         Assert.Equal(name, parsed.Value);
     }
 
+    /// <summary>A body that is not exactly one string member <c>source</c> is refused with a fixed message that echoes
+    /// nothing from the body.</summary>
     [Theory]
     [InlineData("[]", "$")]
     [InlineData("\"x\"", "$")]
@@ -105,6 +124,8 @@ public sealed class SourceDescriptionTests
         AssertRequestFailure(SourceDescription.ParseRequest(body.RootElement), "InvalidStructure", path);
     }
 
+    /// <summary>Invalid UTF-8 in the source value is invalid JSON; in a member name it is an invalid structure; neither
+    /// echoes the input.</summary>
     [Fact]
     public void T6_invalid_utf8_value_and_property_name_are_handled_without_echoing_input()
     {
@@ -117,6 +138,8 @@ public sealed class SourceDescriptionTests
         AssertRequestFailure(SourceDescription.ParseRequest(named.RootElement), "InvalidStructure", "$");
     }
 
+    /// <summary>Configured structural limits appear in the schema, and the validator accepts each limit exactly and
+    /// refuses one past it.</summary>
     [Fact]
     public void T11_configured_schema_and_validator_agree_on_every_structural_boundary()
     {
@@ -127,6 +150,8 @@ public sealed class SourceDescriptionTests
         Assert.Equal(9, RowCap.Plan(null, limits).Keep);
     }
 
+    /// <summary>With a filter depth of 0, the schema offers no group depth or group rule and the validator refuses any
+    /// nested group.</summary>
     [Fact]
     public void T11_depth_zero_schema_and_validator_allow_only_flat_filters()
     {
@@ -137,6 +162,8 @@ public sealed class SourceDescriptionTests
         AssertFlatOnly(contract, limits);
     }
 
+    /// <summary>Limits that overflow, are fractional or strings, are below 1, or exceed the cap are refused by the
+    /// library before any row plan is made.</summary>
     [Theory]
     [InlineData("2147483648", JsonQueryErrorCode.InvalidJson, "$")]
     [InlineData("1.5", JsonQueryErrorCode.InvalidJson, "$")]
@@ -153,6 +180,7 @@ public sealed class SourceDescriptionTests
         Assert.Equal(path, failure?.Path);
     }
 
+    /// <summary>A null limit is accepted as no limit: the query has no limit clause and the plan uses the cap.</summary>
     [Fact]
     public void T11_null_limit_is_accepted_and_has_no_limit_clause()
     {
@@ -167,6 +195,8 @@ public sealed class SourceDescriptionTests
         Assert.Equal(9, plan.Keep);
     }
 
+    /// <summary>The answer's own query schema (the wire form, not the library's JSON Schema) agrees with the flags, the
+    /// types and the validator for every combination.</summary>
     [Fact]
     public void T16_wire_matrix_matches_flags_types_library_and_validator()
     {
@@ -235,6 +265,7 @@ public sealed class SourceDescriptionTests
             Assert.Equal(new[] { "text", "number", "date", "bool" }.Where(t => TypeFunctions(t).Contains(fn.Fn)), fn.Types);
     }
 
+    /// <summary>A source mixing types and flags gets a wire schema whose clauses match what the validator accepts.</summary>
     [Fact]
     public void T16_mixed_source_types_follow_clause_flags_and_validator()
     {
@@ -289,6 +320,8 @@ public sealed class SourceDescriptionTests
                 Probe(contract, limits, JsonSerializer.Serialize(new { aggregates = new[] { new { fn, col = "amount" } } }))?.Code);
     }
 
+    /// <summary>Duplicates within a clause and across group and aggregate output names, empty groups, null and
+    /// fractional limits, and select with grouping are refused or accepted as the schema's rule text says.</summary>
     [Fact]
     public void T16_cross_clause_duplicates_empty_groups_and_limits_agree()
     {
@@ -313,6 +346,8 @@ public sealed class SourceDescriptionTests
         Assert.Contains("never equal to a group_by column", wire.Aggregates!.Rule);
     }
 
+    /// <summary>The flag and clause names that refusal messages refer to still exist in the answer, so a message never
+    /// points at something the caller cannot find.</summary>
     [Fact]
     public void T18_frozen_message_schema_and_flag_referents_remain()
     {
@@ -327,6 +362,10 @@ public sealed class SourceDescriptionTests
             Assert.True(schema.TryGetProperty(clause, out _));
     }
 
+    /// <summary>Asserts the schema shows <paramref name="limits"/>, and that conditions, in values, group depth, limit
+    /// and payload length are each accepted at the limit and refused one past it.</summary>
+    /// <remarks>The edge values assume the limits <see cref="T11_configured_schema_and_validator_agree_on_every_structural_boundary"/>
+    /// configures.</remarks>
     private static void AssertStructuralBoundaries(SourceContract contract, JsonQueryLimits limits)
     {
         var schema = SourceDescription.Map(contract, limits).QuerySchema;
@@ -360,6 +399,7 @@ public sealed class SourceDescriptionTests
         StructuralFailure(contract, limits, json.PadRight(4097), "$");
     }
 
+    /// <summary>Asserts a depth-0 schema offers no grouping and the validator refuses one nested group.</summary>
     private static void AssertFlatOnly(SourceContract contract, JsonQueryLimits limits)
     {
         var schema = SourceDescription.Map(contract, limits).QuerySchema;
@@ -371,6 +411,7 @@ public sealed class SourceDescriptionTests
         StructuralFailure(contract, limits, JsonSerializer.Serialize(new { select = new[] { selected }, filters = new[] { new { and = new[] { node } } } }), "filters");
     }
 
+    /// <summary>Asserts the query is refused for a structural limit at a path starting with <paramref name="path"/>.</summary>
     private static void StructuralFailure(SourceContract contract, JsonQueryLimits limits, string json, string path)
     {
         var failure = Probe(contract, limits, json);
@@ -378,6 +419,8 @@ public sealed class SourceDescriptionTests
         Assert.StartsWith(path, failure?.Path);
     }
 
+    /// <summary>Asserts a describe request was refused with this code, path and the matching fixed message, at step
+    /// <c>request</c>, without echoing the input.</summary>
     private static void AssertRequestFailure(CatalogResult<string> result, string code, string path)
     {
         Assert.False(result.IsSuccess);
@@ -393,10 +436,13 @@ public sealed class SourceDescriptionTests
         Assert.DoesNotContain("fake-input-secret", failure.ToString());
     }
 
+    /// <summary>A synthetic column; bits 1, 2, 4, 8 and 16 of <paramref name="flags"/> switch on select, filter, sort,
+    /// group and aggregate.</summary>
     private static DataSourceColumnRow Column(string name, int ordinal, int flags = 31, string type = "number") =>
         new(name, ordinal, "Title " + name, "Meaning " + name, type, null, null, null,
             (flags & 1) != 0, (flags & 2) != 0, (flags & 4) != 0, (flags & 8) != 0, (flags & 16) != 0);
 
+    /// <summary>Maps a synthetic source with <paramref name="columns"/>, asserting the mapping succeeds.</summary>
     private static SourceContract Contract(IReadOnlyList<DataSourceColumnRow> columns)
     {
         var result = CatalogMapping.Map(new(new DataSourceRow("hidden.synthetic", "fixture-connection-removed")
@@ -407,11 +453,14 @@ public sealed class SourceDescriptionTests
         return result.Value;
     }
 
+    /// <summary>A source with one column for every type and flag combination: 4 types times 32 combinations.</summary>
     private static SourceContract Matrix() => Contract(new[] { "text", "number", "date", "bool" }
         .SelectMany((type, index) => Enumerable.Range(0, 32).Select(flags => Column($"c_{type}_{flags}", index * 32 + flags + 1, flags, type))).ToArray());
 
+    /// <summary>The answer as the web serializer writes it.</summary>
     private static JsonElement Serialize(SourceDescribeResponse response) => JsonSerializer.SerializeToElement(response, JsonSerializerOptions.Web);
 
+    /// <summary>Asserts the answer, its source and each column have exactly their documented members.</summary>
     private static void AssertShape(JsonElement body)
     {
         Properties(body, "source", "querySchema");
@@ -421,9 +470,11 @@ public sealed class SourceDescriptionTests
                 "canSelect", "canFilter", "canSort", "canGroup", "canAggregate");
     }
 
+    /// <summary>Asserts <paramref name="value"/> has exactly these members, in any order.</summary>
     private static void Properties(JsonElement value, params string[] names) =>
         Assert.Equal(names.Order(StringComparer.Ordinal), value.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
 
+    /// <summary>Asserts the answer's source and columns equal the catalog rows, in ordinal order.</summary>
     private static void AssertMetadata(JsonElement body, SourceMetadata source, IReadOnlyList<DataSourceColumnRow> rows)
     {
         Assert.True(JsonElement.DeepEquals(JsonSerializer.SerializeToElement(source, JsonSerializerOptions.Web), body.GetProperty("source")));
@@ -436,19 +487,24 @@ public sealed class SourceDescriptionTests
         Assert.True(JsonElement.DeepEquals(JsonSerializer.SerializeToElement(expected, JsonSerializerOptions.Web), body.GetProperty("querySchema").GetProperty("columns")));
     }
 
+    /// <summary>The strings in a JSON array.</summary>
     private static string[] Strings(JsonElement array) => array.EnumerateArray().Select(v => v.GetString()!).ToArray();
+    /// <summary>The item schema of a clause in the library's JSON Schema.</summary>
     private static JsonElement Items(JsonElement schema, string clause) => schema.GetProperty("properties").GetProperty(clause).GetProperty("items");
+    /// <summary>The column names a list clause offers; none when its items schema is <c>false</c>.</summary>
     private static string[] Names(JsonElement schema, string clause)
     {
         var items = Items(schema, clause);
         return items.ValueKind == JsonValueKind.False ? [] : Strings(items.GetProperty("enum"));
     }
+    /// <summary>The column names the filter schema offers, across its per-type branches.</summary>
     private static string[] FilterNames(JsonElement schema)
     {
         var filter = schema.GetProperty("$defs").GetProperty("filter");
         return filter.ValueKind == JsonValueKind.False ? [] : filter.GetProperty("oneOf").EnumerateArray()
             .SelectMany(b => Strings(b.GetProperty("properties").GetProperty("col").GetProperty("enum"))).ToArray();
     }
+    /// <summary>The aggregate functions the schema offers for each column.</summary>
     private static Dictionary<string, string[]> Functions(JsonElement schema)
     {
         var items = Items(schema, "aggregates");
@@ -457,11 +513,13 @@ public sealed class SourceDescriptionTests
                 .Select(c => (Name: c, Functions: Strings(b.GetProperty("properties").GetProperty("fn").GetProperty("enum")))))
             .ToDictionary(pair => pair.Name, pair => pair.Functions, StringComparer.Ordinal);
     }
+    /// <summary>The names <c>order_by</c> offers: sortable columns and aggregate outputs.</summary>
     private static string[] SortNames(JsonElement schema)
     {
         var items = Items(schema, "order_by");
         return items.ValueKind == JsonValueKind.False ? [] : Strings(items.GetProperty("properties").GetProperty("col").GetProperty("enum"));
     }
+    /// <summary>The aggregate functions each data type allows.</summary>
     private static string[] TypeFunctions(string type) => type switch
     {
         "number" => ["count", "sum", "avg", "min", "max"],
@@ -469,9 +527,12 @@ public sealed class SourceDescriptionTests
         "bool" => ["count"],
         _ => throw new ArgumentOutOfRangeException(nameof(type))
     };
+    /// <summary>Asserts two name lists hold the same names, ignoring order.</summary>
     private static void SetEqual(IEnumerable<string> expected, IEnumerable<string> actual) =>
         Assert.Equal(expected.Order(StringComparer.Ordinal), actual.Order(StringComparer.Ordinal));
 
+    /// <summary>Asserts each clause of the library's JSON Schema offers exactly what the column flags and types allow,
+    /// and the limit runs from 1 to <paramref name="cap"/>.</summary>
     private static void AssertSchema(JsonElement schema, IReadOnlyList<ColumnMetadata> columns, int cap)
     {
         Assert.Equal(columns.Where(c => c.CanSelect).Select(c => c.Name), Names(schema, "select"));
@@ -487,6 +548,8 @@ public sealed class SourceDescriptionTests
         Assert.Equal(cap, limit.GetProperty("maximum").GetInt32());
     }
 
+    /// <summary>Asserts, column by column and clause by clause, that the validator accepts a query exactly when the
+    /// schema offers it; documentation-only columns are refused as unknown.</summary>
     private static void AssertAgreement(SourceContract contract, JsonElement schema, JsonQueryLimits limits, int cap)
     {
         var selected = contract.Columns.First(c => c.CanSelect).Name;
@@ -522,11 +585,15 @@ public sealed class SourceDescriptionTests
         AssertLimit(contract, limits, cap + 1, JsonQueryErrorCode.StructuralLimitExceeded);
         AssertLimit(contract, limits, 0, JsonQueryErrorCode.InvalidLimit);
     }
+    /// <summary>Runs the query library's validator on <paramref name="json"/>.</summary>
+    /// <returns>The refusal, or null when the query is accepted.</returns>
     private static JsonQueryException? Probe(SourceContract contract, JsonQueryLimits limits, string json)
     {
         try { _ = new Query("synthetic_view").WithJsonQuery(json, contract.QueryColumns, limits); return null; }
         catch (JsonQueryException failure) { return failure; }
     }
+    /// <summary>Asserts a select with limit <paramref name="n"/> is accepted, or refused at <c>limit</c> with
+    /// <paramref name="code"/>.</summary>
     private static void AssertLimit(SourceContract contract, JsonQueryLimits limits, int n, JsonQueryErrorCode? code)
     {
         var failure = Probe(contract, limits, JsonSerializer.Serialize(new { select = new[] { contract.Columns.First(c => c.CanSelect).Name }, limit = n }));

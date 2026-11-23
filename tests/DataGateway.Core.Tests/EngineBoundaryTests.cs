@@ -9,8 +9,20 @@ using Xunit;
 
 namespace DataGateway.Core.Tests;
 
+/// <summary>Pins the boundary between the validated query and a database engine: what <see cref="IDatabaseEngine"/>
+/// asks of an engine, and what Core hands it.</summary>
+/// <remarks>
+/// <para>Core owns no SQL dialect. An engine receives a <see cref="ValidatedQuery"/>, compiles it to its own SQL and
+/// returns a <see cref="CompiledQuery"/>, so a new database needs only a new engine, and no engine can change the
+/// query another engine or a later request sees.</para>
+/// <para>The probe engines here are written only against public types, as an outside package would be.</para>
+/// </remarks>
 public sealed class EngineBoundaryTests
 {
+    /// <summary><see cref="ValidatedQuery.CloneQuery"/> returns a tree, nested filter groups included, that an engine
+    /// may change freely: compiling the validated query again gives the same SQL, bindings and row plan.</summary>
+    /// <remarks>Without a deep copy, an engine that adds its row limit or rewrites a pattern would change the shared
+    /// query, and the next compile would differ.</remarks>
     [Fact]
     public void T1_returned_tree_and_every_nested_container_are_detached()
     {
@@ -64,6 +76,8 @@ public sealed class EngineBoundaryTests
         }
     }
 
+    /// <summary><see cref="CompiledQuery"/> copies its bindings and columns, exposes them read-only and refuses missing
+    /// arguments or a keep count below 1.</summary>
     [Fact]
     public void T2_compiled_result_snapshots_neutral_bindings_and_columns()
     {
@@ -86,6 +100,8 @@ public sealed class EngineBoundaryTests
         Assert.Throws<ArgumentOutOfRangeException>(() => new CompiledQuery("select 1", parameters, 0, false, columns));
     }
 
+    /// <summary>An engine built only from public types compiles a query in another dialect (limit instead of top) with
+    /// the planned fetch and keep counts.</summary>
     [Fact]
     public void T3_an_outside_adapter_compiles_using_only_public_contracts()
     {
@@ -105,6 +121,9 @@ public sealed class EngineBoundaryTests
         Assert.Equal(2, validated.CloneQuery().GetOneComponent<LimitClause>("limit").Limit);
     }
 
+    /// <summary>The engine interface is exactly its four methods and provider name, with no optional parameters and no
+    /// driver or data-access types in any signature; Core holds no SQL Server dialect text and exposes no internals; the
+    /// project references run Core, then Data, then the SQL Server engine.</summary>
     [Fact]
     public void T4_eight_engine_capabilities_and_core_has_no_dialect()
     {
@@ -165,6 +184,8 @@ public sealed class EngineBoundaryTests
         Assert.Equal("../DataGateway.Data/DataGateway.Data.csproj", (string?)engineReference.Attribute("Include"));
     }
 
+    /// <summary>Fails when a type, or any element, generic argument, constraint or delegate signature inside it, names a
+    /// database driver or data-access type.</summary>
     private static void InspectType(Type type)
     {
         foreach (var forbidden in new[] { "SqlClient", "Dapper", "DbConnection", "DbDataReader", "DbSession", "IDbConnection", "IDataReader" })
@@ -181,6 +202,8 @@ public sealed class EngineBoundaryTests
         }
     }
 
+    /// <summary>An outside engine runs through <c>QueryRunner</c> with the source's connection and timeout, and its own
+    /// recognized failure becomes a source-unavailable failure carrying the driver's error number and exception.</summary>
     [Theory]
     [InlineData(null)]
     [InlineData(902)]
@@ -206,15 +229,24 @@ public sealed class EngineBoundaryTests
         Assert.Equal(2, engine.Opened);
     }
 
+    /// <summary>The driver exception the probe engine recognizes as its own.</summary>
     private sealed class ProbeException(string message, Exception inner) : Exception(message, inner);
 
+    /// <summary>A probe engine that returns one row, records the connection it was given and can be made to fail.</summary>
+    /// <param name="number">The error number the engine reports for its own failure.</param>
     private sealed class ExecutingProbeEngine(int? number) : PortableProbeEngine
     {
+        /// <summary>When set, the next read throws it after the connection opens.</summary>
         internal Exception? Error;
+        /// <summary>The connection the last read was given.</summary>
         internal string? Connection;
+        /// <summary>How many reads opened a connection.</summary>
         internal int Opened;
+        /// <summary>The single row every successful read returns.</summary>
         internal readonly IDictionary<string, object?> Row = new Dictionary<string, object?> { ["label"] = "portable" };
+        /// <summary>Recognizes only <see cref="ProbeException"/>, as a failure that is not a timeout.</summary>
         public override ProviderFailure? RecognizeFailure(Exception error) => error is ProbeException ? new(false, number) : null;
+        /// <summary>Records the connection, checks the source's timeout arrives, then fails or returns <see cref="Row"/>.</summary>
         public override async Task<QueryRows> ReadSourceAsync(string connection, CompiledQuery query, int commandTimeoutSeconds,
             Action opened, Func<IAsyncEnumerable<IDictionary<string, object?>>, Task<QueryRows>> consume, CancellationToken cancellationToken)
         {
@@ -225,14 +257,20 @@ public sealed class EngineBoundaryTests
             if (Error is not null) throw Error;
             return await consume(Rows());
         }
+        /// <summary>Streams <see cref="Row"/> asynchronously.</summary>
         private async IAsyncEnumerable<IDictionary<string, object?>> Rows() { await Task.Yield(); yield return Row; }
     }
 
+    /// <summary>A minimal engine written against public contracts only, compiling with the PostgreSQL dialect.</summary>
     private class PortableProbeEngine : IDatabaseEngine
     {
+        /// <summary>The probe's provider name.</summary>
         string IDatabaseEngine.ProviderName => "synthetic";
+        /// <summary>Accepts any non-blank connection.</summary>
         public void ValidateSourceConnection(string? connection) => ArgumentException.ThrowIfNullOrWhiteSpace(connection);
+        /// <summary>Recognizes no failure.</summary>
         public virtual ProviderFailure? RecognizeFailure(Exception error) => null;
+        /// <summary>Reports the connection open and returns no rows.</summary>
         public virtual Task<QueryRows> ReadSourceAsync(string connection, CompiledQuery query, int commandTimeoutSeconds,
             Action opened, Func<IAsyncEnumerable<IDictionary<string, object?>>, Task<QueryRows>> consume, CancellationToken cancellationToken)
         {
@@ -240,7 +278,9 @@ public sealed class EngineBoundaryTests
             opened();
             return consume(Empty());
         }
+        /// <summary>An empty row stream.</summary>
         private static async IAsyncEnumerable<IDictionary<string, object?>> Empty() { await Task.CompletedTask; yield break; }
+        /// <summary>Applies the row plan's fetch count to a copy of the query and compiles it.</summary>
         public CompiledQuery Compile(ValidatedQuery query)
         {
             ArgumentNullException.ThrowIfNull(query);
@@ -251,6 +291,7 @@ public sealed class EngineBoundaryTests
         }
     }
 
+    /// <summary>The query and every nested filter-group query below it, depth first.</summary>
     private static IEnumerable<Query> Walk(Query query)
     {
         yield return query;
@@ -258,6 +299,7 @@ public sealed class EngineBoundaryTests
             foreach (var child in Walk(nested.Query)) yield return child;
     }
 
+    /// <summary>Validates <paramref name="json"/> against a one-column synthetic source with a row cap of 500.</summary>
     private static ValidatedQuery Validate(string json)
     {
         var source = new DataSourceRow("dbo.synthetic_view", "fixture-connection-removed")

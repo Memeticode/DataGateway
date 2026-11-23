@@ -26,13 +26,23 @@ using TestFiles = DataGateway.Core.Tests.TestFiles;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the example host's Windows sign-in: every endpoint requires a signed-in caller, a refused caller gets
+/// the gateway's JSON NotAuthenticated error with the Negotiate challenge, and a refusal never reads the catalog or
+/// leaks what the caller sent.</summary>
+/// <remarks>The tests run the real production host with its real Negotiate handler, which cannot complete a handshake
+/// here, so every unsigned call is refused. A probe catalog counts reads to prove refusal happens before the gateway
+/// does any work.</remarks>
+/// <param name="output">Receives each response and the recorded logs, to diagnose a failing run.</param>
 public sealed class SignInTests(ITestOutputHelper output)
 {
+    /// <summary>The exact JSON body of a NotAuthenticated refusal without an incident id.</summary>
     private const string FailureBody = """
         {"code":"NotAuthenticated","path":"$","message":"Sign in with Windows to call DataGateway: send the request with Windows credentials (HTTP Negotiate)."}
         """;
+    /// <summary>A catalog connection setting for a host that does not exist; the tests must never need to reach it.</summary>
     private const string Connection = "Server=fake-sign-in-host;Database=Catalog;Connect Timeout=1";
 
+    /// <summary>The error envelope turns the sign-in failure into status 401 and exactly <see cref="FailureBody"/>.</summary>
     [Fact]
     public void T18_envelope_keeps_the_sign_in_body_byte_for_byte()
     {
@@ -42,6 +52,8 @@ public sealed class SignInTests(ITestOutputHelper output)
         Assert.Equal(FailureBody, JsonSerializer.Serialize(reply.Body, JsonSerializerOptions.Web));
     }
 
+    /// <summary>Negotiate is the default scheme for authenticate and challenge, the fallback policy denies anonymous
+    /// callers, and no endpoint opts out with allow-anonymous.</summary>
     [Fact]
     public async Task T6_production_defaults_and_fallback_cover_every_endpoint()
     {
@@ -64,6 +76,8 @@ public sealed class SignInTests(ITestOutputHelper output)
         Assert.Equal("sign-in", WindowsSignIn.NotAuthenticated.Step);
     }
 
+    /// <summary>Every mapped endpoint, and unmapped routes, wrong methods and bad bodies, answer an unsigned call with the
+    /// plain refusal, without reading the catalog or logging a sign-in failure.</summary>
     [Fact]
     public async Task T7_anonymous_calls_to_every_endpoint_and_invalid_routes_never_read_the_catalog()
     {
@@ -98,6 +112,8 @@ public sealed class SignInTests(ITestOutputHelper output)
         finally { Dump(logs); }
     }
 
+    /// <summary>A malformed Negotiate token is refused with an incident id and one log line that names the exception type
+    /// but holds no exception or token, and the next unsigned call gets the plain refusal again.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -145,6 +161,8 @@ public sealed class SignInTests(ITestOutputHelper output)
         finally { Dump(logs); }
     }
 
+    /// <summary>When the handshake's first leg answers 401 with its own challenge, the caller still gets the gateway's JSON
+    /// body, the leg's header is kept as sent, and nothing is logged or read.</summary>
     [Fact]
     public async Task T9_handshake_leg_preserves_header_and_gets_the_body_outside_authentication()
     {
@@ -167,6 +185,8 @@ public sealed class SignInTests(ITestOutputHelper output)
         finally { Dump(logs); }
     }
 
+    /// <summary>A signed-in caller still gets the normal 404 and 405 for unmapped routes and wrong methods, not a sign-in
+    /// error.</summary>
     [Fact]
     public async Task T9_signed_in_unmapped_and_wrong_method_calls_keep_404_and_405()
     {
@@ -183,6 +203,12 @@ public sealed class SignInTests(ITestOutputHelper output)
             Assert.DoesNotContain("NotAuthenticated", await response.Content.ReadAsStringAsync(timeout.Token));
     }
 
+    /// <summary>Asserts a response is the sign-in refusal: 401, one challenge header, JSON content and the refusal body,
+    /// with an incident id only when the refusal was logged.</summary>
+    /// <param name="response">The response to check.</param>
+    /// <param name="token">Cancels reading the body.</param>
+    /// <param name="challenge">The exact <c>WWW-Authenticate</c> value expected.</param>
+    /// <param name="logged">Whether the refusal was logged and so carries an incident id.</param>
     private async Task AssertRefused(HttpResponseMessage response, CancellationToken token, string challenge = "Negotiate", bool logged = false)
     {
         var body = await response.Content.ReadAsStringAsync(token);
@@ -202,14 +228,17 @@ public sealed class SignInTests(ITestOutputHelper output)
         }
     }
 
+    /// <summary>Writes every recorded log entry to the test output.</summary>
     private void Dump(RecordedLogs logs)
     {
         foreach (var entry in logs.Entries) output.WriteLine($"{entry.Level} {entry.Category}: {entry.Text} {entry.Exception}");
     }
 
+    /// <summary>Every endpoint the host maps.</summary>
     private static Endpoint[] Endpoints(WebApplication app) =>
         ((IEndpointRouteBuilder)app).DataSources.SelectMany(source => source.Endpoints).ToArray();
 
+    /// <summary>A concrete request path for a route, with each route parameter filled by <c>x</c>.</summary>
     private static string RoutePath(Endpoint endpoint) => "/" + string.Join("/",
         Assert.IsType<RouteEndpoint>(endpoint).RoutePattern.PathSegments.Select(segment => string.Concat(
             segment.Parts.Select(part => part switch
@@ -220,8 +249,13 @@ public sealed class SignInTests(ITestOutputHelper output)
                 _ => throw new NotSupportedException("Unrecognized route pattern part.")
             }))));
 
+    /// <summary>A client for the started host, with no credentials.</summary>
     private static HttpClient Client(WebApplication app) => new() { BaseAddress = new Uri(Assert.Single(app.Urls)) };
 
+    /// <summary>Builds the production host on a free local port, with logs recorded and the catalog replaced.</summary>
+    /// <param name="logs">Receives every log entry.</param>
+    /// <param name="probe">The catalog probe that counts reads, or null for a plain test catalog.</param>
+    /// <param name="configure">An optional change to the host, such as a synthetic sign-in scheme.</param>
     private static WebApplication Host(RecordedLogs logs, ReaderProbe? probe = null, Action<WebApplicationBuilder>? configure = null) =>
         Program.CreateApplication(new WebApplicationOptions
         {
@@ -236,18 +270,31 @@ public sealed class SignInTests(ITestOutputHelper output)
             configure?.Invoke(builder);
         });
 
+    /// <summary>Counts the catalog reads made after the host has started.</summary>
+    /// <remarks>Startup reads the catalog itself; <see cref="StartInterval"/> sets the baseline, so <see cref="Calls"/>
+    /// counts only reads caused by the test's requests.</remarks>
     private sealed class ReaderProbe
     {
+        /// <summary>The test catalog the host uses.</summary>
         internal HostCatalogState Catalog { get; } = new();
+        /// <summary>The read count when the interval started.</summary>
         private int baseline;
+        /// <summary>The catalog reads since <see cref="StartInterval"/>.</summary>
         internal int Calls => Catalog.Lists + Catalog.Details - baseline;
+        /// <summary>Starts counting from now and arms the catalog.</summary>
         internal void StartInterval() { baseline = Catalog.Lists + Catalog.Details; Catalog.Arm(); }
     }
 
+    /// <summary>Sets the environment the host reads for one test, and restores it afterwards.</summary>
+    /// <remarks>The user-profile folders point at an empty scratch folder, so no user secrets on the machine reach the
+    /// host, and every limit setting is cleared, so the host runs on its defaults.</remarks>
     private sealed class SettingsScope : IDisposable
     {
+        /// <summary>Each changed variable's value before the scope.</summary>
         private readonly Dictionary<string, string?> original = new();
+        /// <summary>An empty folder under <c>obj</c> that stands in for the user profile.</summary>
         private readonly string scratch = TestFiles.InRepo("tests/DataGateway.Web.Tests/obj/sign-in-settings/" + Guid.NewGuid());
+        /// <summary>Creates the scratch folder and sets the variables.</summary>
         public SettingsScope()
         {
             Directory.CreateDirectory(scratch);
@@ -255,11 +302,13 @@ public sealed class SignInTests(ITestOutputHelper output)
             Set(DataGatewayConfiguration.ConnectionSetting, Connection);
             foreach (var name in new[] { "ConnectTimeoutSeconds", "CommandTimeoutSeconds", "RowCap", "MaxJsonLength", "MaxFilterDepth", "MaxFilterConditions", "MaxInValues" }) Set("DataGateway__Limits__" + name, null);
         }
+        /// <summary>Sets a variable, remembering its first original value.</summary>
         private void Set(string key, string? value)
         {
             original.TryAdd(key, Environment.GetEnvironmentVariable(key));
             Environment.SetEnvironmentVariable(key, value);
         }
+        /// <summary>Restores every variable and removes the scratch folder.</summary>
         public void Dispose()
         {
             foreach (var pair in original) Environment.SetEnvironmentVariable(pair.Key, pair.Value);
@@ -267,18 +316,29 @@ public sealed class SignInTests(ITestOutputHelper output)
         }
     }
 
+    /// <summary>One recorded log call, with its structured fields.</summary>
     private sealed record LogEntry(string Category, LogLevel Level, string Text, Exception? Exception, Dictionary<string, object?> Fields);
+    /// <summary>A logger provider that records every entry, so tests can read the fields of a sign-in failure.</summary>
     private sealed class RecordedLogs : ILoggerProvider
     {
+        /// <summary>Every entry, in order; a queue because requests log from several threads.</summary>
         private readonly ConcurrentQueue<LogEntry> entries = new();
+        /// <summary>Every recorded entry.</summary>
         internal IEnumerable<LogEntry> Entries => entries;
+        /// <summary>The entries that record a NotAuthenticated failure.</summary>
         internal IEnumerable<LogEntry> SignInFailures => entries.Where(entry => entry.Fields.GetValueOrDefault("Code") as string == "NotAuthenticated");
+        /// <summary>Creates a logger that records into this provider.</summary>
         public ILogger CreateLogger(string categoryName) => new Recorder(categoryName, entries);
+        /// <summary>Nothing to release.</summary>
         public void Dispose() { }
+        /// <summary>A logger that records every entry at every level.</summary>
         private sealed class Recorder(string category, ConcurrentQueue<LogEntry> entries) : ILogger
         {
+            /// <summary>Scopes are not recorded.</summary>
             public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            /// <summary>Every level is recorded.</summary>
             public bool IsEnabled(LogLevel logLevel) => true;
+            /// <summary>Records the entry with its formatted text and structured fields.</summary>
             public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
                 Func<TState, Exception?, string> formatter) => entries.Enqueue(new(category, logLevel, formatter(state, exception), exception,
                     state is IEnumerable<KeyValuePair<string, object?>> fields ? fields.ToDictionary(pair => pair.Key, pair => pair.Value) : new()));

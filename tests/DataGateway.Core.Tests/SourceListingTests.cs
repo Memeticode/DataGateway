@@ -4,8 +4,13 @@ using Xunit;
 
 namespace DataGateway.Core.Tests;
 
+/// <summary>Pins <see cref="SourceListing"/>: the list-sources answer, its request check and the unknown-source
+/// refusal.</summary>
+/// <remarks>Every list of source names uses one order, case-insensitive with an ordinal tiebreak, so the answer and
+/// the refusal's list of available sources read the same and do not depend on catalog row order.</remarks>
 public sealed class SourceListingTests
 {
+    /// <summary>Each source carries its own row cap into the answer.</summary>
     [Fact]
     public void T2_heterogeneous_caps_are_copied_independently()
     {
@@ -14,6 +19,8 @@ public sealed class SourceListingTests
         Assert.Equal(new[] { 7, 3 }, wire.GetProperty("sources").EnumerateArray().Select(s => s.GetProperty("rowCap").GetInt32()));
     }
 
+    /// <summary>Only active sources are listed, in name order, each with exactly name, title, description, grain and
+    /// row cap, and the input rows are left as given.</summary>
     [Fact]
     public void T2_active_rows_are_ordered_and_have_exactly_the_five_reasoning_properties()
     {
@@ -59,6 +66,8 @@ public sealed class SourceListingTests
         Assert.Equal(new[] { "Banana", "a1", "apple", "_x", "A1" }, rows.Select(row => row.Name));
     }
 
+    /// <summary>The unknown-source refusal names the active sources in the listing's order, and says what to do when
+    /// none is active.</summary>
     [Fact]
     public void T2_unknown_source_uses_the_list_order_without_mutating_input()
     {
@@ -97,6 +106,8 @@ public sealed class SourceListingTests
         Assert.Null(SourceListing.CheckRequest(body.RootElement));
     }
 
+    /// <summary>Any body other than an empty object, including other JSON kinds and objects with members, is refused
+    /// with one fixed message.</summary>
     [Theory]
     [InlineData("[]")]
     [InlineData("null")]

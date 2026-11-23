@@ -4,8 +4,16 @@ using Xunit;
 
 namespace DataGateway.Core.Tests;
 
+/// <summary>Pins <see cref="RefusalMessage.For"/>: the fix-it text a caller gets for each refused query.</summary>
+/// <remarks>The text is built only from the library's error code, the clause the path names and the computed limit
+/// detail. The caller's own query text never reaches it, so a refusal cannot echo markup, SQL or oversized input
+/// back to the caller.</remarks>
 public sealed class RefusalMessageTests
 {
+    /// <summary>Every library error code, and each clause variant of it, has exactly this wording; an unknown code gets
+    /// the generic sentence.</summary>
+    /// <remarks>The table is exact on purpose: the wording is the public contract a caller and a model act on, so any
+    /// change to it must show up here.</remarks>
     [Theory]
     [InlineData(JsonQueryErrorCode.InvalidJson, "$", null, "The query must be one JSON object whose only members are select, filters, group_by, aggregates, order_by and limit, each used once and with the type querySchema shows. Correct it against querySchema from describe source.")]
     [InlineData(JsonQueryErrorCode.InvalidJson, "", null, "The query must be one JSON object whose only members are select, filters, group_by, aggregates, order_by and limit, each used once and with the type querySchema shows. Correct it against querySchema from describe source.")]
@@ -37,6 +45,7 @@ public sealed class RefusalMessageTests
     public void T7_exact_table_W(JsonQueryErrorCode code, string path, string? detail, string expected) =>
         Assert.Equal(expected, RefusalMessage.For(code, path, detail));
 
+    /// <summary>A hostile or huge path changes nothing in the message beyond the clause it names, for every code.</summary>
     [Fact]
     public void T8_caller_text_never_reaches_wording()
     {

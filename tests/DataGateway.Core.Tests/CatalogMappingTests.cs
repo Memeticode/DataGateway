@@ -7,14 +7,25 @@ using Xunit;
 
 namespace DataGateway.Core.Tests;
 
+/// <summary>Pins <see cref="CatalogMapping.Map"/>: how a source's catalog rows become its contract, the public
+/// metadata plus the columns a query may use for each clause.</summary>
+/// <remarks>
+/// <para>A column's five flags (select, filter, sort, group, aggregate) decide which query clauses may name it. A
+/// column with every flag off stays in the described metadata but is absent from every query clause.</para>
+/// <para>The connection string and object name reach server code only: they never appear in the contract's JSON or
+/// its text form.</para>
+/// </remarks>
 public sealed class CatalogMappingTests
 {
+    /// <summary>Every supported data type paired with each of the 32 flag combinations.</summary>
     public static IEnumerable<object[]> SupportedMatrix()
     {
         foreach (var type in new[] { "text", "number", "date", "bool" })
             for (var flags = 0; flags < 32; flags++) yield return [type, flags];
     }
 
+    /// <summary>Each type and flag combination maps to the exact metadata and query capabilities, and the generated
+    /// query schema offers the column in exactly the clauses its flags allow.</summary>
     [Theory]
     [MemberData(nameof(SupportedMatrix))]
     public void T3_supported_types_and_all_32_flag_combinations_map_exactly(string type, int flags)
@@ -96,6 +107,7 @@ public sealed class CatalogMappingTests
         }
     }
 
+    /// <summary>A source whose columns all have every flag off is an invalid catalog: nothing could be queried.</summary>
     [Fact]
     public void T4_source_with_only_all_off_columns_requires_switching_on_a_flag()
     {
@@ -106,6 +118,8 @@ public sealed class CatalogMappingTests
         Assert.Equal("Switch on at least one flag in the catalog before using this source.", result.Failure.Message);
     }
 
+    /// <summary>A column with every flag off is still checked for a bare identifier name, a unique name and a supported
+    /// type, so a bad row cannot hide behind switched-off flags.</summary>
     [Theory]
     [InlineData("bad.name", "number", "bare ASCII SQL identifier")]
     [InlineData("COMPANION", "number", "duplicated ignoring case")]
@@ -132,6 +146,8 @@ public sealed class CatalogMappingTests
         Assert.DoesNotContain("fake-password", result.Failure.ToString());
     }
 
+    /// <summary>Columns come out in ordinal order, the catalog rows keep their own copy of the input, null unit,
+    /// magnitude and format stay null, and mapping twice gives the same result.</summary>
     [Fact]
     public void Mapping_orders_columns_without_mutating_input_and_preserves_nullable_metadata()
     {
@@ -164,6 +180,7 @@ public sealed class CatalogMappingTests
         Assert.Equal("UnknownSource", CatalogMapping.Map(new(Source(false), [first])).Failure!.Code);
     }
 
+    /// <summary>The connection string and object name are readable by server code but never serialized or printed.</summary>
     [Fact]
     public void Internals_are_available_to_server_code_and_absent_from_default_json_and_ToString()
     {
@@ -180,6 +197,7 @@ public sealed class CatalogMappingTests
         Assert.DoesNotContain("fake-password", output);
     }
 
+    /// <summary>A <see cref="CatalogResult{T}"/> is either a value or a failure; reading the value of a failure throws.</summary>
     [Fact]
     public void result_has_exactly_one_branch_and_rejected_value_throws()
     {
@@ -194,17 +212,25 @@ public sealed class CatalogMappingTests
         Assert.Null(success.Failure);
     }
 
+    /// <summary>A synthetic source row; its connection string is a marker the tests search output for.</summary>
+    /// <param name="active">Whether the source is active in the catalog.</param>
     private static DataSourceRow Source(bool active = true) => new("dbo.synthetic_observations", "fake-password")
     {
         Id = 7319, Name = "synthetic_observations", Title = "Synthetic observations", Description = "Test measurements.",
         QueryTimeoutSeconds = 30, Grain = "One synthetic measurement per day.", RowCap = 500, IsActive = active
     };
 
+    /// <summary>A synthetic column named <c>measure</c> with the given type and flags.</summary>
+    /// <param name="type">The catalog data type.</param>
+    /// <param name="flags">Bits 1, 2, 4, 8 and 16 switch on select, filter, sort, group and aggregate.</param>
     private static DataSourceColumnRow Column(string type, int flags) => new(
         "measure", 1, "Synthetic measure", "Meaning and aggregation guidance.", type,
         "widgets", "thousands", "N2", (flags & 1) != 0, (flags & 2) != 0,
         (flags & 4) != 0, (flags & 8) != 0, (flags & 16) != 0);
 
+    /// <summary>Reads the name, type and capabilities of each query column through reflection.</summary>
+    /// <remarks>The library keeps its ordered columns internal; reading them pins the exact type and capability pair,
+    /// which the public schema alone does not show.</remarks>
     private static IEnumerable<(string Name, string Type, QueryCapability Capabilities)> Inspect(QueryColumns columns)
     {
         var ordered = (IEnumerable)typeof(QueryColumns).GetProperty("Ordered", BindingFlags.NonPublic | BindingFlags.Instance)!
@@ -218,6 +244,7 @@ public sealed class CatalogMappingTests
         }
     }
 
+    /// <summary>Whether <paramref name="token"/> appears as a string anywhere in <paramref name="element"/>.</summary>
     private static bool ContainsToken(JsonElement element, string token) => element.ValueKind switch
     {
         JsonValueKind.String => element.GetString() == token,

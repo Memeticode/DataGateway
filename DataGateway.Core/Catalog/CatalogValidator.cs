@@ -6,6 +6,12 @@ namespace DataGateway.Core.Catalog;
 /// <remarks>Column semantics are checked by CatalogMapping. Inputs must remain stable during each call.</remarks>
 public static class CatalogValidator
 {
+    /// <summary>Checks the source list a catalog reader returned, entry by entry.</summary>
+    /// <remarks>Inactive rows are checked too, and every problem is reported, not only the first. Title,
+    /// description and grain must be non-null but may be empty.</remarks>
+    /// <param name="sources">The list rows, as returned.</param>
+    /// <returns>Every <c>InvalidCatalog</c> failure found, with its path under <c>$.sources</c>; empty when the list
+    /// is usable.</returns>
     public static IReadOnlyList<CatalogFailure> ValidateList(IReadOnlyList<SourceListRow?>? sources)
     {
         var failures = new List<CatalogFailure>();
@@ -47,6 +53,13 @@ public static class CatalogValidator
         return failures.AsReadOnly();
     }
 
+    /// <summary>Checks one source's detail as a catalog reader returned it for <paramref name="requestedName"/>.</summary>
+    /// <remarks>A null detail is not a fault here: it means the source does not exist, which the caller reports
+    /// as an unknown source. The query timeout is checked only here, because list rows do not carry it.</remarks>
+    /// <param name="requestedName">The source name the caller asked for.</param>
+    /// <param name="detail">The detail, or null when the reader found none.</param>
+    /// <returns>Every <c>InvalidCatalog</c> failure found, with its path under <c>$.detail</c>; empty when the
+    /// detail is usable or absent.</returns>
     public static IReadOnlyList<CatalogFailure> ValidateDetail(string requestedName, CatalogDetail? detail)
     {
         ArgumentNullException.ThrowIfNull(requestedName);
@@ -104,15 +117,26 @@ public static class CatalogValidator
     }
 
     // The ceiling has one home (QueryLimits.MaxRowCap); the correction is built from it, never restated.
+    /// <summary>The correction for a row cap out of range.</summary>
     private static readonly string RowCapCorrection =
         "Set rowCap to an integer from 1 through " + QueryLimits.MaxRowCap.ToString(CultureInfo.InvariantCulture) + ".";
 
+    /// <summary>Adds a failure when a row cap is outside 1 through <see cref="QueryLimits.MaxRowCap"/>.</summary>
+    /// <param name="failures">The list to add to.</param>
+    /// <param name="path">The JSON path of the row cap.</param>
+    /// <param name="rowCap">The row cap to check.</param>
+    /// <param name="sourceName">The source the row belongs to, for the message; null when unknown.</param>
     private static void CheckRowCap(List<CatalogFailure> failures, string path, int rowCap, string? sourceName)
     {
         if (rowCap < 1 || rowCap > QueryLimits.MaxRowCap)
             failures.Add(Failure(path, RowCapCorrection, sourceName));
     }
 
+    /// <summary>An <c>InvalidCatalog</c> failure, its message prefixed with the source it concerns when known.</summary>
+    /// <param name="path">The JSON path at fault.</param>
+    /// <param name="instruction">What to correct.</param>
+    /// <param name="sourceName">The source the fault belongs to; null when the row has no usable name.</param>
+    /// <returns>The failure.</returns>
     private static CatalogFailure Failure(string path, string instruction, string? sourceName = null) =>
         new("InvalidCatalog", path, sourceName is null ? instruction : $"Source '{sourceName}'. {instruction}")
         {

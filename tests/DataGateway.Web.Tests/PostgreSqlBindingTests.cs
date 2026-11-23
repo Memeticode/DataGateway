@@ -8,8 +8,15 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins how the PostgreSQL engine binds query values to command parameters.</summary>
 public sealed class PostgreSqlBindingTests
 {
+    /// <summary>Text and nulls bind with an unknown type, dates bind as PostgreSQL <c>date</c>, and every other value
+    /// binds as itself, with the caller's values left unchanged.</summary>
+    /// <remarks>An unknown type lets PostgreSQL infer the column's type, so a comparison against a <c>citext</c>
+    /// column keeps its case-insensitive meaning; binding as <c>text</c> would silently change results. The values
+    /// include an injection attempt, a long beyond double precision and a decimal's scale, which must reach the server
+    /// unaltered.</remarks>
     [Fact]
     public void Parameters_keep_unknown_date_and_native_values()
     {

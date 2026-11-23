@@ -9,6 +9,10 @@ using Microsoft.Extensions.Hosting;
 namespace DataGateway;
 
 /// <summary>Registers application catalogs and engines and exposes named JSON POST, MCP and API-page endpoint groups.</summary>
+/// <remarks>The host passes in everything the gateway needs and owns everything around it: the library reads no
+/// setting by itself, logs only through <see cref="ILoggerFactory"/>, and returns each endpoint group so the host
+/// attaches its own access policy. Registering a gateway maps nothing, and mapping it adds no access
+/// policy.</remarks>
 public static class DataGatewayExtensions
 {
     /// <summary>The category used by the gateway's existing structured failure logger.</summary>
@@ -35,6 +39,7 @@ public static class DataGatewayExtensions
     /// <param name="app">The required application pipeline builder.</param>
     /// <param name="name">The required ordinal gateway name, containing a non-whitespace character.</param>
     /// <returns>The same builder.</returns>
+    /// <exception cref="InvalidOperationException">The name is blank or no gateway is registered under it.</exception>
     public static IApplicationBuilder UseDataGatewayErrors(this IApplicationBuilder app, string name)
     {
         ArgumentNullException.ThrowIfNull(app);
@@ -65,6 +70,15 @@ public static class DataGatewayExtensions
     /// run lazily once per request adapter, with request services, and once in a startup scope. Awaited host startup
     /// validates all registered catalogs, including unmapped gateways. Catalogs and supplied engines remain owned
     /// by the application. A failed configuration is not committed. The original service collection is returned.</remarks>
+    /// <param name="services">The host's service collection.</param>
+    /// <param name="name">The gateway name, containing a non-whitespace character; used again to map the gateway and
+    /// to install its host error boundary.</param>
+    /// <param name="configure">Sets the catalog, engines and optional settings on the gateway's builder.</param>
+    /// <returns>The same service collection.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="services"/> or <paramref name="configure"/> is
+    /// null.</exception>
+    /// <exception cref="InvalidOperationException">The name is blank or already registered, or the configuration is
+    /// incomplete or invalid.</exception>
     public static IServiceCollection AddDataGateway(this IServiceCollection services, string name,
         Action<DataGatewayBuilder> configure)
     {
@@ -96,6 +110,13 @@ public static class DataGatewayExtensions
     /// UseDataGatewayErrors also covers following host middleware on selected gateway endpoints. Each ordinal
     /// gateway identity can be mapped once per service provider, including when mapping through parent groups.
     /// Empty and slash prefixes map at the root. Invalid prefixes do not claim a mapping.</remarks>
+    /// <param name="endpoints">The host's endpoint route builder, or a parent group.</param>
+    /// <param name="name">The registered gateway name.</param>
+    /// <param name="prefix">The route pattern the endpoints are mapped under.</param>
+    /// <returns>The group holding the gateway's endpoints, for the host's policy.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="endpoints"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">The name is not registered, the prefix is not a valid route
+    /// pattern, or the gateway is already mapped.</exception>
     public static RouteGroupBuilder MapDataGateway(this IEndpointRouteBuilder endpoints, string name, string prefix)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
@@ -124,6 +145,15 @@ public static class DataGatewayExtensions
     /// <summary>Maps one gateway's API document and Scalar page and returns their parent group.</summary>
     /// <remarks>The host owns policy on the returned group. API and page mappings are independent.
     /// Each gateway page can be mapped once per service provider. Invalid prefixes do not claim a mapping.</remarks>
+    /// <param name="endpoints">The host's endpoint route builder, or a parent group.</param>
+    /// <param name="name">The registered gateway name.</param>
+    /// <param name="prefix">The route pattern the page and document are mapped under; usually the API's own
+    /// prefix.</param>
+    /// <returns>The group holding the page, its assets and the document, for the host's policy.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="endpoints"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">The name is not registered, the prefix is not a valid route
+    /// pattern, or the gateway's page is already mapped. A document route another gateway already uses is refused
+    /// when the endpoints are built.</exception>
     public static RouteGroupBuilder MapDataGatewayApiPage(this IEndpointRouteBuilder endpoints, string name, string prefix)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
@@ -150,12 +180,19 @@ public static class DataGatewayExtensions
         }
     }
 
+    /// <summary>Refuses a null or blank gateway name.</summary>
+    /// <param name="name">The supplied name.</param>
     private static void CheckName(string name)
     {
         if (string.IsNullOrWhiteSpace(name))
             throw new InvalidOperationException("Gateway name must contain a non-whitespace character.");
     }
 
+    /// <summary>Refuses a name already registered in this service collection.</summary>
+    /// <remarks>Run before configuration, to fail fast, and again under the lock just before committing, so two
+    /// concurrent registrations of one name cannot both succeed.</remarks>
+    /// <param name="services">The host's service collection.</param>
+    /// <param name="name">The gateway name, compared ordinally.</param>
     private static void CheckDuplicate(IServiceCollection services, string name)
     {
         if (services.Any(descriptor => descriptor.ImplementationInstance is GatewayRegistration registration &&
@@ -163,5 +200,9 @@ public static class DataGatewayExtensions
             throw Refuse(name, "A gateway with this name is already registered.");
     }
 
+    /// <summary>A registration or mapping error that names the gateway.</summary>
+    /// <param name="name">The gateway name.</param>
+    /// <param name="reason">What is wrong and how to fix it.</param>
+    /// <returns>The exception to throw.</returns>
     private static InvalidOperationException Refuse(string name, string reason) => new($"Gateway '{name}'. {reason}");
 }

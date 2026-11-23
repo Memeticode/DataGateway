@@ -22,10 +22,17 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Error answers on the wire stay byte for byte what <see cref="WireGolden"/> recorded, on the JSON route and
+/// the MCP tool alike, and a source connection the driver cannot parse is refused without quoting it.</summary>
 public sealed class WireGoldenTests
 {
+    /// <summary>Writes every incident id (32 hex digits) as <c>INCIDENT</c>, so bodies compare with the
+    /// table.</summary>
     internal static string Normalize(string text) => Regex.Replace(text, "[0-9a-f]{32}", "INCIDENT");
 
+    /// <summary>The SQL Server engine replaces the driver's parse error with its own fixed message and drops the
+    /// inner exception.</summary>
+    /// <remarks>The driver's message quotes the part it could not parse, which can be a password.</remarks>
     [Fact]
     public void T1_source_parser_refusal_is_rewrapped_without_an_inner_exception()
     {
@@ -39,6 +46,10 @@ public sealed class WireGoldenTests
         Assert.Equal("A source server is required.", serverless.Message);
     }
 
+    /// <summary>Plants each failure in a host, sends the same request on the route and as a tool, and compares status,
+    /// body, <c>isError</c> and tool text with the recorded table.</summary>
+    /// <remarks>One deliberate change since the recording is stated here instead of in the table: a catalog timeout
+    /// and a catalog configuration fault now answer as CatalogUnavailable.</remarks>
     [Fact]
     public async Task T13_unchanged_route_and_tool_wire_bytes()
     {
@@ -109,6 +120,8 @@ public sealed class WireGoldenTests
         }
     }
 
+    /// <summary>The exception that stands for each case's failure, all carrying the same invented server and user
+    /// text that must never reach the answer.</summary>
     private static Exception Fault(string kind) => kind switch
     {
         "CatalogUnavailable" or "SourceUnavailable" => new IOException("driver server wire-host user wire-user detail"),
@@ -119,10 +132,22 @@ public sealed class WireGoldenTests
     };
 }
 
+/// <summary>How DataGateway treats connection strings and their failures: retired connect and row-cap settings are
+/// refused, each connection string is used exactly as written and governs its own connect behaviour, and driver text
+/// reaches the log without leaking a password into answers.</summary>
+/// <remarks>
+/// <para>The gateway never builds, edits or adds to a connection string: whoever writes the string decides its
+/// timeouts and retries, so there is one place to look and the gateway cannot quietly override it.</para>
+/// <para>A retired setting is refused at start, with exit code 2, rather than ignored: an operator who still sets it
+/// would otherwise believe it works.</para>
+/// </remarks>
 public sealed class ConnectionsAndErrorsTests
 {
+    /// <summary>The start-up refusal of the retired connect timeout setting.</summary>
     private const string Retired = "InvalidConfiguration: DataGateway:Limits:ConnectTimeoutSeconds is no longer read, because each connection string governs its own connect behaviour. Remove it (DataGateway__Limits__ConnectTimeoutSeconds in the environment), and set Connect Timeout and ConnectRetryCount in the connection string if you want values other than the driver's.";
 
+    /// <summary>The retired connect timeout setting is refused whatever its value, empty included, and the limits type
+    /// has no such property any more.</summary>
     [Theory]
     [InlineData("")]
     [InlineData("5")]
@@ -137,6 +162,8 @@ public sealed class ConnectionsAndErrorsTests
         Assert.Null(typeof(DataGatewayLimits).GetProperty("ConnectTimeoutSeconds"));
     }
 
+    /// <summary>Set in the environment, the retired connect timeout stops the real executable with exit code 2 and the
+    /// refusal on its output.</summary>
     [Theory]
     [InlineData("")]
     [InlineData("5")]
@@ -165,6 +192,7 @@ public sealed class ConnectionsAndErrorsTests
         finally { Environment.SetEnvironmentVariable(key, previous); }
     }
 
+    /// <summary>A key under the retired row cap setting is refused like the setting itself.</summary>
     [Fact]
     public void T20_stale_row_cap_child_section_is_refused()
     {
@@ -176,8 +204,10 @@ public sealed class ConnectionsAndErrorsTests
         Assert.Equal(220, Encoding.UTF8.GetByteCount(error.Message));
     }
 
+    /// <summary>The start-up refusal of the retired global row cap; each source's catalog row_cap replaced it.</summary>
     private const string RetiredRowCap = "InvalidConfiguration: DataGateway:Limits:RowCap is no longer read, because each source's row_cap in the catalog governs its cap. Remove it (DataGateway__Limits__RowCap in the environment), and set row_cap in the catalog.";
 
+    /// <summary>The retired row cap setting is refused whatever its value, valid numbers included.</summary>
     [Theory]
     [InlineData("")]
     [InlineData("5")]
@@ -195,6 +225,8 @@ public sealed class ConnectionsAndErrorsTests
         Assert.Null(typeof(DataGatewayLimits).GetProperty("RowCap"));
     }
 
+    /// <summary>Set in the environment, the retired row cap stops the real executable with exit code 2, without
+    /// echoing the value.</summary>
     [Theory]
     [InlineData("")]
     [InlineData("5")]
@@ -224,6 +256,9 @@ public sealed class ConnectionsAndErrorsTests
         finally { Environment.SetEnvironmentVariable(key, previous); }
     }
 
+    /// <summary>The catalog connection from the environment becomes <c>ConnectionStrings:Catalog</c> character for
+    /// character, spaces included, for SQL Server and PostgreSQL, and the raw setting is removed from
+    /// configuration.</summary>
     [Fact]
     public void T6_catalog_text_is_published_ordinally_unchanged()
     {
@@ -250,6 +285,8 @@ public sealed class ConnectionsAndErrorsTests
         finally { Environment.SetEnvironmentVariable(DataGatewayConfiguration.ConnectionSetting, original); }
     }
 
+    /// <summary>A missing, unparseable, serverless or databaseless catalog connection gets a fixed message that never
+    /// quotes the input.</summary>
     [Theory]
     [InlineData(null, "The catalog connection is missing. ")]
     [InlineData("", "The catalog connection is missing. ")]
@@ -265,6 +302,10 @@ public sealed class ConnectionsAndErrorsTests
         Assert.Equal(expected, HostCatalogs.CatalogConnectionError(input, false));
     }
 
+    /// <summary>Against a listener that accepts and never answers, the connect gives up within the string's own
+    /// Connect Timeout, 1 or 5 seconds, and fails as SourceUnavailable with the driver's timeout number.</summary>
+    /// <remarks>The 5-second case also checks the wait is not cut short, which would mean the gateway overrode the
+    /// string.</remarks>
     [Theory]
     [InlineData(1)]
     [InlineData(5)]
@@ -294,6 +335,9 @@ public sealed class ConnectionsAndErrorsTests
         finally { listener.Stop(); }
     }
 
+    /// <summary>Product source never builds or edits connection strings, sets no connect timeout or retry count, uses
+    /// the SQL Server driver only in the web host's catalog code, and logs nothing from the data layers; no file
+    /// anywhere still names retired gate markers.</summary>
     [Fact]
     public void T9_product_static_guards()
     {
@@ -330,6 +374,10 @@ public sealed class ConnectionsAndErrorsTests
         }
     }
 
+    /// <summary>The leak scan itself: it finds planted passwords of any length, judges driver text more leniently
+    /// than gateway text, never prints the value it found, and a real scan refuses a password too short to find
+    /// reliably.</summary>
+    /// <remarks>Every leak test leans on this scan, so the scan gets its own test.</remarks>
     [Fact]
     public void T10_leak_scan_oracle()
     {
@@ -351,6 +399,9 @@ public sealed class ConnectionsAndErrorsTests
             LeakScan.Real(("fixture", "Server=plain-host;Password=abc"))));
     }
 
+    /// <summary>A catalog row whose connection the driver cannot parse answers InternalError; the log line holds the
+    /// engine's fixed refusal instead of the driver's text, and the password fragment the driver quotes appears
+    /// nowhere.</summary>
     [Fact]
     public async Task T11_driver_fragment_and_T14_expected_line_are_safe()
     {
@@ -380,6 +431,8 @@ public sealed class ConnectionsAndErrorsTests
         Assert.Equal(7319, line.GetProperty("SourceId").GetInt32());
     }
 
+    /// <summary>A known source failure keeps the driver's own exception instance but never prints it; the log line
+    /// carries the driver's multi-line message verbatim, no exception text, and the fixed field order.</summary>
     [Fact]
     public async Task T12_same_driver_instance_and_T14_line_order_and_multiline_text()
     {
@@ -406,6 +459,8 @@ public sealed class ConnectionsAndErrorsTests
         Assert.Equal(ErrorLogTests.Fields, line.EnumerateObject().Select(p => p.Name).Where(ErrorLogTests.Fields.Contains));
     }
 
+    /// <summary>An exception whose <c>ToString</c> throws still gets the caller the fixed UnexpectedError body; the
+    /// failure line is lost, and one notice goes to standard error instead.</summary>
     [Fact]
     public async Task T15_throwing_ToString_keeps_fixed_body_and_one_notice()
     {
@@ -419,6 +474,8 @@ public sealed class ConnectionsAndErrorsTests
         Assert.Empty(host.Lines());
     }
 
+    /// <summary>A missing, blank or serverless source connection is InvalidCatalog without any connect attempt; a
+    /// data source of spaces still goes on to connect.</summary>
     [Theory]
     [InlineData(null, false)]
     [InlineData("", false)]
@@ -437,6 +494,8 @@ public sealed class ConnectionsAndErrorsTests
         Assert.Equal("connect", result.Failure.Step);
     }
 
+    /// <summary>The catalog's source id appears in failure lines, as null when no catalog row was found, and never
+    /// in a route or tool answer.</summary>
     [Fact]
     public async Task T17_source_ID_stays_in_trail_and_out_of_answers()
     {
@@ -476,6 +535,8 @@ public sealed class ConnectionsAndErrorsTests
         Assert.Equal("synthetic", noRow.GetProperty("SourceName").GetString());
     }
 
+    /// <summary>The configuration guide names every current log field and no retired setting, and the README states
+    /// that connection strings are used as written.</summary>
     [Fact]
     public void T19_documentation_names_current_fields_and_policy()
     {
@@ -486,9 +547,12 @@ public sealed class ConnectionsAndErrorsTests
         Assert.Contains("DataGateway uses this string exactly as written and sets no connect timeout or retry count.", File.ReadAllText(TestFiles.InRepo("DataGateway.Web/README.md")));
     }
 
+    /// <summary>An exception whose <c>ToString</c> throws.</summary>
     private sealed class TextFault : Exception { public override string ToString() => throw new NotSupportedException("text unavailable"); }
+    /// <summary>A one-column test source over <paramref name="text"/>, with source id 7319.</summary>
     private static SourceContract Source(string text, int timeout = 30) => CatalogMapping.Map(new(new DataSourceRow("dbo.synthetic", text)
     { QueryTimeoutSeconds = timeout, Id = 7319, Name = "synthetic", Title = "Synthetic", Description = "Synthetic", Grain = "One row", RowCap = 500, IsActive = true },
     [new("text", 1, "Text", "Synthetic", "text", null, null, null, true, true, true, true, true)])).Value;
+    /// <summary>The SQL Server compilation of the empty query on <paramref name="source"/>.</summary>
     private static CompiledQuery Compile(SourceContract source) => new SqlServerEngine().Compile(QueryBuilding.Validate(source, "{}", QueryLimits.ForRowCap(500)).Value);
 }

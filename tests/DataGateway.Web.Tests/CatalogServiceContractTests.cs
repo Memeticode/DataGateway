@@ -14,8 +14,16 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the contract of <see cref="CatalogService{TConnection}"/>, the base class an application derives to
+/// supply its catalog: its public surface, how its results feed list, describe and query, and how it treats names,
+/// malformed results, secrets and cancellation.</summary>
+/// <remarks>The application owns the catalog queries; the service hands its results on as returned. Names are not
+/// normalized and malformed rows are not repaired here, so catalog validation sees exactly what the application
+/// returned.</remarks>
 public sealed class CatalogServiceContractTests
 {
+    /// <summary>The service is an abstract class over a connection type, takes one database context through a protected
+    /// constructor, exposes it only to subclasses, and owns nothing to dispose.</summary>
     [Fact]
     public void Public_surface_and_context_identity_are_exact()
     {
@@ -184,6 +192,8 @@ public sealed class CatalogServiceContractTests
         Assert.Null(await new RawCatalog(null!, null).QueryCatalogAsync(CancellationToken.None));
     }
 
+    /// <summary>Null lists, null entries, duplicates and out-of-range values come back as returned, for catalog
+    /// validation to report.</summary>
     [Fact]
     public async Task Malformed_results_remain_visible_to_the_future_validator()
     {
@@ -237,6 +247,8 @@ public sealed class CatalogServiceContractTests
             Assert.IsType<CatalogDetail>(await new RawCatalog([], value).QueryCatalogDetailAsync("widgets", CancellationToken.None));
     }
 
+    /// <summary>No catalog result or projection built from it prints or serializes the connection string, in any
+    /// serializer setting, while server code can still read it.</summary>
     [Fact]
     public async Task Secret_bearing_shapes_never_format_or_serialize_the_connection()
     {
@@ -330,6 +342,8 @@ public sealed class CatalogServiceContractTests
         }
     }
 
+    /// <summary>Core, Data and the library reference no database driver in their compiled assemblies or their restore
+    /// graphs; Data and the library carry only the pinned data-access packages.</summary>
     [Fact]
     public void Core_and_data_remain_driver_free_in_all_dependency_views()
     {
@@ -355,41 +369,54 @@ public sealed class CatalogServiceContractTests
         }
     }
 
+    /// <summary>Whether a package or assembly name is a database driver or an engine package.</summary>
     private static bool Driver(string name) => name.Contains("SqlClient", StringComparison.OrdinalIgnoreCase) ||
         name.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) || name.Contains("Sqlite", StringComparison.OrdinalIgnoreCase) ||
         name.StartsWith("DataGateway.Data.", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>A database context over an in-memory SQLite database.</summary>
     private static DbContext<SqliteConnection> NewDb() => new("Data Source=:memory:");
 
+    /// <summary>A source row with the given, possibly invalid, name, connection and row cap.</summary>
     private static DataSourceRow InvalidSource(string name, string connection, int cap) => new("main.measurements", connection)
     {
         Id = 7319, Name = name, Title = "Widgets", Description = "Synthetic measurements",
         Grain = "One measurement", IsActive = true, QueryTimeoutSeconds = 30, RowCap = cap
     };
 
+    /// <summary>A catalog that returns whatever list and detail it was given, malformed or not.</summary>
     private sealed class RawCatalog(IReadOnlyList<SourceListRow> list, CatalogDetail? detail) : CatalogService<SqliteConnection>(NewDb())
     {
+        /// <summary>Returns the seed MCP metadata.</summary>
         public override Task<global::DataGateway.Core.Catalog.McpMetadata> QueryMcpMetadataAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(global::DataGateway.Web.Tests.McpMetadataFixture.Seed);
         }
 
+        /// <summary>Returns the given list.</summary>
         public override Task<IReadOnlyList<SourceListRow>> QueryCatalogAsync(CancellationToken cancellationToken) => Task.FromResult(list);
+        /// <summary>Returns the given detail for any name.</summary>
         public override Task<CatalogDetail?> QueryCatalogDetailAsync(string sourceName, CancellationToken cancellationToken) => Task.FromResult(detail);
     }
 
+    /// <summary>A catalog whose queries signal entry and then wait until cancelled, to test cancellation mid-query.</summary>
     private sealed class GatedCatalog() : CatalogService<SqliteConnection>(NewDb())
     {
+    /// <summary>Returns the seed MCP metadata.</summary>
     public override Task<global::DataGateway.Core.Catalog.McpMetadata> QueryMcpMetadataAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(global::DataGateway.Web.Tests.McpMetadataFixture.Seed);
     }
 
+        /// <summary>Completes when a query has started.</summary>
         public TaskCompletionSource<bool> Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        /// <summary>Never completes; a query waits on it until cancelled.</summary>
         private TaskCompletionSource<bool> Pending { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        /// <summary>The token the last query received.</summary>
         public CancellationToken LastToken { get; private set; }
+        /// <summary>Signals entry, then waits until cancelled.</summary>
         public override async Task<IReadOnlyList<SourceListRow>> QueryCatalogAsync(CancellationToken cancellationToken)
         {
             LastToken = cancellationToken;
@@ -398,6 +425,7 @@ public sealed class CatalogServiceContractTests
             await Pending.Task.WaitAsync(cancellationToken);
             return [];
         }
+        /// <summary>Signals entry, then waits until cancelled.</summary>
         public override async Task<CatalogDetail?> QueryCatalogDetailAsync(string sourceName, CancellationToken cancellationToken)
         {
             LastToken = cancellationToken;
@@ -408,8 +436,10 @@ public sealed class CatalogServiceContractTests
         }
     }
 
+    /// <summary>A connection string value that must never appear in any printed or serialized form.</summary>
     private const string ConnectionSentinel = "catalog-contract-connection-sentinel-6a";
 
+    /// <summary>The example catalog's rows for one source: every data type and a documentation-only column.</summary>
     private static CatalogRows FixtureRows(string name) => new(
         new DataSourceRow("main.measurements", ConnectionSentinel)
         { QueryTimeoutSeconds = 30,
@@ -429,19 +459,27 @@ public sealed class CatalogServiceContractTests
                 false, false, false, false, false)
         ]);
 
+    /// <summary>A catalog written the way an application would: its queries run on the supplied context and it records
+    /// the name and token each query received.</summary>
     private sealed class ExampleCatalog(DbContext<SqliteConnection> db) : CatalogService<SqliteConnection>(db)
     {
+    /// <summary>Returns the seed MCP metadata.</summary>
     public override Task<global::DataGateway.Core.Catalog.McpMetadata> QueryMcpMetadataAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(global::DataGateway.Web.Tests.McpMetadataFixture.Seed);
     }
 
+        /// <summary>The provider name the example reports for its sources.</summary>
         public const string TargetProvider = "fixture-target";
+        /// <summary>The context the service was given, for identity checks.</summary>
         public DbContext<SqliteConnection> SuppliedDb => Db;
+        /// <summary>The source name the last detail query received.</summary>
         public string? LastSourceName { get; private set; }
+        /// <summary>The token the last query received.</summary>
         public CancellationToken LastToken { get; private set; }
 
+        /// <summary>Lists the one example source through a database query.</summary>
         public override async Task<IReadOnlyList<SourceListRow>> QueryCatalogAsync(CancellationToken cancellationToken)
         {
             LastToken = cancellationToken;
@@ -456,6 +494,7 @@ public sealed class CatalogServiceContractTests
             }).ToArray());
         }
 
+        /// <summary>Finds the example source by name, ignoring case in the database, or returns null.</summary>
         public override async Task<CatalogDetail?> QueryCatalogDetailAsync(string sourceName, CancellationToken cancellationToken)
         {
             LastSourceName = sourceName;

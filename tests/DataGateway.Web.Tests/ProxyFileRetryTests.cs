@@ -6,6 +6,10 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the proxy's retry of file operations on the client configuration file during registration.</summary>
+/// <remarks>Only a file held briefly by another process (access denied, a sharing or a lock violation) is retried, a
+/// fixed number of times with a fixed pause; any other failure is thrown at once, as the same exception instance, and a
+/// retry that runs out leaves the files unchanged.</remarks>
 public sealed class ProxyFileRetryTests
 {
     [Fact]
@@ -54,6 +58,8 @@ public sealed class ProxyFileRetryTests
         Assert.NotEmpty(f.Sleeps);
     }
 
+    /// <summary>Writing a new file retries access denied, here caused by a directory in its place, and creates the
+    /// file once the way is clear.</summary>
     [Fact]
     public void WriteNewFile_retries_access_denied_then_creates_file()
     {
@@ -70,6 +76,8 @@ public sealed class ProxyFileRetryTests
         Assert.Equal(new byte[] { 13, 14, 15 }, File.ReadAllBytes(target));
     }
 
+    /// <summary>A target held for the whole run fails after exactly the configured attempts, with the same kind of
+    /// error a plain move gives, and changes neither file.</summary>
     [Fact]
     public void T3_held_target_exhausts_exact_attempt_count_without_changes()
     {
@@ -124,6 +132,8 @@ public sealed class ProxyFileRetryTests
         Assert.Empty(f.Sleeps);
     }
 
+    /// <summary>Writing a new file over an existing one fails at once and leaves the existing file as it was.</summary>
+    /// <remarks>The file is not this writer's: retrying or overwriting it could destroy another file.</remarks>
     [Fact]
     public void WriteNewFile_existing_file_is_not_owned_or_retried()
     {
@@ -135,6 +145,8 @@ public sealed class ProxyFileRetryTests
         Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(target));
     }
 
+    /// <summary>The default retry (10 attempts, 50 ms apart) gives up on a held target within a bounded
+    /// window.</summary>
     [Fact]
     public void T5_default_held_target_waits_for_bounded_retry_window()
     {
@@ -152,6 +164,10 @@ public sealed class ProxyFileRetryTests
         Assert.Equal(50, typeof(RegistrationFiles).GetField("pauseMilliseconds", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(files));
     }
 
+    /// <summary>The retry filter retries only access denied and sharing or lock violations, and always rethrows the
+    /// original exception instance.</summary>
+    /// <remarks>An "already exists", a missing path, a failed temporary cleanup or any other error is permanent, and
+    /// retrying it would only delay the same failure.</remarks>
     [Theory]
     [InlineData("access", true)]
     [InlineData("sharing", true)]
@@ -193,16 +209,22 @@ public sealed class ProxyFileRetryTests
         Assert.Equal(transient ? new[] { 7, 7, 7 } : Array.Empty<int>(), sleeps);
     }
 
+    /// <summary>A private temporary folder for one test, with a record of every retry pause.</summary>
     private sealed class Fixture : IDisposable
     {
+        /// <summary>The test's folder, unique per fixture.</summary>
         internal string Root { get; } = Path.Combine(Path.GetTempPath(), "dg-file-retry-" + Guid.NewGuid().ToString("N"));
+        /// <summary>Every pause the retry asked for, in milliseconds.</summary>
         internal List<int> Sleeps { get; } = [];
 
+        /// <summary>Creates the folder.</summary>
         internal Fixture()
         {
             Directory.CreateDirectory(Root);
         }
 
+        /// <summary>Writes <paramref name="bytes"/> to a file named <paramref name="name"/> in the folder.</summary>
+        /// <returns>The file's path.</returns>
         internal string Seed(string name, byte[] bytes)
         {
             var path = Path.Combine(Root, name);
@@ -210,6 +232,10 @@ public sealed class ProxyFileRetryTests
             return path;
         }
 
+        /// <summary>Runs <paramref name="operation"/> while <paramref name="path"/> is held exclusively, and releases
+        /// the file shortly after the first retry pause.</summary>
+        /// <remarks>Releasing only after a pause has started proves the operation succeeded by retrying, not on its
+        /// first attempt.</remarks>
         internal void AfterUnlock(string path, Action<RegistrationFiles> operation)
         {
             using var held = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
@@ -239,6 +265,7 @@ public sealed class ProxyFileRetryTests
             }
         }
 
+        /// <summary>Removes the folder.</summary>
         public void Dispose()
         {
             Directory.Delete(Root, recursive: true);

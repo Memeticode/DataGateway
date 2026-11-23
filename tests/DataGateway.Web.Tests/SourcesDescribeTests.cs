@@ -19,14 +19,27 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the <c>/sources/describe</c> route: the source and query schema it returns, a fresh catalog read on
+/// every request, the checks on its body, and how catalog failures and cancellation reach the caller and the log.</summary>
+/// <remarks>Every failure test also scans the body and the logs for the synthetic connection strings, the source's
+/// database object name and driver text: a describe answer is built from the catalog row that holds them, and none of
+/// them may reach the caller or the log.</remarks>
 public sealed class SourcesDescribeTests
 {
+    /// <summary>A synthetic catalog connection to a local port nothing listens on, so a real read fails fast; its parts are
+    /// leak markers.</summary>
     private const string Connection = "Server=tcp:127.0.0.1,1;Database=Catalog;User ID=fake-describe-reader;Password=fake-describe-password;Encrypt=false;Pooling=false;Connect Timeout=1;ConnectRetryCount=0";
+    /// <summary>The message for a body that is not valid JSON.</summary>
     private const string M1 = "The request body is not valid JSON. Send {\"source\": \"<name>\"} with a name from list sources.";
+    /// <summary>The message for a JSON body that is not an object with exactly one <c>source</c> property.</summary>
     private const string M2 = "Send a JSON object with exactly one property, source: {\"source\": \"<name>\"} with a name from list sources.";
+    /// <summary>The message for a <c>source</c> property that is not a string.</summary>
     private const string M3 = "source must be a JSON string: the name of a source from list sources.";
+    /// <summary>The message for an InternalError.</summary>
     private const string M4 = "DataGateway could not complete the request because of a fault on its side, not in the request. Contact the DataGateway administrator. Tell the user, give the incidentId and stop; do not retry.";
 
+    /// <summary>The requested name reaches the catalog exactly as sent, the answer uses the catalog's own spelling of the
+    /// name, and the row limit comes from the source's row cap while the shared limits keep no row limit of their own.</summary>
     [Fact]
     public async Task T8_real_host_uses_canonical_metadata_verbatim_name_and_registered_limits()
     {
@@ -55,6 +68,8 @@ public sealed class SourcesDescribeTests
         await app.StopAsync(timeout.Token);
     }
 
+    /// <summary>The schema joins the source's row cap with the host's configured filter limits, and a filter depth of zero
+    /// removes group conditions from the schema entirely.</summary>
     [Fact]
     public async Task T15_describe_combines_catalog_cap_with_shared_structural_limits()
     {
@@ -94,6 +109,7 @@ public sealed class SourcesDescribeTests
         await app.StopAsync(timeout.Token);
     }
 
+    /// <summary>A change to the catalog shows in the next describe on the same running host, with no restart.</summary>
     [Fact]
     public async Task T9_same_host_rereads_metadata_and_rebuilds_schema_after_catalog_changes()
     {
@@ -121,6 +137,8 @@ public sealed class SourcesDescribeTests
         await app.StopAsync(timeout.Token);
     }
 
+    /// <summary>The describe answer is exactly these bytes, the MCP tool returns the same text, and column names appear only
+    /// in the column list, not in the rules of each operation.</summary>
     [Fact]
     public async Task T15_one_schema_exact_bytes_and_facts_only_beside_their_operation()
     {
@@ -149,6 +167,7 @@ public sealed class SourcesDescribeTests
         Assert.Equal(M3, error.RootElement.GetProperty("message").GetString());
     }
 
+    /// <summary>Request bodies that must be refused, each with the code, path and message expected.</summary>
     public static IEnumerable<object[]> BadBodies()
     {
         foreach (var text in new[] { "not json", "", "{} {}", "/* comment */{}", new string('[', 65) + new string(']', 65) })
@@ -162,6 +181,8 @@ public sealed class SourcesDescribeTests
         yield return [new byte[] { 123, 34, 255, 254, 34, 58, 49, 125 }, "InvalidStructure", "$", M2];
     }
 
+    /// <summary>A malformed describe body is refused with 400 and its exact message before the catalog is read, and logged
+    /// once at the request step.</summary>
     [Theory]
     [MemberData(nameof(BadBodies))]
     public async Task T10_bad_request_is_rejected_before_catalog_and_logged_once(byte[] bytes, string code, string path, string message)
@@ -194,6 +215,8 @@ public sealed class SourcesDescribeTests
         await app.StopAsync(timeout.Token);
     }
 
+    /// <summary>Each catalog problem reaches the caller with a public code and status, internal codes become InternalError,
+    /// the requested name is never echoed back, and one log line keeps the internal code and the name.</summary>
     [Theory]
     [InlineData("unknown", 404, "UnknownSource")]
     [InlineData("empty", 404, "UnknownSource")]
@@ -243,6 +266,8 @@ public sealed class SourcesDescribeTests
         await app.StopAsync(timeout.Token);
     }
 
+    /// <summary>An unreachable catalog, read through the real SQL Server catalog reader, gives 503 CatalogUnavailable and
+    /// one log line that names the exception type only, never the driver's message or text.</summary>
     [Fact]
     public async Task T12_real_driver_unreachable_catalog_is_sanitized_and_reported_once()
     {
@@ -267,6 +292,7 @@ public sealed class SourcesDescribeTests
         await app.StopAsync(timeout.Token);
     }
 
+    /// <summary>A caller that disconnects cancels the catalog read in progress, and one CatalogCancelled warning is logged.</summary>
     [Fact]
     public async Task T13a_client_abort_reaches_catalog_token_and_reports_once()
     {
@@ -296,6 +322,8 @@ public sealed class SourcesDescribeTests
         Assert.Equal(LogLevel.Warning, Assert.Single(logs.Levels));
     }
 
+    /// <summary>When the caller has gone away, any catalog failure is logged once as a CatalogCancelled warning and nothing
+    /// is written to the response.</summary>
     [Theory]
     [InlineData("pool")]
     [InlineData("io")]
@@ -325,6 +353,8 @@ public sealed class SourcesDescribeTests
         AssertSafe(logs.Text);
     }
 
+    /// <summary>A caller that disconnects while its body is read gets nothing written and nothing logged, and the catalog
+    /// is not read.</summary>
     [Theory]
     [InlineData("pre")]
     [InlineData("io")]
@@ -353,6 +383,7 @@ public sealed class SourcesDescribeTests
         Assert.Empty(logs.Text);
     }
 
+    /// <summary>A response write that fails because the caller has gone away neither throws out of the route nor logs.</summary>
     [Fact]
     public async Task T14_aborted_write_does_not_escape_or_log()
     {
@@ -366,14 +397,20 @@ public sealed class SourcesDescribeTests
         Assert.Empty(logs.Errors);
     }
 
+    /// <summary>A response body whose write cancels the request and then fails with an I/O error.</summary>
     private sealed class AbortedWriteStream(CancellationTokenSource abort) : MemoryStream
     {
+        /// <summary>Cancels the request, then throws.</summary>
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer,CancellationToken cancellationToken=default)
         { abort.Cancel(); throw new IOException("fake-driver-secret"); }
     }
 
+    /// <summary>A request body whose read cancels the request and then fails as <paramref name="kind"/> says.</summary>
+    /// <param name="abort">The request's abort source, cancelled on the first read.</param>
+    /// <param name="kind">The failure: <c>json</c>, <c>cancelled</c> or an I/O error.</param>
     private sealed class CancellingStream(CancellationTokenSource abort, string kind) : MemoryStream
     {
+        /// <summary>Cancels the request, then throws.</summary>
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             abort.Cancel();
@@ -386,6 +423,7 @@ public sealed class SourcesDescribeTests
         }
     }
 
+    /// <summary>A request context for describing the synthetic source, for calling the route without a host.</summary>
     private static DefaultHttpContext Context(CancellationToken token, Stream response)
     {
         var context = new DefaultHttpContext { RequestAborted = token };
@@ -393,7 +431,9 @@ public sealed class SourcesDescribeTests
         context.Response.Body = response;
         return context;
     }
+    /// <summary>A client for the started host.</summary>
     private static HttpClient Client(WebApplication app) => new() { BaseAddress = new Uri(Assert.Single(app.Urls)) };
+    /// <summary>Describes the synthetic source, asserting 200, and returns the answer.</summary>
     private static async Task<JsonElement> Describe(HttpClient client, CancellationToken token)
     {
         using var response = await client.PostAsJsonAsync("/sources/describe", new { source = "synthetic" }, token);
@@ -401,20 +441,28 @@ public sealed class SourcesDescribeTests
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
         return body.RootElement.Clone();
     }
+    /// <summary>A test catalog whose detail read is <paramref name="read"/> and whose list holds the given names.</summary>
+    /// <param name="logs">Not used by the catalog.</param>
+    /// <param name="read">The detail read.</param>
+    /// <param name="names">The listed source names; only <c>synthetic</c> by default.</param>
     private static HostCatalogState ApplicationCatalog(RecordedLogs logs, Func<string, CancellationToken,
         Task<(IReadOnlyList<dynamic> Rows, IReadOnlyList<dynamic> Available)>> read, string[]? names = null) => HostCatalogState.Raw(
             _ => Task.FromResult<IReadOnlyList<dynamic>>((names ?? ["synthetic"]).Select(name => (dynamic)new Dictionary<string, object?>
                 { ["name"] = name, ["title"] = name, ["description"] = "Synthetic", ["grain"] = "One row", ["row_cap"] = 7 }).ToArray()), read);
 
+    /// <summary>Starts the host, then arms the test catalog so requests use the test's reads.</summary>
     private static async Task Start(WebApplication app, CancellationToken token = default)
     {
         await app.StartAsync(token);
         app.Services.GetRequiredService<HostCatalogState>().Arm();
     }
 
+    /// <summary>A detail read result holding <paramref name="rows"/> and no available names.</summary>
     private static Task<(IReadOnlyList<dynamic> Rows, IReadOnlyList<dynamic> Available)> Batch(Dictionary<string, object?>[] rows) =>
         Task.FromResult<(IReadOnlyList<dynamic>, IReadOnlyList<dynamic>)>((rows, []));
 
+    /// <summary>The detail read for a failure scenario of <see cref="T11_catalog_failure_mapping_preserves_only_public_codes_and_logs_once"/>:
+    /// no rows (unknown source), rows the catalog must refuse, or a driver exception.</summary>
     private static Task<(IReadOnlyList<dynamic> Rows, IReadOnlyList<dynamic> Available)> FailureBatch(string kind)
     {
         if (kind is "unknown" or "empty" or "bad-available")
@@ -436,12 +484,14 @@ public sealed class SourcesDescribeTests
         return Batch(rows);
     }
 
+    /// <summary>Detail rows for the synthetic source: one column with every operation on and one with every operation off.</summary>
     private static Dictionary<string, object?>[] Rows()
     {
         var usable = Row("measure", 1, true);
         var documented = Row("documented", 2, false);
         return [usable, documented];
     }
+    /// <summary>One catalog detail row for the synthetic source, with every operation set to <paramref name="enabled"/>.</summary>
     private static Dictionary<string, object?> Row(string column, int ordinal, bool enabled) => new()
     {
         ["id"] = 7319, ["object_name"] = "hidden_schema.synthetic", ["connection_string"] = "fixture-connection-removed",
@@ -450,6 +500,8 @@ public sealed class SourcesDescribeTests
         ["data_type"] = "number", ["unit"] = null, ["magnitude"] = null, ["display_format"] = null,
         ["can_select"] = enabled, ["can_filter"] = enabled, ["can_sort"] = enabled, ["can_group"] = enabled, ["can_aggregate"] = enabled
     };
+    /// <summary>The answer the route should give for <paramref name="rows"/>, built by mapping them directly with the
+    /// product's own mapping and description code.</summary>
     private static JsonElement Expected(Dictionary<string, object?>[] rows)
     {
         var source = rows[0];
@@ -464,6 +516,10 @@ public sealed class SourcesDescribeTests
         return JsonSerializer.SerializeToElement(SourceDescription.Map(mapped.Value, QueryLimits.ForRowCap(7)), JsonSerializerOptions.Web);
     }
 
+    /// <summary>An exception a database driver could throw, chosen by <paramref name="kind"/>, whose message is a leak
+    /// marker.</summary>
+    /// <remarks>The <c>sql</c> kind is an uninitialized <c>SqlException</c>, because the driver offers no public way to
+    /// create one; only the cancellation test uses it.</remarks>
     private static Exception DriverFailure(string kind) => kind switch
     {
         "pool" => new InvalidOperationException("fake-driver-secret"),
@@ -479,6 +535,10 @@ public sealed class SourcesDescribeTests
         _ => throw new ArgumentOutOfRangeException(nameof(kind))
     };
 
+    /// <summary>Builds the production host with synthetic sign-in and recorded logs.</summary>
+    /// <param name="logs">Receives every log entry.</param>
+    /// <param name="reader">The test catalog; by default, a real SQL Server catalog reader against <see cref="Connection"/>.</param>
+    /// <param name="settings">Extra configuration, such as limits.</param>
     private static WebApplication Host(RecordedLogs logs, HostCatalogState? reader = null,
         IDictionary<string, string?>? settings = null)
     {
@@ -503,6 +563,8 @@ public sealed class SourcesDescribeTests
         });
     }
 
+    /// <summary>Asserts the body is a gateway error with exactly code, incidentId, message and path, and the expected code
+    /// and path.</summary>
     private static void AssertError(HttpResponseMessage response, string text, string code, string path)
     {
         Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
@@ -514,6 +576,8 @@ public sealed class SourcesDescribeTests
         Assert.False(string.IsNullOrWhiteSpace(json.RootElement.GetProperty("message").GetString()));
     }
 
+    /// <summary>Asserts <paramref name="text"/> holds no part of the synthetic connection strings, the object name or any
+    /// driver or input leak marker.</summary>
     private static void AssertSafe(string text)
     {
         LeakScan.Synthetic(("route catalog", Connection)).Text("route body and logs", text, Rule.Foreign);
@@ -521,11 +585,17 @@ public sealed class SourcesDescribeTests
             Assert.True(!text.Contains(marker, StringComparison.OrdinalIgnoreCase), "Diagnostic marker found in route output.");
     }
 
+    /// <summary>Sets the environment the host reads for one test, and restores it afterwards.</summary>
+    /// <remarks>The user-profile folders point at an empty scratch folder, so no user secrets on the machine reach the
+    /// host, and every limit setting is cleared, so the host runs on its defaults.</remarks>
     private sealed class SettingsScope : IDisposable
     {
+        /// <summary>Each changed variable's value before the scope.</summary>
         private readonly Dictionary<string, string?> original = new();
+        /// <summary>An empty folder under <c>obj</c> that stands in for the user profile.</summary>
         private readonly string scratch = TestFiles.InRepo("tests/DataGateway.Web.Tests/obj/describe-settings/" + Guid.NewGuid());
 
+        /// <summary>Creates the scratch folder and sets the variables.</summary>
         public SettingsScope()
         {
             Directory.CreateDirectory(scratch);
@@ -535,12 +605,14 @@ public sealed class SourcesDescribeTests
                 Set("DataGateway__Limits__" + name, null);
         }
 
+        /// <summary>Sets a variable, remembering its first original value.</summary>
         private void Set(string key, string? value)
         {
             original.TryAdd(key, Environment.GetEnvironmentVariable(key));
             Environment.SetEnvironmentVariable(key, value);
         }
 
+        /// <summary>Restores every variable and removes the scratch folder.</summary>
         public void Dispose()
         {
             foreach (var pair in original) Environment.SetEnvironmentVariable(pair.Key, pair.Value);
@@ -548,22 +620,37 @@ public sealed class SourcesDescribeTests
         }
     }
 
+    /// <summary>A logger provider that records every entry, and the structured fields of each warning or error.</summary>
+    /// <remarks>It fails the test if any log call passes an exception: the gateway logs failures as fields, never as an
+    /// exception object, whose message could hold driver or connection text.</remarks>
     private sealed class RecordedLogs : ILoggerProvider
     {
+        /// <summary>Every entry's level and text, in order.</summary>
         private readonly ConcurrentQueue<(LogLevel Level, string Text)> entries = new();
+        /// <summary>The structured fields of each warning or error.</summary>
         private readonly ConcurrentQueue<Dictionary<string, object?>> errorFields = new();
+        /// <summary>The structured fields of each warning or error.</summary>
         public IEnumerable<Dictionary<string, object?>> ErrorFields => errorFields;
+        /// <summary>The text of each warning or error.</summary>
         public IEnumerable<string> Errors => entries.Where(entry => entry.Level >= LogLevel.Warning).Select(entry => entry.Text);
+        /// <summary>The level of each warning or error.</summary>
         public IEnumerable<LogLevel> Levels => entries.Where(entry => entry.Level >= LogLevel.Warning).Select(entry => entry.Level);
+        /// <summary>All recorded text, for leak scans.</summary>
         public string Text => string.Join("\n", entries.Select(entry => entry.Text));
+        /// <summary>Creates a logger that records into this provider.</summary>
         public ILogger CreateLogger(string categoryName) => new Recorder(entries, errorFields);
+        /// <summary>Nothing to release.</summary>
         public void Dispose() { }
 
+        /// <summary>A logger that records every entry at every level.</summary>
         private sealed class Recorder(ConcurrentQueue<(LogLevel Level, string Text)> entries,
             ConcurrentQueue<Dictionary<string, object?>> errorFields) : ILogger
         {
+            /// <summary>Scopes are not recorded.</summary>
             public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            /// <summary>Every level is recorded.</summary>
             public bool IsEnabled(LogLevel logLevel) => true;
+            /// <summary>Records the entry, failing the test if it carries an exception.</summary>
             public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
                 Func<TState, Exception?, string> formatter)
             {

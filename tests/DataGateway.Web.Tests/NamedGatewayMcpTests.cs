@@ -30,12 +30,29 @@ using static DataGateway.Web.Tests.NamedGatewayMcpWire;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the MCP endpoint of named gateways: each gateway mapped with <c>MapDataGateway</c> serves its own
+/// stateless <c>/mcp</c> endpoint with its own server identity, catalog, engines, limits and failure log scope.</summary>
+/// <remarks>
+/// <para>Most tests run two gateways side by side (<see cref="NamedGatewayMcpPair"/>) and check every answer against
+/// the gateway that should have given it. A shared server, tool collection or catalog between gateways would answer
+/// one gateway's call from the other's data.</para>
+/// <para>Every tool answer, success or failure, must match the JSON route byte for byte and log the same fields, so
+/// the two ways in never drift apart.</para>
+/// <para>Each POST is stateless: it reads the catalog's MCP metadata afresh and creates its own scoped catalog, which
+/// is disposed with the request scope.</para>
+/// </remarks>
 public sealed class NamedGatewayMcpTests
 {
+    /// <summary>The three gateway operations.</summary>
     private static readonly string[] Operations = ["list", "describe", "query"];
+    /// <summary>The MCP protocol versions tests run on: the SDK default and the latest pinned version.</summary>
     private static readonly string?[] Protocols = [null, "2025-11-25"];
+    /// <summary>Text carried by synthetic faults; it must never reach a caller or a log field that is not exception
+    /// text.</summary>
     private const string Secret = "synthetic-private-fault-sentinel";
 
+    /// <summary>Each gateway reports its own name, title and description on initialize, before and after tool calls, on
+    /// every protocol version, and no response opens a session.</summary>
     [Fact]
     public async Task T01_each_gateway_has_its_own_identity_and_instructions()
     {
@@ -58,6 +75,8 @@ public sealed class NamedGatewayMcpTests
         Assert.Contains(pair.Capture.Responses, item => item.Status == 200);
     }
 
+    /// <summary>The catalog's MCP title and description reach the client exactly as stored, including surrounding spaces
+    /// and long text.</summary>
     [Fact]
     public async Task T02_catalog_text_is_preserved_without_trimming()
     {
@@ -68,6 +87,8 @@ public sealed class NamedGatewayMcpTests
         Identity(client, "a", "  Retail  ", new string('x', 1000));
     }
 
+    /// <summary>A catalog whose MCP title holds a line break stops host startup, with a message that names the bad
+    /// field.</summary>
     [Fact]
     public async Task T03_invalid_catalog_metadata_refuses_startup()
     {
@@ -77,6 +98,8 @@ public sealed class NamedGatewayMcpTests
         Assert.Contains("mcpserver.title", error.Message);
     }
 
+    /// <summary>A catalog edit to the MCP metadata after startup reaches the next client, though the gateway's builder is
+    /// already frozen.</summary>
     [Fact]
     public async Task T04_catalog_edits_are_independent_of_frozen_builder()
     {
@@ -97,6 +120,8 @@ public sealed class NamedGatewayMcpTests
         Frozen(saved);
     }
 
+    /// <summary>Every stateless POST, including initialize, reads the MCP metadata once and creates one catalog, and
+    /// never answers with a session id.</summary>
     [Fact]
     public async Task T05_each_stateless_post_reads_metadata_and_creates_one_catalog()
     {
@@ -125,6 +150,8 @@ public sealed class NamedGatewayMcpTests
         pair.Capture.Stateless("/north/mcp", "/south/mcp");
     }
 
+    /// <summary>Calls to two gateways, held open together and released at once, each answer from their own catalog and
+    /// database and log failures with their own gateway scope and caller.</summary>
     [Fact]
     public async Task T06_alternating_concurrent_calls_keep_gateway_witnesses()
     {
@@ -175,6 +202,8 @@ public sealed class NamedGatewayMcpTests
         pair.Capture.Stateless("/north/mcp", "/south/mcp");
     }
 
+    /// <summary>A source that exists only in the other gateway's catalog is unknown here, and the other gateway's catalog
+    /// is never read.</summary>
     [Fact]
     public async Task T07_cross_gateway_sources_are_unknown_locally()
     {
@@ -199,6 +228,11 @@ public sealed class NamedGatewayMcpTests
         Assert.Empty(pair.Eb.Executed);
     }
 
+    /// <summary>Each tool call gets its own catalog instance from its own request scope, used for every read in that
+    /// call and disposed when the scope ends.</summary>
+    /// <remarks>An unkeyed catalog registered in the container would throw if resolved, so the test also shows the
+    /// gateway uses only its own factory. A missing source is looked up and then listed for the error message on the
+    /// same instance.</remarks>
     [Fact]
     public async Task T08_calls_create_fresh_scoped_catalog_adapters()
     {
@@ -257,6 +291,8 @@ public sealed class NamedGatewayMcpTests
         Assert.All(created, item => Assert.Contains(item.Scope, pair.Host.Cleanup.Disposed));
     }
 
+    /// <summary>A source's provider name selects the engine registered under that name, ignoring case, and compiles the
+    /// same SQL as the engine would directly; a provider with no engine is an invalid catalog.</summary>
     [Fact]
     public async Task T09_provider_aliases_select_the_correct_runner()
     {
@@ -316,6 +352,8 @@ public sealed class NamedGatewayMcpTests
         Assert.Single(second.Executed);
     }
 
+    /// <summary>Catalog edits (titles, column flags, provider, row cap) apply to the next call, the host's own JSON
+    /// encoder does not change the gateway's escaping, and the gateway keeps the library's default limits.</summary>
     [Fact]
     public async Task T10_catalog_edits_and_library_defaults_are_observed()
     {
@@ -372,6 +410,8 @@ public sealed class NamedGatewayMcpTests
         Assert.All(alternative.Executed, execution => Assert.Equal(30, execution.Timeout));
     }
 
+    /// <summary>Authorization required on the returned group, directly or through a parent group, refuses an anonymous
+    /// MCP call before any catalog is created or read.</summary>
     [Fact]
     public async Task T11_returned_group_authorization_blocks_catalog_reads()
     {
@@ -426,6 +466,8 @@ public sealed class NamedGatewayMcpTests
         }
     }
 
+    /// <summary>An argument error from a tool gives the same body as the JSON route, and each logs exactly one line
+    /// scoped to its own gateway.</summary>
     [Fact]
     public async Task T12_argument_failures_use_the_selected_log_once()
     {
@@ -450,6 +492,9 @@ public sealed class NamedGatewayMcpTests
         NoSdkFailure(pair.Host);
     }
 
+    /// <summary>Every kind of catalog fault (factory throws or returns null, read throws, times out, returns a null task
+    /// or is cancelled) gives the documented answer through tool and route alike, and the log names the exception type
+    /// without its text.</summary>
     [Fact]
     public async Task T13_catalog_faults_match_post_wire_and_diagnostics()
     {
@@ -497,6 +542,8 @@ public sealed class NamedGatewayMcpTests
         NoSdkFailure(pair.Host);
     }
 
+    /// <summary>A malformed list or detail from the catalog fails with InvalidCatalog through the same validation the
+    /// route uses, logs the precise path and fix, and never logs the connection string or table name.</summary>
     [Fact]
     public async Task T14_malformed_and_changed_catalogs_use_existing_validation()
     {
@@ -567,6 +614,9 @@ public sealed class NamedGatewayMcpTests
         }
     }
 
+    /// <summary>An unexpected fault in compile, execute or answer writing gives the unexpected-error answer with its
+    /// second text block and one log line with the exception and SQL details, and the gateways keep working
+    /// afterwards.</summary>
     [Fact]
     public async Task T15_unexpected_tool_faults_have_two_blocks_and_one_event()
     {
@@ -618,6 +668,8 @@ public sealed class NamedGatewayMcpTests
         }
     }
 
+    /// <summary>A fault while reading the MCP request body (a fault, an unreadable body or a body over the size limit) is
+    /// answered once, with one log line and no catalog read.</summary>
     [Fact]
     public async Task T16_endpoint_body_faults_are_answered_once()
     {
@@ -649,6 +701,8 @@ public sealed class NamedGatewayMcpTests
         }
     }
 
+    /// <summary>A caller who disconnects mid-call, at any stage, leaves exactly one cancellation warning and no
+    /// unexpected error, and the call's scope is still disposed.</summary>
     [Fact]
     public async Task T17_disconnected_tool_calls_keep_one_cancellation_event()
     {
@@ -702,6 +756,8 @@ public sealed class NamedGatewayMcpTests
         await CrossEndpointCancellation();
     }
 
+    /// <summary>The MCP endpoint's last-resort handler answers a fault that happens before the MCP server takes the
+    /// request, and stays silent only when the caller has left after the server took it.</summary>
     [Fact]
     public async Task T18_endpoint_abort_guard_distinguishes_pre_server_faults()
     {
@@ -747,6 +803,9 @@ public sealed class NamedGatewayMcpTests
                 }
     }
 
+    /// <summary>A root gateway and named gateways behave the same whatever order they are registered and mapped in: one
+    /// shared transport registration, a separate server identity and tool collection per gateway, and each gateway's
+    /// own catalog and limits.</summary>
     [Fact]
     public async Task T19_public_root_and_named_registration_orders_are_equivalent()
     {
@@ -855,6 +914,8 @@ public sealed class NamedGatewayMcpTests
             }
     }
 
+    /// <summary>The real example host serves its root MCP endpoint beside a named gateway,
+    /// each with its own identity, data and log scope.</summary>
     [Fact]
     public async Task T20_real_example_composition_coexists_with_named_mcp()
     {
@@ -918,6 +979,8 @@ public sealed class NamedGatewayMcpTests
         McpToolTests.NoSdkFailure(host);
     }
 
+    /// <summary>Two hosts may each register a gateway with the same name without sharing anything; a failed registration
+    /// changes nothing; and an unmapped gateway is still validated once at startup.</summary>
     [Fact]
     public async Task T21_registration_is_host_local()
     {
@@ -958,6 +1021,8 @@ public sealed class NamedGatewayMcpTests
         }
     }
 
+    /// <summary>The MCP endpoint is named after its gateway, accepts only POST, is left out of OpenAPI documents, works
+    /// under every prefix shape, and refuses a session id without reading the catalog.</summary>
     [Fact]
     public async Task T22_mapping_metadata_methods_and_document_exclusion()
     {
@@ -1016,9 +1081,14 @@ public sealed class NamedGatewayMcpTests
         }
     }
 
+    /// <summary>Creates the deadline that bounds one test.</summary>
     private static CancellationTokenSource Deadline() => new(TimeSpan.FromSeconds(45));
+    /// <summary>Creates a signal whose continuations run asynchronously, so releasing it never runs a test's code on the
+    /// releasing thread.</summary>
     private static TaskCompletionSource Gate() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    /// <summary>Asserts a client's server name, version (the library's, three parts), title and instructions; the
+    /// description, when set, comes before the shared instructions.</summary>
     private static void Identity(McpClient client, string name, string? title, string? about)
     {
         Assert.Equal(name, client.ServerInfo.Name);
@@ -1028,9 +1098,12 @@ public sealed class NamedGatewayMcpTests
         Assert.Equal(about is null ? Instructions : about + " " + Instructions, client.ServerInstructions);
     }
 
+    /// <summary>Asserts that the builder refuses changes after registration has completed.</summary>
     private static void Frozen(DataGatewayBuilder builder) => Assert.Equal("Gateway 'a'. Registration is already complete.",
         Assert.Throws<InvalidOperationException>(() => builder.UseMcpTools()).Message);
 
+    /// <summary>Calls one operation through the tool and the route and asserts both succeed with the same bytes from the
+    /// expected gateway.</summary>
     private static async Task Successful(NamedGatewayMcpPair pair, McpClient client, string gateway, string operation)
     {
         var body = NamedGatewayHost.Body(operation);
@@ -1044,6 +1117,8 @@ public sealed class NamedGatewayMcpTests
         Assert.Equal(route.Bytes, Encoding.UTF8.GetBytes(text));
     }
 
+    /// <summary>Sends a query for an unknown column as a signed-in caller and asserts the log line names that
+    /// caller.</summary>
     private static async Task FailureForCaller(NamedGatewayMcpPair pair, string gateway, string caller, string column)
     {
         using var capture = new Capture();
@@ -1055,6 +1130,18 @@ public sealed class NamedGatewayMcpTests
         capture.Stateless(gateway == "a" ? "/north/mcp" : "/south/mcp");
     }
 
+    /// <summary>Sends the same failing request through the tool and the route and asserts equal bodies, one log line
+    /// each with equal fields, and the status the route maps the code to.</summary>
+    /// <param name="host">The host.</param>
+    /// <param name="client">The MCP client for the gateway.</param>
+    /// <param name="gateway">The gateway name.</param>
+    /// <param name="prefix">The gateway's route prefix.</param>
+    /// <param name="operation">The operation.</param>
+    /// <param name="body">The request body.</param>
+    /// <param name="expected">The expected error body, with <c>INCIDENT</c> in place of the incident id.</param>
+    /// <param name="code">The code the log lines must carry.</param>
+    /// <param name="token">Cancels the calls.</param>
+    /// <returns>The tool's log line.</returns>
     private static async Task<NamedGatewayEvent> Parity(NamedGatewayHost host, McpClient client,
         string gateway, string prefix, string operation, string body, string expected, string code, CancellationToken token)
     {
@@ -1074,6 +1161,7 @@ public sealed class NamedGatewayMcpTests
         return tool;
     }
 
+    /// <summary>Removes every fault and change hook from a catalog state.</summary>
     private static void Reset(NamedGatewayState state)
     {
         state.FactoryOverride = null;
@@ -1083,6 +1171,7 @@ public sealed class NamedGatewayMcpTests
         state.NullListTask = state.NullDetailTask = false;
     }
 
+    /// <summary>Copies a catalog detail with some source fields replaced.</summary>
     private static CatalogDetail WithSource(CatalogDetail detail, string? name = null, string? connection = null,
         int? cap = null, bool? active = null)
     {
@@ -1100,6 +1189,8 @@ public sealed class NamedGatewayMcpTests
         return new(detail.Provider, new(source, detail.Rows.Columns));
     }
 
+    /// <summary>Builds a request context that posts a <c>tools/list</c> call to the MCP endpoint without a server, for
+    /// calling the endpoint delegate directly.</summary>
     private static DefaultHttpContext Context(IServiceProvider services, Endpoint endpoint, Stream output, CancellationToken token)
     {
         var context = new DefaultHttpContext { RequestServices = services, RequestAborted = token };
@@ -1114,6 +1205,10 @@ public sealed class NamedGatewayMcpTests
         return context;
     }
 
+    /// <summary>Asserts that a cancel notification sent to one gateway does not cancel a call running on another, and
+    /// that the caller disconnecting does.</summary>
+    /// <remarks>The endpoints are stateless, so a notification carries no session that could tie it to the other
+    /// gateway's call.</remarks>
     private static async Task CrossEndpointCancellation()
     {
         var httpAborted = Gate();
@@ -1170,17 +1265,24 @@ public sealed class NamedGatewayMcpTests
         Assert.Equal(LogLevel.Warning, line.Level);
     }
 
+    /// <summary>The service registrations of the MCP HTTP transport, to show that more gateways do not add more.</summary>
     private static ServiceDescriptor[] TransportDescriptors(IServiceCollection services) => services.Where(descriptor =>
         descriptor.ServiceType == typeof(IConfigureOptions<HttpServerTransportOptions>)
         || descriptor.ServiceType.FullName?.Contains("StreamableHttpHandler", StringComparison.Ordinal) == true).ToArray();
 
+    /// <summary>Renames a fixture's sources and shifts its ids so it can stand for the root gateway beside named
+    /// ones.</summary>
     private static void PrepareExample(SqliteFixture fixture) => fixture.Change("UPDATE gateway_source SET name='synthetic_example_only' WHERE name='synthetic_items'; UPDATE gateway_source SET name='synthetic_example_other' WHERE name='synthetic_other'; UPDATE proof_items SET id=id+100");
 
+    /// <summary>The expected UnknownSource body from the root gateway.</summary>
     private const string UnknownExample = "{\"code\":\"UnknownSource\",\"path\":\"$.source\",\"message\":\"Choose an active source. Available sources: synthetic_example_only, synthetic_example_other.\",\"incidentId\":\"INCIDENT\"}";
 
+    /// <summary>A request body for the root gateway's source with the given row limit.</summary>
     private static string ExampleBody(string operation, int limit) => NamedGatewayHost.Body(operation, "synthetic_example_only")
         .Replace("\"limit\":2", "\"limit\":" + limit, StringComparison.Ordinal);
 
+    /// <summary>Asserts the root gateway's server identity: the host's application name and the given version, title and
+    /// description.</summary>
     private static void ExampleIdentity(McpClient client, string title, string about, string expectedVersion)
     {
         Assert.Equal("DataGateway.Web", client.ServerInfo.Name);
@@ -1189,6 +1291,7 @@ public sealed class NamedGatewayMcpTests
         Assert.Equal(about + " " + Instructions, client.ServerInstructions);
     }
 
+    /// <summary>Asserts that an answer came from the root gateway's catalog and database.</summary>
     private static void ExampleWitness(string operation, string text, int limit)
     {
         if (operation == "list")
@@ -1206,6 +1309,8 @@ public sealed class NamedGatewayMcpTests
         Assert.Equal("""{"name":"synthetic_example_only","title":"Synthetic","description":"Invented SQLite proof data.","grain":"One item","rowCap":3}""", json.RootElement.GetProperty("source").GetRawText());
     }
 
+    /// <summary>Asserts the three tool definitions: descriptions, input schemas, read-only annotations, no output schema,
+    /// and titles from the catalog.</summary>
     private static async Task Definitions(McpClient client, CancellationToken token)
     {
         var tools = await client.ListToolsAsync(cancellationToken: token);
@@ -1225,6 +1330,7 @@ public sealed class NamedGatewayMcpTests
         }
     }
 
+    /// <summary>The expected description and input schema of each tool, written out in full.</summary>
     private static readonly Dictionary<string, (string Description, string Schema)> ExpectedDefinitions = new()
     {
             ["list_sources"] = ("""No source named? See all data sources and what each holds. Takes no arguments and returns {"sources":[...]}: each active source's name, title, description, grain (what one row represents) and rowCap (maximum rows per query). Pick the source whose description and grain fit the question, then call describe_source with its name.""", """{"type":"object","properties":{},"additionalProperties":false}"""),

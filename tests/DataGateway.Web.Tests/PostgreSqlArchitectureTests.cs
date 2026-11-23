@@ -13,8 +13,19 @@ using System.Reflection;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the PostgreSQL engine's place in the assembly graph: it implements the engine boundary and is the
+/// only library assembly that depends on Npgsql.</summary>
+/// <remarks>The core, data, gateway and failure-log assemblies stay provider-free, so adding or removing an engine
+/// never touches them. Only the host may reference Npgsql directly, and no shipped assembly references the tests-only
+/// SQLite engine.</remarks>
 public sealed class PostgreSqlArchitectureTests
 {
+    /// <summary>The engine boundary keeps its member count; the engine is sealed with a public parameterless
+    /// constructor; provider references stay inside the adapter; and the Npgsql version is a minimum that the lock
+    /// file pins.</summary>
+    /// <remarks>A minimum version, not an exact one, lets a package consumer take Npgsql patches, while this
+    /// repository still builds against the locked version. The test name predates the boundary's current five
+    /// members.</remarks>
     [Fact]
     public void Eight_member_boundary_and_adapter_local_dependencies()
     {

@@ -22,10 +22,25 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>What happens when DataGateway itself fails (a bug, not a bad request or a down database): the caller gets
+/// one fixed UnexpectedError body with an incident id, and the log gets one line under that id with the whole
+/// exception.</summary>
+/// <remarks>
+/// <para>The answer never carries exception detail, because it can hold server names, users or SQL; the log line
+/// keeps all of it, because the operator needs it to find the bug. Faults are planted at each stage (catalog, query,
+/// writing the answer, reading the body, sign-in) with the helpers in UnexpectedFaults.cs.</para>
+/// <para>A caller who has already left gets no reply and only a warning line, and no framework error line may appear
+/// beside the gateway's own.</para>
+/// </remarks>
 public sealed class UnexpectedErrorTests
 {
+    /// <summary>The fixed message of every UnexpectedError answer.</summary>
     internal const string Message = "An unexpected error stopped DataGateway from completing the request. Tell the user, give the incidentId and stop; do not retry.";
 
+    /// <summary>A fault in an operation or while writing its answer is logged with the request and, for a query, its
+    /// SQL; a fault in the catalog read is a known CatalogUnavailable instead.</summary>
+    /// <remarks>After an answer fault that fired once, the next request succeeds with no new line: the fault left no
+    /// state behind.</remarks>
     [Theory]
     [InlineData("list", false)]
     [InlineData("describe", false)]
@@ -73,6 +88,8 @@ public sealed class UnexpectedErrorTests
         NoFrameworkError(host);
     }
 
+    /// <summary>A source row that does not match its output columns is the gateway's bug: UnexpectedError with the
+    /// gateway's own exception message in the log.</summary>
     [Fact]
     public async Task T3_route_mapping_fault_keeps_datagateway_message()
     {
@@ -90,6 +107,7 @@ public sealed class UnexpectedErrorTests
         ErrorLogTests.AssertSql(line, Compile(host));
     }
 
+    /// <summary>A fault while reading the request body still logs the operation, with no request text.</summary>
     [Theory]
     [InlineData("list")]
     [InlineData("describe")]
@@ -107,6 +125,9 @@ public sealed class UnexpectedErrorTests
         Nulls(line, "Sql", "SqlParameters");
     }
 
+    /// <summary>A fault inside sign-in is UnexpectedError for an anonymous caller, and names the operation when the
+    /// route is one of the gateway's.</summary>
+    /// <remarks>Routing runs before sign-in, so the operation is already known when sign-in fails.</remarks>
     [Theory]
     [InlineData("/sources/list", "list")]
     [InlineData("/not-a-route", null)]
@@ -121,6 +142,8 @@ public sealed class UnexpectedErrorTests
         Check(host, line, body, operation, null, "anonymous");
     }
 
+    /// <summary>A fault after the answer has started streaming aborts the response, since the status is already sent,
+    /// and logs one error line at the response step.</summary>
     [Fact]
     public async Task T6_started_answer_is_aborted_and_logged_once()
     {
@@ -148,6 +171,8 @@ public sealed class UnexpectedErrorTests
         NoFrameworkError(host);
     }
 
+    /// <summary>The log line keeps the whole exception tree (messages, inner and aggregate exceptions, stack
+    /// trace), while the log still holds no password.</summary>
     [Fact]
     public async Task T7_exception_tree_is_logged_whole()
     {
@@ -173,6 +198,8 @@ public sealed class UnexpectedErrorTests
         ErrorLogTests.Safe(text);
     }
 
+    /// <summary>A cancellation the caller did not ask for (thrown by the driver while the caller is still there) is
+    /// UnexpectedError, not a quiet cancel.</summary>
     [Fact]
     public async Task T8_live_caller_driver_cancellation_is_unexpected()
     {
@@ -186,6 +213,9 @@ public sealed class UnexpectedErrorTests
         Assert.Contains("System.OperationCanceledException", line.GetProperty("ExceptionText").GetString());
     }
 
+    /// <summary>When the caller leaves mid-request, during the query or during sign-in, the gateway writes one
+    /// warning line and never tries to write a reply.</summary>
+    /// <remarks>The armed answer fault counts reply attempts; it must stay at zero.</remarks>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -231,6 +261,8 @@ public sealed class UnexpectedErrorTests
         NoFrameworkError(host);
     }
 
+    /// <summary>Eight requests failing at once each get their own incident id, caller, request, parameters and
+    /// exception in their own line.</summary>
     [Fact]
     public async Task T10_concurrent_trails_and_ids_are_independent()
     {
@@ -266,6 +298,8 @@ public sealed class UnexpectedErrorTests
         }
     }
 
+    /// <summary>The Development environment answers with the same JSON body, not the framework's developer
+    /// exception page.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -281,6 +315,8 @@ public sealed class UnexpectedErrorTests
         NoFrameworkError(host);
     }
 
+    /// <summary>A body over the size limit, or one that cannot be read in full, is a known 400 refusal logged at the
+    /// request step, and no catalog read runs.</summary>
     [Theory]
     [InlineData("list", false)]
     [InlineData("describe", false)]
@@ -320,6 +356,8 @@ public sealed class UnexpectedErrorTests
         NoFrameworkError(host);
     }
 
+    /// <summary>The failure line carries the exception text exactly as given, with the fixed field set and
+    /// summary.</summary>
     [Fact]
     public void T16_failure_line_keeps_whole_exception_text()
     {
@@ -332,6 +370,8 @@ public sealed class UnexpectedErrorTests
         Assert.Equal($"Failure abc: query for caller: UnexpectedError: {Message} (null, null, null)", line.Summary());
     }
 
+    /// <summary>Server and user names in an unexpected exception stay in the log line, since the operator needs
+    /// them.</summary>
     [Fact]
     public async Task T7_server_and_user_remain_visible_without_password()
     {
@@ -347,6 +387,8 @@ public sealed class UnexpectedErrorTests
             Assert.True(detail.Contains(part, StringComparison.Ordinal), "Unexpected detail missing.");
     }
 
+    /// <summary>No product assembly holds a JSON converter or startup filter, and a healthy host has no converters,
+    /// so the fault seams above exist only in tests.</summary>
     [Fact]
     public async Task T17_product_contains_no_fault_seams_and_healthy_host_has_no_converters()
     {
@@ -362,15 +404,26 @@ public sealed class UnexpectedErrorTests
         NoFrameworkError(host);
     }
 
+    /// <summary>The answer type each operation writes, where <see cref="AnswerFault"/> strikes.</summary>
     private static Type AnswerType(string operation) => operation switch
     { "list" => typeof(SourceListResponse), "describe" => typeof(SourceDescribeResponse), _ => typeof(QueryResponse) };
 
+    /// <summary>The SQL the host compiles for the empty test query, to compare with the logged SQL.</summary>
     private static CompiledQuery Compile(LoggedHost host) => new SqlServerEngine().Compile(QueryBuilding.Validate(ErrorLogTests.Contract(),
         "{}", host.App.Services.GetRequiredService<JsonQueryLimits>() with { MaxLimit = ErrorLogTests.Contract().Source.RowCap }).Value);
 
+    /// <summary>Asserts each named field of a log line is JSON null.</summary>
     internal static void Nulls(JsonElement line, params string[] names)
     { foreach (var name in names) Assert.Equal(JsonValueKind.Null, line.GetProperty(name).ValueKind); }
 
+    /// <summary>Asserts an UnexpectedError line matches its answer: the shared checks, path <c>$</c>, the fixed
+    /// message, level Error, exception text present, no step and no SQL number.</summary>
+    /// <param name="host">The host, checked for stray framework errors.</param>
+    /// <param name="line">The failure line.</param>
+    /// <param name="body">The answer body.</param>
+    /// <param name="operation">The expected operation, or null when routing found none.</param>
+    /// <param name="request">The expected request text, or null when none was read.</param>
+    /// <param name="caller">The expected caller.</param>
     private static void Check(LoggedHost host, JsonElement line, JsonElement body, string? operation, string? request, string caller = "synthetic-user")
     {
         ErrorLogTests.Check(line, body, operation, request is null ? null : Encoding.UTF8.GetBytes(request), "UnexpectedError", caller);
@@ -382,6 +435,8 @@ public sealed class UnexpectedErrorTests
         NoFrameworkError(host);
     }
 
+    /// <summary>A log level of None for the failure category, the DataGateway prefix or the default, set at start or
+    /// after a reload, cannot hide known or unexpected failure lines.</summary>
     [Theory]
     [InlineData("Logging:Serilog:LogLevel:DataGateway.Failure")]
     [InlineData("Logging:Serilog:LogLevel:DataGateway")]
@@ -413,12 +468,17 @@ public sealed class UnexpectedErrorTests
         NoFrameworkError(host);
     }
 
+    /// <summary>A SQL Server engine whose read connects and then throws <paramref name="failure"/>, or a
+    /// <see cref="SyntheticFault"/> when null.</summary>
     internal static DataGateway.Data.IDatabaseEngine FaultEngine(Exception? failure = null) => FakeRows.Engine(new SqlServerEngine(), (_, _, connected, _) =>
     { connected(); throw failure ?? new SyntheticFault("synthetic query fault"); });
 
+    /// <summary>A query runner over the same faulting read as <see cref="FaultEngine"/>.</summary>
     internal static QueryRunner FaultRunner(Exception? failure = null) =>FakeRows.Runner(new SqlServerEngine(), (_, _, connected, _) =>
     { connected(); throw failure ?? new SyntheticFault("synthetic query fault"); });
 
+    /// <summary>Asserts a response is exactly the UnexpectedError answer, byte for byte apart from its incident id,
+    /// and returns its body.</summary>
     internal static async Task<JsonElement> Exact(HttpResponseMessage response)
     {
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
@@ -436,6 +496,9 @@ public sealed class UnexpectedErrorTests
         return body;
     }
 
+    /// <summary>Asserts no logger other than the gateway's failure log wrote an error or fatal line.</summary>
+    /// <remarks>A framework error line next to the gateway's would mean the fault escaped the gateway's
+    /// handling.</remarks>
     internal static void NoFrameworkError(LoggedHost host) =>
         Assert.DoesNotContain(host.AllLines(), l => l.GetProperty("SourceContext").GetString() != "DataGateway.Failure" &&
             l.TryGetProperty("@l", out var level) && level.GetString() is "Error" or "Fatal");

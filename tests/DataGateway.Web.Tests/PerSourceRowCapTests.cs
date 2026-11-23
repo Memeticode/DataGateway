@@ -13,22 +13,35 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the per-source row cap: each source's <c>row_cap</c> in the catalog bounds that source's queries and
+/// is shown in its listing and description.</summary>
+/// <remarks>The cap is read from the catalog on every request, so a changed cap applies to the next call without a
+/// restart, and two sources with different caps never share one limit. The host's limits template carries no row cap
+/// of its own and is never modified by a request.</remarks>
 public sealed class PerSourceRowCapTests
 {
+    /// <summary>The members of a source in a listing or description, in wire order.</summary>
     private static readonly string[] Members = ["name", "title", "description", "grain", "rowCap"];
 
+    /// <summary>A catalog of two synthetic sources whose caps a test can change between calls, counting list and
+    /// source reads.</summary>
     private sealed class Catalog
     {
+        /// <summary>Each source's current row cap.</summary>
         internal readonly ConcurrentDictionary<string, int> Caps = new(new Dictionary<string, int>
         { ["synthetic_small"] = 3, ["synthetic_large"] = 7 });
+        /// <summary>How many times the source list was read.</summary>
         internal int ListReads;
+        /// <summary>How many times one source's detail was read.</summary>
         internal int SourceReads;
+        /// <summary>A catalog that lists both sources with their current caps.</summary>
         internal HostCatalogState ListCatalog() => HostCatalogState.Raw(_ =>
         {
             Interlocked.Increment(ref ListReads);
             return Task.FromResult<IReadOnlyList<dynamic>>(Caps.Select(pair => (dynamic)new Dictionary<string, object?>
             { ["name"] = pair.Key, ["title"] = "Synthetic", ["description"] = "Synthetic", ["grain"] = "One row", ["row_cap"] = pair.Value }).ToArray());
         }, (name, _) => Task.FromResult<(IReadOnlyList<dynamic>, IReadOnlyList<dynamic>)>((ErrorLogTests.Rows(), [])));
+        /// <summary>A catalog that serves each source's detail with its current cap.</summary>
         internal HostCatalogState SourceCatalog() => HostCatalogState.Raw(_ => Task.FromResult<IReadOnlyList<dynamic>>([]), (name, _) =>
         {
             Interlocked.Increment(ref SourceReads);
@@ -39,6 +52,13 @@ public sealed class PerSourceRowCapTests
         });
     }
 
+    /// <summary>Sends one request over HTTP and as an MCP tool call, asserts both give the same answer, and returns
+    /// the HTTP answer.</summary>
+    /// <param name="host">The running host.</param>
+    /// <param name="mcp">A client connected to the same host's MCP endpoint.</param>
+    /// <param name="operation">The operation: list, describe or query.</param>
+    /// <param name="body">The JSON request body; the tool call sends the same arguments.</param>
+    /// <param name="success">Whether the call should succeed (200) or be refused (400).</param>
     private static async Task<JsonElement> Pair(LoggedHost host, McpClient mcp, string operation, string body, bool success = true)
     {
         using var response = await host.Client.PostAsync(ErrorLogTests.Route(operation), new StringContent(body));
@@ -52,8 +72,11 @@ public sealed class PerSourceRowCapTests
         return json.RootElement.Clone();
     }
 
+    /// <summary>A query request body for source <paramref name="name"/>.</summary>
     private static string Body(string name, string query) => "{\"source\":\"" + name + "\",\"query\":" + query + "}";
+    /// <summary>A describe request body for source <paramref name="name"/>.</summary>
     private static string Describe(string name) => "{\"source\":\"" + name + "\"}";
+    /// <summary>Asserts a source's listed members, in order, with <paramref name="cap"/> as its row cap.</summary>
     private static void Metadata(JsonElement source, string name, int cap)
     {
         Assert.Equal(Members, source.EnumerateObject().Select(p => p.Name));
@@ -63,6 +86,7 @@ public sealed class PerSourceRowCapTests
         Assert.Equal("One row", source.GetProperty("grain").GetString());
         Assert.Equal(cap, source.GetProperty("rowCap").GetInt32());
     }
+    /// <summary>Asserts a query answer's row count, <c>more</c> flag and the hint that matches them.</summary>
     private static void Answer(JsonElement answer, int kept, bool more)
     {
         Assert.Equal(kept, answer.GetProperty("rowCount").GetInt32());
@@ -72,6 +96,9 @@ public sealed class PerSourceRowCapTests
             answer.GetProperty("hint").GetString());
     }
 
+    /// <summary>Each source's cap drives its listing, its described limit maximum and every query's kept and fetched
+    /// rows; a limit above the cap is refused before any read; a changed cap applies on the next call; and two
+    /// concurrent queries on sources with different caps each keep their own.</summary>
     [Fact]
     public async Task T1_catalog_caps_drive_list_describe_query_and_live_refresh()
     {
@@ -164,6 +191,10 @@ public sealed class PerSourceRowCapTests
         Assert.Equal(JsonQueryLimits.Default with { MaxLimit = null }, template);
     }
 
+    /// <summary>The catalog cap replaces any maximum limit in the host's template, from 1 up to one below
+    /// <see cref="int.MaxValue"/>, while the template's structural limits (filter depth, conditions, list values)
+    /// still apply and the template itself is unchanged.</summary>
+    /// <remarks>The largest cap shows that fetching one row past the cap cannot overflow.</remarks>
     [Theory]
     [InlineData(1)]
     [InlineData(500)]
@@ -217,6 +248,8 @@ public sealed class PerSourceRowCapTests
         Assert.Null(typeof(DataGatewayLimits).GetProperty("RowCap"));
     }
 
+    /// <summary>A source row without a <c>row_cap</c> makes every operation answer CatalogUnavailable over HTTP and
+    /// MCP, with the catalog step logged.</summary>
     [Fact]
     public async Task T3_reader_rejects_missing_null_wrong_type_and_out_of_range_caps()
     {

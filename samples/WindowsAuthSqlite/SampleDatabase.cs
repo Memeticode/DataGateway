@@ -2,8 +2,22 @@ namespace WindowsAuthSample
 {
     using Microsoft.Data.Sqlite;
 
+    /// <summary>Creates the quickstart's database: the catalog table with one source, and that source's
+    /// table.</summary>
     public static class SampleDatabase
     {
+        /// <summary>Creates the file and its two tables in one transaction.</summary>
+        /// <remarks>
+        /// <para><c>catalog_source</c> gets one row: the source <c>sample_items</c>, active, with a row cap of 2,
+        /// reading the table <c>items</c>. <c>items</c> gets three rows, ids 1 to 3, so a query without a limit
+        /// stops at the cap and comes back with <c>more</c> set to true. All the names and values are
+        /// invented.</para>
+        /// <para>This is the one connection that writes, so it opens the file read-write. Pooling is off, so the
+        /// file is closed when seeding ends. Seeding runs once: a second run fails because the tables already
+        /// exist, and the transaction leaves nothing half made.</para>
+        /// </remarks>
+        /// <param name="file">The database file to create.</param>
+        /// <param name="cancellationToken">Cancels the seeding.</param>
         public static async Task CreateAsync(string file, CancellationToken cancellationToken)
         {
             var connection = new SqliteConnectionStringBuilder

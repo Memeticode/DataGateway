@@ -13,13 +13,29 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins per-gateway request limits: the <see cref="GatewayLimits"/> a gateway selects with <c>UseLimits</c>
+/// bound its own requests (JSON length, filter depth, filter conditions, in values), its failure log and its
+/// describe answer, and never another gateway's.</summary>
+/// <remarks>
+/// <para>Every limit is checked through both the JSON route and the MCP tool, on both protocol versions, and must give
+/// the same refusal, the same log line and no engine work: a refused request is stopped before it is compiled.</para>
+/// <para>An invalid selection fails the registration and commits nothing, so a host cannot start with a gateway whose
+/// limits were never checked.</para>
+/// </remarks>
 public sealed class NamedGatewayLimitsTests
 {
+    /// <summary>The MCP protocol versions each check runs on: the SDK default and the latest pinned version.</summary>
     private static readonly string?[] Protocols = [null, "2025-11-25"];
+    /// <summary>A query for the first two ids in order, within every limit.</summary>
     private const string OrderedTwo = "{\"select\":[\"id\"],\"order_by\":[{\"col\":\"id\",\"dir\":\"asc\"}],\"limit\":2}";
+    /// <summary>One filter condition that every row meets.</summary>
     private const string Leaf = "{\"col\":\"id\",\"op\":\"gte\",\"value\":0}";
+    /// <summary>The advice every filter-limit refusal ends with.</summary>
     private const string Advice = " Use fewer filter conditions, fewer in values or fewer nested groups.";
 
+    /// <summary>The defaults equal the query library's defaults, setting one limit leaves the others at their defaults,
+    /// and a gateway without a selection, or with an explicit default one, runs with the defaults and the 30-second
+    /// command timeout.</summary>
     [Fact]
     public async Task T1_defaults_and_partial_assignment()
     {
@@ -43,6 +59,9 @@ public sealed class NamedGatewayLimitsTests
         }
     }
 
+    /// <summary>The last <c>UseLimits</c> call wins and is checked only when registration completes, so an invalid
+    /// earlier selection does no harm; after completion, or a failed registration, the builder refuses further
+    /// changes.</summary>
     [Fact]
     public async Task T2_last_assignment_is_deferred_and_frozen()
     {
@@ -115,6 +134,9 @@ public sealed class NamedGatewayLimitsTests
         Assert.Equal(0, state.Factories);
     }
 
+    /// <summary>Each out-of-range value fails registration with a message naming the gateway, the field and the allowed
+    /// range, leaves the service collection exactly as it was and creates no catalog; the same name can then register
+    /// cleanly.</summary>
     [Fact]
     public void T3_invalid_values_commit_nothing()
     {
@@ -158,6 +180,8 @@ public sealed class NamedGatewayLimitsTests
         Assert.Empty(spaced);
     }
 
+    /// <summary>The smallest and largest allowed values register, and the failure log's request bound follows the JSON
+    /// length limit up to <see cref="int.MaxValue"/> without overflowing.</summary>
     [Fact]
     public void T4_boundaries_are_accepted()
     {
@@ -186,6 +210,8 @@ public sealed class NamedGatewayLimitsTests
         Assert.Equal(0, state.Factories);
     }
 
+    /// <summary>A query of exactly the gateway's JSON length passes and one character more is refused, for each gateway
+    /// independently.</summary>
     [Fact]
     public async Task T5_json_length_is_per_gateway()
     {
@@ -215,6 +241,8 @@ public sealed class NamedGatewayLimitsTests
             }
     }
 
+    /// <summary>Filter nesting is bounded per gateway, and the refusal path points at the first group that is too deep;
+    /// a depth limit of zero allows flat filters only.</summary>
     [Fact]
     public async Task T6_filter_depth_is_per_gateway()
     {
@@ -239,6 +267,8 @@ public sealed class NamedGatewayLimitsTests
         await rig.Success("d", QueryDepth(3), 1);
     }
 
+    /// <summary>The filter condition count is bounded per gateway, counting conditions inside groups, and the refusal
+    /// path points at the first condition over the limit.</summary>
     [Fact]
     public async Task T7_filter_conditions_are_per_gateway()
     {
@@ -261,6 +291,8 @@ public sealed class NamedGatewayLimitsTests
         await rig.Refusal("a", grouped, "$.query.filters[0].and[1].or[1]", ConditionsMessage(2));
     }
 
+    /// <summary>The number of values in <c>in</c> and <c>not_in</c> is bounded per gateway, including when the gateways
+    /// are called at the same time.</summary>
     [Fact]
     public async Task T8_in_values_are_per_gateway()
     {
@@ -294,6 +326,8 @@ public sealed class NamedGatewayLimitsTests
             rig.Success("d", Membership("not_in", 4), 1));
     }
 
+    /// <summary>Each gateway's failure log keeps the request up to its JSON length limit plus 1024 characters and marks
+    /// anything longer as cut.</summary>
     [Fact]
     public async Task T9_failure_log_is_per_gateway()
     {
@@ -315,6 +349,8 @@ public sealed class NamedGatewayLimitsTests
         }
     }
 
+    /// <summary>Each source's command timeout reaches the engine that runs it, for every gateway and every engine name,
+    /// also when the gateways share one engine; a timeout refusal names that source's seconds.</summary>
     [Fact]
     public async Task T10_timeout_reaches_each_engine()
     {
@@ -352,6 +388,8 @@ public sealed class NamedGatewayLimitsTests
         }
     }
 
+    /// <summary>Describe reports each gateway's own filter limits and each source's row cap, and the row cap, not a
+    /// gateway limit, bounds the query <c>limit</c>.</summary>
     [Fact]
     public async Task T11_describe_and_row_caps_use_gateway_limits()
     {
@@ -394,6 +432,10 @@ public sealed class NamedGatewayLimitsTests
         }
     }
 
+    /// <summary>Query limits, a query runner and a failure log registered directly in the container do not change any
+    /// gateway's limits; only the gateway's own <c>UseLimits</c> selection applies.</summary>
+    /// <remarks>The direct registrations are added before and after the gateways, so neither registration order lets
+    /// them leak into a gateway.</remarks>
     [Fact]
     public async Task T12_di_limits_do_not_override_public_gateway_limits()
     {
@@ -470,6 +512,7 @@ public sealed class NamedGatewayLimitsTests
         }
     }
 
+    /// <summary>Asserts all four values of a limits object.</summary>
     private static void Values(GatewayLimits limits, int length, int depth, int conditions, int values)
     {
         Assert.Equal(length, limits.MaxJsonLength);
@@ -478,6 +521,10 @@ public sealed class NamedGatewayLimitsTests
         Assert.Equal(values, limits.MaxInValues);
     }
 
+    /// <summary>Creates limits with one field set and the rest at their defaults.</summary>
+    /// <param name="field">The property name to set.</param>
+    /// <param name="value">The value to give it.</param>
+    /// <returns>The limits.</returns>
     private static GatewayLimits One(string field, int value) => field switch
     {
         "MaxJsonLength" => new GatewayLimits { MaxJsonLength = value },
@@ -487,6 +534,8 @@ public sealed class NamedGatewayLimitsTests
         _ => throw new ArgumentException("Unknown limit field.", nameof(field))
     };
 
+    /// <summary>Asserts the limits a registration carries, and that it sets no maximum row limit: row caps come from the
+    /// catalog, not from gateway limits.</summary>
     private static void Projection(GatewayRegistration registration, int length, int depth, int conditions, int values)
     {
         Assert.Equal(length, registration.Limits.MaxJsonLength);
@@ -496,6 +545,7 @@ public sealed class NamedGatewayLimitsTests
         Assert.Null(registration.Limits.MaxLimit);
     }
 
+    /// <summary>Asserts that a service collection holds exactly the same descriptor instances as before.</summary>
     private static void SameDescriptors(ServiceDescriptor[] before, IServiceCollection after)
     {
         Assert.Equal(before.Length, after.Count);
@@ -503,6 +553,8 @@ public sealed class NamedGatewayLimitsTests
             Assert.Same(before[i], after[i]);
     }
 
+    /// <summary>Asserts that the builder refuses any further <c>UseLimits</c> call, valid or null, once registration has
+    /// ended.</summary>
     private static void Frozen(DataGatewayBuilder builder, string name)
     {
         foreach (var selection in new GatewayLimits?[] { new GatewayLimits(), null })
@@ -512,13 +564,16 @@ public sealed class NamedGatewayLimitsTests
         }
     }
 
+    /// <summary>Registers a named gateway with the given limits.</summary>
     private static void Register(IServiceCollection services, string name, NamedGatewayState state, NamedGatewayEngine engine, GatewayLimits limits)
     {
         services.AddDataGateway(name, gateway => gateway.UseCatalog(state.Create).AddEngine(engine).UseLimits(limits));
     }
 
+    /// <summary>Builds a query request body.</summary>
     private static string Body(string source, string query) => "{\"source\":\"" + source + "\",\"query\":" + query + "}";
 
+    /// <summary>Builds a valid query of exactly <paramref name="length"/> characters by padding a filter value.</summary>
     private static string QueryLength(int length)
     {
         const string prefix = "{\"select\":[\"id\"],\"filters\":[{\"col\":\"label\",\"op\":\"eq\",\"value\":\"";
@@ -526,6 +581,7 @@ public sealed class NamedGatewayLimitsTests
         return prefix + new string('x', length - prefix.Length - suffix.Length) + suffix;
     }
 
+    /// <summary>Builds a query whose one filter is nested <paramref name="depth"/> groups deep.</summary>
     private static string QueryDepth(int depth)
     {
         var filter = Leaf;
@@ -535,21 +591,30 @@ public sealed class NamedGatewayLimitsTests
             + "],\"order_by\":[{\"col\":\"id\",\"dir\":\"asc\"}],\"limit\":1}";
     }
 
+    /// <summary>Builds a query with <paramref name="count"/> flat filter conditions.</summary>
     private static string Conditions(int count) => "{\"select\":[\"id\"],\"filters\":[" + string.Join(',', Enumerable.Repeat(Leaf, count))
         + "],\"order_by\":[{\"col\":\"id\",\"dir\":\"asc\"}],\"limit\":1}";
 
+    /// <summary>Builds a query with one <c>in</c> or <c>not_in</c> filter holding <paramref name="count"/> values.</summary>
     private static string Membership(string op, int count) => "{\"select\":[\"id\"],\"filters\":[{\"col\":\"id\",\"op\":\"" + op
         + "\",\"value\":[" + string.Join(',', Enumerable.Repeat("0", count))
         + "]}],\"order_by\":[{\"col\":\"id\",\"dir\":\"asc\"}],\"limit\":1}";
 
+    /// <summary>The expected message for a query over the JSON length limit.</summary>
     private static string LengthMessage(int count, int limit) => $"The query is over a configured limit: {count} characters exceed the payload limit of {limit}. Send a shorter query.";
+    /// <summary>The expected message for one condition more than the limit.</summary>
     private static string ConditionsMessage(int limit) => $"The query is over a configured limit: {limit + 1} filter conditions exceed the limit of {limit}." + Advice;
+    /// <summary>The expected message for one nesting level more than the limit.</summary>
     private static string DepthMessage(int limit) => $"The query is over a configured limit: filter group nesting depth {limit + 1} exceeds the limit of {limit}." + Advice;
+    /// <summary>The expected message for too many in values.</summary>
     private static string InMessage(int count, int limit) => $"The query is over a configured limit: {count} values exceed the in limit of {limit}." + Advice;
 
+    /// <summary>Builds an expected error body, with <c>INCIDENT</c> in place of the incident id.</summary>
     private static string Error(string code, string path, string message) => "{\"code\":\"" + code + "\",\"path\":\"" + path
         + "\",\"message\":" + JsonSerializer.Serialize(message) + ",\"incidentId\":\"INCIDENT\"}";
 
+    /// <summary>Asserts that a tool call failed with one text block equal to <paramref name="expected"/> and returns its
+    /// incident id.</summary>
     private static string ToolError(CallToolResult result, string expected)
     {
         Assert.True(result.IsError);
@@ -560,6 +625,12 @@ public sealed class NamedGatewayLimitsTests
         return incident;
     }
 
+    /// <summary>Asserts a query answer's source, its single <c>id</c> column, the ids returned, the count, and the
+    /// hint.</summary>
+    /// <param name="text">The answer text.</param>
+    /// <param name="source">The expected source name.</param>
+    /// <param name="first">The first expected id.</param>
+    /// <param name="count">The expected number of rows.</param>
     private static void Witness(string text, string source, int first, int count)
     {
         using var json = JsonDocument.Parse(text);
@@ -575,6 +646,19 @@ public sealed class NamedGatewayLimitsTests
         Assert.Equal(hint, root.GetProperty("hint").GetString());
     }
 
+    /// <summary>Finds the failure log line for an incident and asserts its gateway scope, fields and logged request,
+    /// cut at <paramref name="bound"/> characters.</summary>
+    /// <param name="host">The host whose logs to search.</param>
+    /// <param name="incident">The incident id.</param>
+    /// <param name="gateway">The expected gateway scope, or null when the line must have none.</param>
+    /// <param name="operation">The expected operation.</param>
+    /// <param name="code">The expected error code.</param>
+    /// <param name="path">The expected error path.</param>
+    /// <param name="message">The expected message.</param>
+    /// <param name="step">The expected step.</param>
+    /// <param name="body">The request that was sent.</param>
+    /// <param name="bound">The number of request characters the log keeps.</param>
+    /// <returns>The log line.</returns>
     private static NamedGatewayEvent Failure(NamedGatewayHost host, string incident, string? gateway, string operation,
         string code, string path, string message, string step, string body, int bound)
     {
@@ -594,6 +678,7 @@ public sealed class NamedGatewayLimitsTests
         return line;
     }
 
+    /// <summary>Asserts that nine executions ran, three per gateway, each with its source's command timeout.</summary>
     private static void Receipts((string Connection, DataGateway.Core.Queries.CompiledQuery Query, int Timeout)[] receipts, Rig rig)
     {
         Assert.Equal(9, receipts.Length);
@@ -605,17 +690,37 @@ public sealed class NamedGatewayLimitsTests
         }
     }
 
+    /// <summary>One host with three named gateways, <c>a</c>, <c>b</c> and <c>d</c>, each on its own catalog and engine,
+    /// mapped under <c>/a</c>, <c>/b</c> and <c>/d</c>, with MCP clients for each gateway and protocol.</summary>
+    /// <remarks><c>d</c> is usually left on the default limits, as the control gateway. Each catalog's source is named
+    /// after its gateway and its ids are shifted by ten per gateway, so an answer from the wrong gateway is
+    /// visible.</remarks>
     private sealed class Rig : IAsyncDisposable
     {
+        /// <summary>The gateway names, in fixture order.</summary>
         private static readonly string[] Names = ["a", "b", "d"];
+        /// <summary>One catalog database per gateway.</summary>
         private readonly SqliteFixture[] fixtures = [new(), new(), new()];
+        /// <summary>One catalog state per gateway.</summary>
         private readonly NamedGatewayState[] states;
+        /// <summary>The engine per gateway; all the same instance when a shared engine is given.</summary>
         private readonly NamedGatewayEngine[] engines;
+        /// <summary>The MCP clients, by gateway name and index into <see cref="Protocols"/>.</summary>
         private readonly Dictionary<(string Name, int Protocol), McpClient> clients = new();
+        /// <summary>Bounds the whole test.</summary>
         private readonly CancellationTokenSource deadline = new(TimeSpan.FromSeconds(120));
+        /// <summary>The host that serves the three gateways.</summary>
         internal NamedGatewayHost Host { get; }
+        /// <summary>The deadline's token.</summary>
         internal CancellationToken Token => deadline.Token;
 
+        /// <summary>Prepares the catalogs and registers and maps the three gateways.</summary>
+        /// <param name="selections">The limits for <c>a</c>, <c>b</c> and <c>d</c>; null leaves a gateway without a
+        /// <c>UseLimits</c> call.</param>
+        /// <param name="shared">One engine for all three gateways, or null for one each.</param>
+        /// <param name="configure">Extra builder calls per gateway.</param>
+        /// <param name="extra">Extra service registrations.</param>
+        /// <param name="extraFirst">True to add <paramref name="extra"/> before the gateways, false after.</param>
         internal Rig(GatewayLimits?[] selections, NamedGatewayEngine? shared = null,
             Action<string, DataGatewayBuilder>? configure = null, Action<IServiceCollection>? extra = null, bool extraFirst = false)
         {
@@ -647,12 +752,18 @@ public sealed class NamedGatewayLimitsTests
                 Host.App.MapDataGateway(name, "/" + name);
         }
 
+        /// <summary>The source name in a gateway's catalog.</summary>
         internal string Source(string name) => "synthetic_" + name + "_only";
+        /// <summary>A gateway's catalog database.</summary>
         internal SqliteFixture Fixture(string name) => fixtures[Array.IndexOf(Names, name)];
+        /// <summary>A gateway's catalog state.</summary>
         internal NamedGatewayState State(string name) => states[Array.IndexOf(Names, name)];
+        /// <summary>A gateway's engine.</summary>
         internal NamedGatewayEngine Engine(string name) => engines[Array.IndexOf(Names, name)];
+        /// <summary>A gateway's registration as the host resolved it.</summary>
         internal GatewayRegistration Registration(string name) => Assert.Single(Host.App.Services.GetServices<GatewayRegistration>(), item => item.Name == name);
 
+        /// <summary>Starts the host and connects one MCP client per gateway and protocol.</summary>
         internal async Task Start()
         {
             await Host.Start(Token);
@@ -661,6 +772,8 @@ public sealed class NamedGatewayLimitsTests
                     clients.Add((name, i), await NamedGatewayMcpWire.Connect(Host.Client, "/" + name + "/mcp", Protocols[i], Token));
         }
 
+        /// <summary>Asserts that a query succeeds with <paramref name="count"/> rows through the route and every MCP client,
+        /// with the same text, and runs once on the gateway's own database each time.</summary>
         internal async Task Success(string name, string query, int count)
         {
             var body = Body(Source(name), query);
@@ -686,6 +799,17 @@ public sealed class NamedGatewayLimitsTests
             }
         }
 
+        /// <summary>Asserts that a query is refused with the same body and log line through the route and every MCP client.</summary>
+        /// <remarks>A limit refusal must reach neither compile nor execute; a command failure (step <c>command</c>) runs
+        /// once and logs the source name.</remarks>
+        /// <param name="name">The gateway.</param>
+        /// <param name="query">The query to send.</param>
+        /// <param name="path">The expected error path.</param>
+        /// <param name="message">The expected message.</param>
+        /// <param name="code">The expected code.</param>
+        /// <param name="status">The expected HTTP status.</param>
+        /// <param name="step">The expected step.</param>
+        /// <param name="logBound">The request characters the log keeps, or null for the gateway's JSON length plus 1024.</param>
         internal async Task Refusal(string name, string query, string path, string message, string code = "StructuralLimitExceeded",
             int status = 400, string step = "query", int? logBound = null)
         {
@@ -717,6 +841,8 @@ public sealed class NamedGatewayLimitsTests
             }
         }
 
+        /// <summary>Asserts how far the engine got: nothing for a refusal, one compile and one execution for a command
+        /// failure.</summary>
         private static void Counts(NamedGatewayEngine engine, int compiled, int executed, string step)
         {
             var increment = step == "command" ? 1 : 0;
@@ -724,6 +850,8 @@ public sealed class NamedGatewayLimitsTests
             Assert.Equal(executed + increment, engine.Executed.Count);
         }
 
+        /// <summary>Describes the gateway's source through the route and every MCP client and runs the same assertion on
+        /// each answer, which must also be identical.</summary>
         internal async Task Describe(string name, Action<JsonElement> assertion)
         {
             var body = "{\"source\":\"" + Source(name) + "\"}";
@@ -744,6 +872,7 @@ public sealed class NamedGatewayLimitsTests
             }
         }
 
+        /// <summary>Closes the clients, stops the host and releases the catalogs.</summary>
         public async ValueTask DisposeAsync()
         {
             foreach (var client in clients.Values)

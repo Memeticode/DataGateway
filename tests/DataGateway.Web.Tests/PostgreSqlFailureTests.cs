@@ -15,8 +15,15 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins how PostgreSQL connection problems and provider errors become the gateway's errors.</summary>
+/// <remarks>Bad connection text is refused locally with a fixed message and no connection opened. A provider error is
+/// recognized by its SQLSTATE only on the provider's own exception, and the query runner decides the public error from
+/// whether the connection had opened. The wire answers and log lines match the shared goldens and leak no connection
+/// text.</remarks>
 public sealed class PostgreSqlFailureTests
 {
+    /// <summary>One joined catalog row (source plus one column) for the synthetic PostgreSQL source, as the catalog
+    /// reader returns it.</summary>
     internal static Dictionary<string,object?> Joined() => new(StringComparer.Ordinal)
     {
         ["id"]=7L,["name"]="synthetic_items",["title"]="Items",["description"]="Rows.",["grain"]="One item.",["row_cap"]=5L, ["query_timeout_seconds"] = 1,
@@ -25,6 +32,10 @@ public sealed class PostgreSqlFailureTests
         ["unit"]=DBNull.Value,["magnitude"]=null,["display_format"]=null,
         ["can_select"]=true,["can_filter"]=false,["can_sort"]=true,["can_group"]=false,["can_aggregate"]=true
     };
+    /// <summary>The catalog setting and a source connection are each checked in a fixed order with fixed messages,
+    /// no inner exception and no connection created.</summary>
+    /// <remarks>Fixed messages never echo the connection text, which can carry a password; that is why a parse error
+    /// is replaced rather than passed through.</remarks>
     [Theory]
     [InlineData(null,"The catalog connection is missing. ","A source host is required.")]
     [InlineData(" ","The catalog connection is missing. ","A source host is required.")]
@@ -57,6 +68,8 @@ public sealed class PostgreSqlFailureTests
         var sourceError=await Assert.ThrowsAsync<ArgumentException>(()=>engine.ReadSourceAsync(input!,SqliteEngineTests.Raw("SELECT id"),7,()=>{},SqliteEngineTests.Collect,default));
         Assert.Equal(source,sourceError.Message);Assert.Null(sourceError.InnerException);
     }
+    /// <summary>A source read uses the connection text exactly as given, the caller's token for open and execute,
+    /// and the requested command timeout; a token already cancelled opens nothing.</summary>
     [Fact]
     public async Task Original_connection_timeout_tokens_and_precancel()
     {
@@ -71,6 +84,8 @@ public sealed class PostgreSqlFailureTests
         caller.Cancel();var count=probe.Connections.Count;
         await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>PostgreSqlSourceTests.Read(token:caller.Token));Assert.Equal(count,probe.Connections.Count);
     }
+    /// <summary>SQLSTATE 57014 (query canceled by the server) is a timeout and other states are not; an exception that
+    /// only wraps a provider error is not recognized.</summary>
     [Theory]
     [InlineData("57014",true)][InlineData("42P01",false)][InlineData("42501",false)][InlineData("28P01",false)]
     public void SQLSTATE_only_recognizes_provider_root(string state,bool timeout)
@@ -79,6 +94,8 @@ public sealed class PostgreSqlFailureTests
         var failure=engine.RecognizeFailure(error);Assert.NotNull(failure);Assert.Equal(timeout,failure.IsTimeout);Assert.Null(failure.Number);
         Assert.Null(engine.RecognizeFailure(new Exception("wrapper",error)));
     }
+    /// <summary>A provider exception is a timeout only when a <see cref="TimeoutException"/> is in its inner chain; a
+    /// bare timeout or cancellation from elsewhere is not the provider's.</summary>
     [Fact]
     public void Provider_inner_timeout_only_and_unrelated_errors()
     {
@@ -87,6 +104,10 @@ public sealed class PostgreSqlFailureTests
         Assert.Null(engine.RecognizeFailure(new TimeoutException()));Assert.Null(engine.RecognizeFailure(new OperationCanceledException()));
         Assert.Throws<ArgumentNullException>(()=>engine.RecognizeFailure(null!));
     }
+    /// <summary>Before the connection opens, any provider error is SourceUnavailable at step <c>connect</c>; after it
+    /// opens, a timeout is QueryTimeout and anything else SourceUnavailable at step <c>command</c>.</summary>
+    /// <remarks>Only a timeout after open says the query itself was too slow; before open, the source was not
+    /// reachable in time, which a narrower query cannot fix.</remarks>
     [Theory]
     [InlineData(false,"57014","SourceUnavailable","connect")][InlineData(true,"57014","QueryTimeout","command")]
     [InlineData(true,"42P01","SourceUnavailable","command")]
@@ -99,6 +120,8 @@ public sealed class PostgreSqlFailureTests
         Assert.Same(error,result.Failure!.DriverException);
         Assert.Equal(code=="QueryTimeout"?"$.query":"$.source",result.Failure.Path);
     }
+    /// <summary>A cancellation the caller did not ask for is rethrown as unexpected; a cancelled caller token gives
+    /// QueryCancelled.</summary>
     [Fact]
     public async Task Source_and_catalog_cancellation_policies()
     {
@@ -108,14 +131,27 @@ public sealed class PostgreSqlFailureTests
         using var caller=new CancellationTokenSource();caller.Cancel();
         Assert.Equal("QueryCancelled",(await runner.RunAsync(PostgreSqlCompilationTests.Source(queryTimeoutSeconds: 7),SqliteEngineTests.Raw("SELECT id"),caller.Token)).Failure?.Code);
     }
+    /// <summary>A PostgreSQL engine whose source read always fails with a synthetic provider error chosen by
+    /// <c>mode</c>.</summary>
+    /// <remarks>Modes: <c>open</c> fails before the connection opens; <c>missing</c> and <c>malformed</c> fail after
+    /// it opens with an undefined-table error; <c>timeout</c> fails after it opens with SQLSTATE 57014.</remarks>
     private sealed class HostEngine(string mode) : IDatabaseEngine
     {
+        /// <summary>The real engine's provider name.</summary>
         string IDatabaseEngine.ProviderName => ((IDatabaseEngine)inner).ProviderName;
+        /// <summary>The real engine that compiles, validates and recognizes failures.</summary>
         private readonly PostgreSqlEngine inner=new();
+        /// <summary>Set after host startup, so the catalog serves a malformed connection only to the request under
+        /// test.</summary>
         internal bool Armed;
+        /// <summary>Compiles with the real engine.</summary>
         public CompiledQuery Compile(ValidatedQuery q)=>inner.Compile(q);
+        /// <summary>Validates with the real engine.</summary>
         public void ValidateSourceConnection(string? c)=>inner.ValidateSourceConnection(c);
+        /// <summary>Recognizes failures with the real engine.</summary>
         public ProviderFailure? RecognizeFailure(Exception e)=>inner.RecognizeFailure(e);
+        /// <summary>Fails with the mode's provider error, calling <c>opened</c> first unless the mode is
+        /// <c>open</c>.</summary>
         public Task<QueryRows> ReadSourceAsync(string c,CompiledQuery q,int t,Action opened,Func<IAsyncEnumerable<IDictionary<string,object?>>,Task<QueryRows>> consume,CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
@@ -124,19 +160,24 @@ public sealed class PostgreSqlFailureTests
             return Task.FromException<QueryRows>(error);
         }
     }
+    /// <summary>A PostgreSQL catalog serving the synthetic source from memory, with an unparseable connection once
+    /// the engine is armed in <c>malformed</c> mode.</summary>
     private sealed class ProviderCatalog(HostEngine engine, string mode) : CatalogService<NpgsqlConnection>(Dapper.Data.DbContext<NpgsqlConnection>.FromFactory(() => throw new InvalidOperationException("Synthetic provider only.")))
     {
+    /// <summary>The shared test MCP metadata.</summary>
     public override Task<global::DataGateway.Core.Catalog.McpMetadata> QueryMcpMetadataAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(global::DataGateway.Web.Tests.McpMetadataFixture.Seed);
     }
 
+        /// <summary>The one synthetic source.</summary>
         public override Task<IReadOnlyList<SourceListRow>> QueryCatalogAsync(CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
             return Task.FromResult<IReadOnlyList<SourceListRow>>([new("synthetic_items", "Items", "Rows.", "Item", true, 5)]);
         }
+        /// <summary>The synthetic source's detail, mapped by the real catalog table reader.</summary>
         public override Task<CatalogDetail?> QueryCatalogDetailAsync(string name, CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
@@ -148,6 +189,8 @@ public sealed class PostgreSqlFailureTests
             return Task.FromResult<CatalogDetail?>(detail);
         }
     }
+    /// <summary>Each provider or validation failure gives the golden HTTP and MCP answers, one log line per answer
+    /// with its step and no SQL number, and no connection text anywhere.</summary>
     [Theory]
     [InlineData("open","SourceUnavailable","connect")][InlineData("missing","SourceUnavailable","command")]
     [InlineData("timeout","SourceTimeout","command")][InlineData("malformed","InvalidCatalog","connect")]

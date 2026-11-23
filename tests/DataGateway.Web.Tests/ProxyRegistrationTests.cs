@@ -11,20 +11,47 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the proxy's <c>--register</c> and <c>--unregister</c> commands, which add or remove the proxy as a
+/// named MCP server in every configuration file of the desktop client on this computer.</summary>
+/// <remarks>
+/// <para>TERMS. A target is one client configuration file. A tier A target lives in a folder the client always reads,
+/// so it is written even when the file does not exist yet; a tier B target is written only when its file already
+/// exists. The fallback is the classic configuration folder, created only when discovery found no target and no
+/// error. An entry is owned when its command is this proxy's executable; an old alias is an owned entry for the same
+/// gateway URL under another key. A barrier is a name conflict or a malformed server map in any target: it stops every
+/// write. The late guard is the second running-client check, made after every read and plan and just before the first
+/// write.</para>
+/// <para>The rule behind every case: change nothing that is not this proxy's, keep every other byte of a file as it
+/// was, back up exactly before replacing, refuse before touching anything when the client is running, and say per
+/// file what happened. Every test runs on a private temporary folder through a recording file layer, with the
+/// client's policy, processes and tool list injected.</para>
+/// </remarks>
 public sealed class ProxyRegistrationTests
 {
+    /// <summary>A gateway URL in a deliberately unusual spelling, so tests can check that the original spelling is
+    /// written unchanged.</summary>
     private const string Url = "HTTP://example.invalid:80/a/../mcp?X=%2f";
+    /// <summary>The line that ends every run's output.</summary>
     private const string Footer = "Start Claude Desktop to load it.";
+    /// <summary>The refusal while the desktop client is running.</summary>
     private const string Tray = "refused: quit Claude Desktop from the tray icon (not just the window), then run the command again";
+    /// <summary>The refusal when the gateway's tools cannot be listed.</summary>
     private const string Gateway = "refused: gateway could not be reached or its tools could not be listed; check the URL and your Windows access";
+    /// <summary>The refusal when policy disables local MCP servers.</summary>
     private const string Policy = "refused: your organization's policy disables local MCP servers in Claude Desktop; ask your administrator";
+    /// <summary>The two usage lines written to stderr for bad arguments.</summary>
     private static readonly string[] Usage =
     [
         "Usage: DataGateway.Proxy --register <URL of the server's /mcp endpoint> --name <server key>",
         "Usage: DataGateway.Proxy --unregister --name <server key>"
     ];
+    /// <summary>A value quoted as a JSON string, as the output quotes paths and keys.</summary>
     private static string Q(string value) => JsonSerializer.Serialize(value);
 
+    /// <summary>Registering keeps every other member's raw JSON text (number spelling, escapes, spacing) and backs up
+    /// the original bytes exactly, without printing other entries' values.</summary>
+    /// <remarks>Reserializing the file would rewrite tokens another program wrote; another entry's environment can
+    /// hold a secret, so it never reaches the output.</remarks>
     [Fact]
     public async Task T1_merge_preserves_raw_value_tokens_and_exact_original_backup()
     {
@@ -44,6 +71,9 @@ public sealed class ProxyRegistrationTests
         Assert.Empty(f.Error.ToString());
     }
 
+    /// <summary>A file that is not one JSON object, has duplicate members, comments, a trailing comma, invalid UTF-8 or
+    /// cannot be read is refused alone and left as it was; other targets are still registered, and once repaired the
+    /// file registers on the next run.</summary>
     [Theory]
     [InlineData("{")]
     [InlineData("")]
@@ -79,6 +109,7 @@ public sealed class ProxyRegistrationTests
         Assert.Contains("skipped: already registered", f.Out.ToString());
     }
 
+    /// <summary>A running desktop client refuses both commands before the tool list or any file is touched.</summary>
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -98,6 +129,8 @@ public sealed class ProxyRegistrationTests
         Assert.Equal(0, await f.Run(register));
     }
 
+    /// <summary>A client that starts after the first check is caught by the late guard, which refuses even the
+    /// fallback folder's creation.</summary>
     [Fact]
     public async Task T3_desktop_starting_during_preflight_blocks_even_fallback_creation()
     {
@@ -113,6 +146,7 @@ public sealed class ProxyRegistrationTests
         f.Unchanged(snapshot);
     }
 
+    /// <summary>The late guard refuses every planned target by name and writes nothing.</summary>
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -134,6 +168,9 @@ public sealed class ProxyRegistrationTests
         Assert.Equal(register ? 1 : 0, f.ListCalls);
     }
 
+    /// <summary>The server key must leave room for the longest tool name in a bridged tool name: a 21-character
+    /// prefix, the key, a two-character separator and the tool, at most 64 characters. The boundary is inclusive, and
+    /// a refusal names the longest tool and the longest key that fits.</summary>
     [Theory]
     [InlineData(15, 26, true)]
     [InlineData(15, 27, false)]
@@ -163,6 +200,8 @@ public sealed class ProxyRegistrationTests
         }
     }
 
+    /// <summary>Tools of equal length are ranked ordinally, and an empty or null tool name counts as a failed tool
+    /// list.</summary>
     [Fact]
     public async Task T4_ties_are_ordinal_and_malformed_tool_names_refuse_as_gateway_failure()
     {
@@ -181,6 +220,8 @@ public sealed class ProxyRegistrationTests
         }
     }
 
+    /// <summary>A key outside ASCII letters, digits, underscore and hyphen is a usage error, found before any
+    /// environment is read.</summary>
     [Theory]
     [InlineData("")]
     [InlineData(" ")]
@@ -205,6 +246,9 @@ public sealed class ProxyRegistrationTests
         AssertEntry(f, f.Classic, "Data_2026-a", Url);
     }
 
+    /// <summary>Old aliases are recognized however the proxy's path is spelled (slash direction, case, a dot
+    /// segment) and removed; entries of other programs, relative commands and malformed entries are kept byte for
+    /// byte.</summary>
     [Fact]
     public async Task T6_alias_identity_normalizes_slashes_case_and_dots_and_preserves_nonowners()
     {
@@ -232,6 +276,8 @@ public sealed class ProxyRegistrationTests
         AssertEntry(f, f.Classic, "data", Url);
     }
 
+    /// <summary>Registering the same thing twice changes no byte and makes no backup; a changed URL updates the entry
+    /// with a new, separate backup.</summary>
     [Fact]
     public async Task T7_repeat_is_a_complete_byte_noop_and_url_change_has_unique_backup()
     {
@@ -250,6 +296,9 @@ public sealed class ProxyRegistrationTests
         AssertEntry(f, f.Classic, "data", "http://example.invalid/changed");
     }
 
+    /// <summary>Unregister removes exactly the named key, whoever owns it, keeps other entries including owned ones
+    /// under other keys, never asks the gateway, and is a no-op when repeated.</summary>
+    /// <remarks>Unregister is the explicit way out of a name conflict, so it does not check ownership.</remarks>
     [Fact]
     public async Task T8_unregister_removes_only_selected_key_regardless_of_ownership()
     {
@@ -273,6 +322,8 @@ public sealed class ProxyRegistrationTests
         f.Unchanged(snapshot);
     }
 
+    /// <summary>Unregistering when the key, the server map, the file or every configuration folder is missing
+    /// succeeds, creates nothing and never contacts the gateway.</summary>
     [Theory]
     [InlineData("missing-key")]
     [InlineData("absent-map")]
@@ -292,6 +343,11 @@ public sealed class ProxyRegistrationTests
         Assert.Contains(kind == "empty-tree" ? "skipped: no Claude Desktop configs found" : "skipped:", f.Out.ToString());
     }
 
+    /// <summary>A proxy launched through <c>dotnet</c>, an executable path that is missing, relative or invalid, a
+    /// platform other than Windows, or an unresolvable profile folder is refused before policy, processes, the gateway
+    /// or files are touched.</summary>
+    /// <remarks>The configuration entry stores the executable's absolute path; a <c>dotnet</c> host path would start
+    /// the runtime, not the proxy.</remarks>
     [Theory]
     [InlineData("dotnet")]
     [InlineData("DOTNET.EXE")]
@@ -329,6 +385,8 @@ public sealed class ProxyRegistrationTests
         }
     }
 
+    /// <summary>A failed tool list (HTTP, handshake, listing or cancellation) refuses registration without touching a
+    /// file, and creates no fallback folder; unregister still works.</summary>
     [Theory]
     [InlineData("http")]
     [InlineData("initialize")]
@@ -351,6 +409,8 @@ public sealed class ProxyRegistrationTests
         Assert.Equal(0, await f.Run(false));
     }
 
+    /// <summary>An argument list that starts with an unknown dash verb is a usage error, both in process and from the
+    /// built executable.</summary>
     [Theory]
     [InlineData("--bogus")]
     [InlineData("-register")]
@@ -366,6 +426,8 @@ public sealed class ProxyRegistrationTests
         Assert.Equal(Usage, tap.Stderr);
     }
 
+    /// <summary>Arguments that do not start with a dash are left to the stdio server: registration returns null, reads
+    /// no environment and writes nothing.</summary>
     [Fact]
     public async Task T11_server_dispatch_fallthrough_does_not_create_context_or_writers()
     {
@@ -377,6 +439,10 @@ public sealed class ProxyRegistrationTests
         }
     }
 
+    /// <summary>The backup holds the original bytes, byte order mark included, under a timestamped unique name, and is
+    /// copied and verified before the temporary file is written, closed and moved into place.</summary>
+    /// <remarks>The original is never replaced until a verified copy of it exists. A file that did not exist gets no
+    /// backup.</remarks>
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -412,6 +478,9 @@ public sealed class ProxyRegistrationTests
         Assert.Empty(missing.Backups());
     }
 
+    /// <summary>Discovery finds every known configuration folder (classic, packaged installs of both package families,
+    /// the relocation folder and the other known folders) once each, ignoring case and dot segments, lists each parent
+    /// folder only once, and skips excluded folders, backups and copies.</summary>
     [Fact]
     public async Task T13_exhaustive_bounded_discovery_both_package_families_and_lexical_dedup()
     {
@@ -455,6 +524,8 @@ public sealed class ProxyRegistrationTests
         Assert.Empty(f.Temps());
     }
 
+    /// <summary>The fallback folder is created only when discovery found nothing; an existing tier B file or a
+    /// relocation folder is used instead, and an empty tier B folder gets no file.</summary>
     [Theory]
     [InlineData("empty")]
     [InlineData("empty-B")]
@@ -485,6 +556,8 @@ public sealed class ProxyRegistrationTests
         Assert.False(Directory.Exists(Path.Combine(f.Context.AppData, "Claude-3p")));
     }
 
+    /// <summary>A bad or excluded relocation folder, or a folder that cannot be inspected, is reported and makes the
+    /// run fail, but accessible targets are still written and no fallback is created.</summary>
     [Theory]
     [InlineData("relative")]
     [InlineData("invalid")]
@@ -530,6 +603,8 @@ public sealed class ProxyRegistrationTests
         }
     }
 
+    /// <summary>Machine and user policy values with whether local servers are allowed: the machine value wins when
+    /// set, and only a false-like value disables.</summary>
     public static IEnumerable<object?[]> Policies()
     {
         yield return [0, null, false]; yield return [false, null, false];
@@ -560,6 +635,8 @@ public sealed class ProxyRegistrationTests
         }
     }
 
+    /// <summary>A policy that cannot be read is its own refusal, made before processes, the gateway or files are
+    /// touched, and does not print the error's text.</summary>
     [Fact]
     public async Task T14_unreadable_policy_is_a_separate_refusal()
     {
@@ -575,6 +652,8 @@ public sealed class ProxyRegistrationTests
         }
     }
 
+    /// <summary>A key already used by an entry that is not this proxy's stops every target from changing, names the
+    /// owner's command and the way out; after an explicit unregister, the key registers.</summary>
     [Theory]
     [InlineData("other")]
     [InlineData("missing")]
@@ -610,6 +689,8 @@ public sealed class ProxyRegistrationTests
         AssertEntry(f, f.Classic, "data", "https://example.invalid/new");
     }
 
+    /// <summary>A process counts as the desktop client only by its name and its path under the client's known install
+    /// folders, matched by whole path segments ignoring case and slash direction.</summary>
     [Theory]
     [InlineData("store", true)]
     [InlineData("anthropic-store", true)]
@@ -650,6 +731,8 @@ public sealed class ProxyRegistrationTests
         Assert.Equal(expected, ClaudeDesktopEnvironment.IsDesktop(new(kind == "wrong-name" ? "code" : "CLAUDE.EXE", path), f.Context));
     }
 
+    /// <summary>When the process list cannot be read at all, the run is refused, because no target can be
+    /// safe.</summary>
     [Fact]
     public async Task T16_whole_process_enumeration_failure_is_global()
     {
@@ -661,6 +744,8 @@ public sealed class ProxyRegistrationTests
         f.Unchanged(snapshot); Assert.Empty(f.Files.Calls); Assert.Equal(0, f.ListCalls);
     }
 
+    /// <summary>A server map that is not a JSON object is a barrier for both commands: that file is refused and no
+    /// other file changes.</summary>
     [Theory]
     [InlineData("null")]
     [InlineData("[]")]
@@ -682,6 +767,8 @@ public sealed class ProxyRegistrationTests
         }
     }
 
+    /// <summary>The server map's name is matched exactly, so a differently cased member is another program's data and
+    /// is kept; a file without a map is legal.</summary>
     [Fact]
     public async Task T17_lowercase_map_is_unrelated_and_absent_map_is_legal()
     {
@@ -696,6 +783,9 @@ public sealed class ProxyRegistrationTests
         AssertEntry(f, f.Classic, "data", Url);
     }
 
+    /// <summary>A failure while committing one target (backup, verify, write, replace, cleanup, or the file changing,
+    /// appearing or vanishing since it was read) refuses that target alone, keeps its original and any temporary file
+    /// that is not this run's, and still commits the next target.</summary>
     [Theory]
     [InlineData("copy", "cannot create or verify backup")]
     [InlineData("verify", "cannot create or verify backup")]
@@ -747,6 +837,8 @@ public sealed class ProxyRegistrationTests
         Assert.Equal(3, f.Lines.Length);
     }
 
+    /// <summary>A tier B file that disappears before commit is not recreated, and a directory where a file should be
+    /// is refused untouched.</summary>
     [Fact]
     public async Task T18_disappeared_tier_b_and_directory_targets_are_not_recreated()
     {
@@ -765,6 +857,7 @@ public sealed class ProxyRegistrationTests
         Assert.True(Directory.Exists(path)); Assert.Equal(0, f.Files.Mutations);
     }
 
+    /// <summary>A fallback folder that cannot be created is refused and leaves nothing behind.</summary>
     [Fact]
     public async Task T18_backup_copy_drift_and_fallback_mkdir_failure_refuse_safely()
     {
@@ -776,6 +869,8 @@ public sealed class ProxyRegistrationTests
         f.Unchanged(snapshot); Assert.False(Directory.Exists(Path.GetDirectoryName(f.Classic)));
     }
 
+    /// <summary>Argument lists that break the exact command grammar: missing or extra arguments, a wrong order, a
+    /// repeated or miscased option, or a URL that is not absolute HTTP or HTTPS.</summary>
     public static IEnumerable<object[]> Grammar()
     {
         yield return [new[] { "--register" }];
@@ -800,6 +895,8 @@ public sealed class ProxyRegistrationTests
     [MemberData(nameof(Grammar))]
     public async Task T19_exact_grammar_rejects_extras_before_context_creation(string[] arguments) => await UsageOnly(arguments);
 
+    /// <summary>A key may be spelled like a verb, the URL is stored as typed, and the built executable rejects a
+    /// truncated command line.</summary>
     [Fact]
     public async Task T19_valid_forms_retain_original_url_spelling_and_allow_key_register()
     {
@@ -814,6 +911,8 @@ public sealed class ProxyRegistrationTests
         Assert.Equal(2, malformed.ExitCode); Assert.Empty(malformed.Stdout); Assert.Equal(Usage, malformed.Stderr);
     }
 
+    /// <summary>The real tool-list client lists the same tools from a live host as an independent MCP client, and a
+    /// port nothing listens on refuses without touching files.</summary>
     [Fact]
     public async Task T20_actual_streamable_http_adapter_initializes_and_lists_synthetic_host()
     {
@@ -842,6 +941,8 @@ public sealed class ProxyRegistrationTests
         unavailable.Unchanged(snapshot); Assert.Empty(unavailable.Files.Calls);
     }
 
+    /// <summary>An HTTP error answering discovery, the handshake or the tool list refuses registration before any
+    /// file is touched.</summary>
     [Theory]
     [InlineData("initialize")]
     [InlineData("server/discover")]
@@ -887,7 +988,9 @@ public sealed class ProxyRegistrationTests
         f.Unchanged(snapshot); Assert.Empty(f.Files.Calls);
     }
 
-    // A second gateway (another URL) through the same proxy is kept; only an entry for the same URL is an old alias.
+    /// <summary>An owned entry for another gateway URL is kept; only an owned entry for the same URL is an old alias
+    /// and is removed.</summary>
+    /// <remarks>One proxy executable can serve several gateways, each under its own key.</remarks>
     [Fact]
     public async Task T6b_a_second_gateway_through_the_same_proxy_is_kept()
     {
@@ -902,6 +1005,8 @@ public sealed class ProxyRegistrationTests
         AssertEntry(f, f.Classic, "data", Url);
     }
 
+    /// <summary>The output has one line per target and per discovery error, aliases escaped as JSON strings, other
+    /// entries' values never printed, and exactly one closing line.</summary>
     [Fact]
     public async Task T21_output_is_one_line_per_target_and_candidate_with_escaped_aliases_and_footer()
     {
@@ -925,6 +1030,8 @@ public sealed class ProxyRegistrationTests
         Assert.Equal(0, await f.Run()); Assert.Equal(3, f.Lines.Length);
     }
 
+    /// <summary>The README shows register, the quit-first note, unregister and the manual setup in that order, and its
+    /// API examples are unchanged.</summary>
     [Fact]
     public void T22_readme_cli_order_and_unchanged_manual_examples_are_preserved()
     {
@@ -943,6 +1050,8 @@ public sealed class ProxyRegistrationTests
         Assert.Equal(new[] { "challenge", "describe", "list", "query", "refusal", "unknown-source", "vocabulary" }, ReadmeExamples.Parse(markdown).Select(example => example.Name).Order());
     }
 
+    /// <summary>An excluded folder named as the relocation folder, however its slashes are written, is refused and is
+    /// not written later when the child-folder scan reaches it.</summary>
     [Theory]
     [InlineData(true, "forward")]
     [InlineData(false, "forward")]
@@ -983,6 +1092,8 @@ public sealed class ProxyRegistrationTests
         Assert.Empty(f.Error.ToString());
     }
 
+    /// <summary>The scan of child folders skips folders of other clients, managed configuration, backups and copies,
+    /// and still writes an ordinary child folder.</summary>
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -1019,6 +1130,8 @@ public sealed class ProxyRegistrationTests
         }
     }
 
+    /// <summary>A classic folder or fallback under an excluded path is never a target, whether or not its file exists;
+    /// the same layout under an ordinary path is.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -1046,6 +1159,8 @@ public sealed class ProxyRegistrationTests
         f.Unchanged(snapshot);
     }
 
+    /// <summary>Configuration texts with an unpaired UTF-16 surrogate escape in a member name or value, at several
+    /// depths, for both commands.</summary>
     public static IEnumerable<object[]> SurrogateDocuments()
     {
         string[] documents =
@@ -1062,6 +1177,9 @@ public sealed class ProxyRegistrationTests
                 yield return [register, document];
     }
 
+    /// <summary>A file with an unpaired surrogate is refused alone and kept; the run finishes the other
+    /// targets.</summary>
+    /// <remarks>Such a string cannot be written back as valid UTF-8, so rewriting the file would corrupt it.</remarks>
     [Theory]
     [MemberData(nameof(SurrogateDocuments))]
     public async Task T26_invalid_surrogates_refuse_only_their_file_and_finish(bool register, string text)
@@ -1088,6 +1206,8 @@ public sealed class ProxyRegistrationTests
         Assert.Empty(f.Error.ToString());
     }
 
+    /// <summary>The same documents with valid surrogate pairs are accepted, and their members keep their raw
+    /// text.</summary>
     [Theory]
     [MemberData(nameof(SurrogateDocuments))]
     public async Task T27_valid_pairs_are_accepted_and_retained(bool register, string invalid)
@@ -1129,6 +1249,8 @@ public sealed class ProxyRegistrationTests
         Assert.Empty(f.Error.ToString());
     }
 
+    /// <summary>When the late guard refuses, every target, including no-ops and invalid files, is named with the
+    /// refusal after the discovery errors; when it passes, each target reports its own result.</summary>
     [Theory]
     [InlineData(true, "desktop")]
     [InlineData(false, "desktop")]
@@ -1205,6 +1327,8 @@ public sealed class ProxyRegistrationTests
         Assert.Empty(f.Error.ToString());
     }
 
+    /// <summary>With no target to name, a late-guard refusal is the single global refusal, printed after any discovery
+    /// errors.</summary>
     [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
@@ -1233,6 +1357,8 @@ public sealed class ProxyRegistrationTests
         Assert.Empty(f.Error.ToString());
     }
 
+    /// <summary>Asserts that <paramref name="args"/> give exit code 2 and the usage lines, without reading the
+    /// environment or writing to stdout.</summary>
     private static async Task UsageOnly(string[] args)
     {
         using var output = new StringWriter(); using var error = new StringWriter();
@@ -1241,9 +1367,15 @@ public sealed class ProxyRegistrationTests
         Assert.Equal(0, factories); Assert.Equal("", output.ToString());
         Assert.Equal(Usage, Lines(error.ToString()));
     }
+    /// <summary>The non-empty lines of <paramref name="text"/>, ignoring carriage returns.</summary>
     private static string[] Lines(string text) => text.Replace("\r", "").Split('\n', StringSplitOptions.RemoveEmptyEntries);
+    /// <summary>Asserts that two JSON values have the same raw text, byte for byte.</summary>
     private static void RawEqual(JsonElement expected, JsonElement actual) => Assert.Equal(Encoding.UTF8.GetBytes(expected.GetRawText()), Encoding.UTF8.GetBytes(actual.GetRawText()));
+    /// <summary>A server entry that runs <paramref name="command"/> with <paramref name="url"/> as its only
+    /// argument.</summary>
     private static JsonObject Server(string command, string url = "old-url") => new() { ["command"] = command, ["args"] = new JsonArray(url) };
+    /// <summary>Asserts that the file holds exactly this proxy's entry under <paramref name="key"/>: its command and
+    /// the URL as its only argument, nothing else.</summary>
     private static void AssertEntry(Fixture f, string path, string key, string url)
     {
         using var document = JsonDocument.Parse(File.ReadAllBytes(path));
@@ -1253,19 +1385,34 @@ public sealed class ProxyRegistrationTests
         Assert.Equal(new[] { url }, entry.GetProperty("args").EnumerateArray().Select(argument => argument.GetString()));
     }
 
+    /// <summary>A fake user profile in a private temporary folder, with an injected environment that records each
+    /// policy, process and tool-list call.</summary>
     private sealed class Fixture : IDisposable
     {
+        /// <summary>The profile's root folder, unique per fixture.</summary>
         internal string Root { get; } = Path.Combine(Path.GetTempPath(), "dg-registration-" + Guid.NewGuid().ToString("N"));
+        /// <summary>The proxy's installed executable path, which owned entries name as their command.</summary>
         internal string Exe => Path.Combine(Root, "installed", "DataGateway.Proxy.exe");
+        /// <summary>The classic configuration file under the roaming profile.</summary>
         internal string Classic => Config("Roaming", "Claude");
+        /// <summary>The environment a run sees; tests replace parts of it.</summary>
         internal RegistrationContext Context;
+        /// <summary>The recording file layer every run uses.</summary>
         internal readonly RecordingFiles Files = new();
+        /// <summary>The last run's stdout.</summary>
         internal readonly StringWriter Out = new();
+        /// <summary>The last run's stderr.</summary>
         internal readonly StringWriter Error = new();
+        /// <summary>How many times policy, processes and the tool list were read.</summary>
         internal int PolicyCalls, ProcessCalls, ListCalls;
+        /// <summary>The tool names the fake gateway lists.</summary>
         internal IReadOnlyList<string> Tools = ["list_sources", "describe_source", "query_source"];
+        /// <summary>A process that counts as the running desktop client.</summary>
         internal DesktopProcess Desktop => new("claude", Path.Combine(Context.LocalAppData, "AnthropicClaude", "app-1", "Claude.exe"));
+        /// <summary>The last run's stdout lines.</summary>
         internal string[] Lines => ProxyRegistrationTests.Lines(Out.ToString());
+        /// <summary>Creates the profile folders, with the classic configuration folder when
+        /// <paramref name="classic"/> is true.</summary>
         internal Fixture(bool classic = true)
         {
             foreach (var directory in new[] { Root, Path.Combine(Root, "Roaming"), Path.Combine(Root, "Local"), Path.Combine(Root, "ProgramFiles") }) Directory.CreateDirectory(directory);
@@ -1274,46 +1421,73 @@ public sealed class ProxyRegistrationTests
                 () => { PolicyCalls++; return new(null, null); }, () => { ProcessCalls++; return []; },
                 (_, _) => { ListCalls++; return Task.FromResult(Tools); }, Files);
         }
+        /// <summary>The configuration file inside the folder at <paramref name="parts"/> under the root.</summary>
         internal string Config(params string[] parts) => Path.Combine([Root, .. parts, ClaudeConfigFiles.Filename]);
+        /// <summary>Writes <paramref name="text"/> as UTF-8 to <paramref name="path"/>, creating its folder.</summary>
+        /// <returns>The bytes written.</returns>
         internal byte[] Seed(string path, string text)
         { Directory.CreateDirectory(Path.GetDirectoryName(path)!); var bytes = Encoding.UTF8.GetBytes(text); File.WriteAllBytes(path, bytes); return bytes; }
+        /// <summary>A configuration text holding this proxy's entry under key <c>data</c>, optionally with an extra
+        /// member that makes it differ from what registration writes.</summary>
         internal string Entry(bool extra = false)
         {
             var server = Server(Exe);
             if (extra) server["env"] = new JsonObject { ["TOKEN"] = "SYNTHETIC_ONLY" };
             return new JsonObject { ["mcpServers"] = new JsonObject { ["data"] = server } }.ToJsonString();
         }
+        /// <summary>Runs one register or unregister command against the fixture, clearing the previous output.</summary>
+        /// <returns>The exit code: 0 for success, 1 for a refusal, 2 for a usage error.</returns>
         internal async Task<int?> Run(bool register = true, string key = "data", string url = Url)
         {
             Out.GetStringBuilder().Clear(); Error.GetStringBuilder().Clear();
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             return await ProxyRegistration.TryHandleAsync(register ? ["--register", url, "--name", key] : ["--unregister", "--name", key], () => Context, Out, Error, timeout.Token);
         }
+        /// <summary>Every backup file under the root, sorted.</summary>
         internal string[] Backups() => Directory.GetFiles(Root, "*.bak", SearchOption.AllDirectories).Order().ToArray();
+        /// <summary>Every temporary file under the root, sorted.</summary>
         internal string[] Temps() => Directory.GetFiles(Root, "*.tmp", SearchOption.AllDirectories).Order().ToArray();
+        /// <summary>Every file under the root with its bytes.</summary>
         internal Dictionary<string, byte[]> Snapshot() => Directory.GetFiles(Root, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
+        /// <summary>Asserts that the same files exist with the same bytes as in <paramref name="snapshot"/>.</summary>
         internal void Unchanged(Dictionary<string, byte[]> snapshot)
         {
             var current = Snapshot(); Assert.Equal(snapshot.Keys.Order(), current.Keys.Order());
             foreach (var pair in snapshot) Assert.Equal(pair.Value, current[pair.Key]);
         }
+        /// <summary>Disposes the writers and removes the root folder.</summary>
         public void Dispose() { Out.Dispose(); Error.Dispose(); Directory.Delete(Root, recursive: true); }
     }
 
+    /// <summary>The real file layer with every call recorded and an optional hook that runs before each one, so a
+    /// test can inject a failure or a concurrent change at an exact step.</summary>
     private sealed class RecordingFiles : IRegistrationFiles
     {
+        /// <summary>The real file layer.</summary>
         private readonly IRegistrationFiles inner = new RegistrationFiles();
+        /// <summary>Every call in order, with its operation name, path and destination.</summary>
         internal readonly List<(string Op, string Path, string? Destination)> Calls = [];
+        /// <summary>Runs before each call with its operation name, path and destination; it may throw.</summary>
         internal Action<string, string, string?>? Before;
+        /// <summary>How many recorded calls change the disk.</summary>
         internal int Mutations => Calls.Count(call => call.Op is "mkdir" or "copy" or "write" or "move" or "delete");
+        /// <summary>Records the call, then runs <see cref="Before"/>.</summary>
         private void Record(string op, string path, string? destination = null) { Calls.Add((op, path, destination)); Before?.Invoke(op, path, destination); }
+        /// <summary>Records and returns the path's attributes.</summary>
         public FileAttributes? Attributes(string path) { Record("attributes", path); return inner.Attributes(path); }
+        /// <summary>Records and lists the child folders.</summary>
         public IReadOnlyList<string> Directories(string path) { Record("directories", path); return inner.Directories(path); }
+        /// <summary>Records and reads the file.</summary>
         public byte[] ReadAllBytes(string path) { Record("read", path); return inner.ReadAllBytes(path); }
+        /// <summary>Records and creates the folder.</summary>
         public void CreateDirectory(string path) { Record("mkdir", path); inner.CreateDirectory(path); }
+        /// <summary>Records and copies the file.</summary>
         public void CopyFile(string source, string destination) { Record("copy", source, destination); inner.CopyFile(source, destination); }
+        /// <summary>Records and writes a new file.</summary>
         public void WriteNewFile(string path, byte[] content) { Record("write", path); inner.WriteNewFile(path, content); }
+        /// <summary>Records and moves the file.</summary>
         public void MoveFile(string source, string destination, bool overwrite) { Record("move", source, destination); inner.MoveFile(source, destination, overwrite); }
+        /// <summary>Records and deletes the file.</summary>
         public void DeleteFile(string path) { Record("delete", path); inner.DeleteFile(path); }
     }
 }

@@ -12,23 +12,42 @@ using DataGateway.Data.Queries;
 namespace DataGateway;
 
 /// <summary>Configures one named gateway during AddDataGateway. Registration freezes this builder.</summary>
+/// <remarks>Setters only record values; the checks run once, when registration completes, so the last value
+/// is the one checked and a failed configuration registers nothing. Every method returns this builder.</remarks>
 public sealed class DataGatewayBuilder
 {
+    /// <summary>The gateway name, quoted in every refusal.</summary>
     private readonly string name;
+    /// <summary>The registered engines by name, unique ignoring case.</summary>
     private readonly Dictionary<string, IDatabaseEngine> engines = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Builds a request's catalog adapter; null until <see cref="UseCatalog{TConnection}"/> is called.</summary>
     private Func<IServiceProvider, IReadOnlyDictionary<string, QueryRunner>, GatewayCatalog>? catalog;
+    /// <summary>Set once AddDataGateway has run the configuration; every setter then refuses.</summary>
     private bool frozen;
+    /// <summary>The MCP tool name prefix as supplied, checked at registration.</summary>
     private string? mcpNamePrefix;
+    /// <summary>The MCP tool description prefix as supplied, checked at registration.</summary>
     private string? mcpDescriptionPrefix;
+    /// <summary>The query limits as supplied, checked at registration.</summary>
     private GatewayLimits limits = new();
+    /// <summary>The host policy as supplied, checked at registration; null when none is set.</summary>
     private GatewayHostPolicy? hostPolicy;
 
+    /// <summary>Starts an empty configuration for one gateway.</summary>
+    /// <remarks>Internal: only AddDataGateway creates a builder, so it can freeze and complete it.</remarks>
+    /// <param name="name">The gateway name, already checked by AddDataGateway.</param>
     internal DataGatewayBuilder(string name) => this.name = name;
 
     /// <summary>Sets optional MCP tool name and description prefixes. The last call wins.</summary>
     /// <remarks>Blank values are unset. Registration validates nonblank values as supplied: names use
     /// 1-24 lowercase ASCII letters, digits or underscores, start with a letter and never end with an underscore.
     /// Descriptions are one line of at most 80 UTF-8 bytes ending with a period. Registration freezes this setting.</remarks>
+    /// <param name="namePrefix">Joined to each tool name with an underscore, and applied to every tool name the
+    /// catalog's MCP text mentions; null or blank for none.</param>
+    /// <param name="descriptionPrefix">Put before each tool description, separated by one space; null or blank for
+    /// none.</param>
+    /// <returns>The same builder.</returns>
+    /// <exception cref="InvalidOperationException">Registration is already complete.</exception>
     public DataGatewayBuilder UseMcpTools(string? namePrefix = null, string? descriptionPrefix = null)
     {
         CheckMutable();
@@ -44,6 +63,12 @@ public sealed class DataGatewayBuilder
     /// the server starts, including unmapped gateways. The application owns created catalogs and supplied contexts;
     /// DI owns dependencies resolved from its scopes. Fresh wrappers isolate mutable state; applications returning
     /// a shared catalog are responsible for concurrent access to overrides and result objects.</remarks>
+    /// <typeparam name="TConnection">The ADO.NET connection type the catalog reads with.</typeparam>
+    /// <param name="factory">Creates the catalog service from the current scope's services. Returning null is a
+    /// catalog failure.</param>
+    /// <returns>The same builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">Registration is already complete.</exception>
     public DataGatewayBuilder UseCatalog<TConnection>(Func<IServiceProvider, CatalogService<TConnection>> factory)
         where TConnection : DbConnection, new()
     {
@@ -61,6 +86,12 @@ public sealed class DataGatewayBuilder
     }
 
     /// <summary>Registers an application-owned engine under its ProviderName, matched ordinally ignoring case.</summary>
+    /// <remarks>Each catalog detail names the engine that runs its source; see the overload that takes a name.</remarks>
+    /// <param name="engine">The engine; the application owns it and its lifetime.</param>
+    /// <returns>The same builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="engine"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">The name is blank or already registered, or registration is
+    /// already complete.</exception>
     public DataGatewayBuilder AddEngine(IDatabaseEngine engine)
     {
         CheckMutable();
@@ -71,6 +102,12 @@ public sealed class DataGatewayBuilder
     /// <summary>Registers an application-owned engine under an alias, preserving spelling and whitespace.</summary>
     /// <remarks>Names must be non-blank and unique ignoring case within this gateway. Startup refuses any
     /// active catalog detail whose provider has no matching engine. Distinct aliases support engine variants.</remarks>
+    /// <param name="engine">The engine; the application owns it and its lifetime.</param>
+    /// <param name="name">The name a catalog detail's provider uses to select this engine.</param>
+    /// <returns>The same builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="engine"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">The name is blank or already registered, or registration is
+    /// already complete.</exception>
     public DataGatewayBuilder AddEngine(IDatabaseEngine engine, string name)
     {
         CheckMutable();
@@ -80,9 +117,13 @@ public sealed class DataGatewayBuilder
         return this;
     }
 
-    /// <summary>Sets all five limits for this gateway. The last assignment is validated during registration.</summary>
+    /// <summary>Sets all four limits for this gateway. The last assignment is validated during registration.</summary>
     /// <remarks>Unspecified properties receive their defaults. A null argument is refused immediately.
     /// Registration freezes this setting together with the other builder settings.</remarks>
+    /// <param name="limits">The limits; see <see cref="GatewayLimits"/> for each default and range.</param>
+    /// <returns>The same builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="limits"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">Registration is already complete.</exception>
     public DataGatewayBuilder UseLimits(GatewayLimits limits)
     {
         CheckMutable();
@@ -101,6 +142,8 @@ public sealed class DataGatewayBuilder
     /// <param name="description">The sentence appended to the page document description.</param>
     /// <param name="responseDescription">The complete description of each operation's 401 response.</param>
     /// <returns>The same builder.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="InvalidOperationException">Registration is already complete.</exception>
     public DataGatewayBuilder UseHostPolicy(CatalogFailure failure, string description, string responseDescription)
     {
         CheckMutable();
@@ -111,6 +154,10 @@ public sealed class DataGatewayBuilder
         return this;
     }
 
+    /// <summary>Checks the final host policy.</summary>
+    /// <remarks>The failure is put through the public error envelope: a code the envelope would redact, or answer with
+    /// another status, could not be the 401 that the host's refusal is answered and documented with.</remarks>
+    /// <returns>The policy, or null when none was set.</returns>
     private GatewayHostPolicy? ReadHostPolicy()
     {
         if (hostPolicy is null)
@@ -125,8 +172,15 @@ public sealed class DataGatewayBuilder
         return hostPolicy;
     }
 
+    /// <summary>Ends configuration; any later setter call refuses.</summary>
+    /// <remarks>Called even when the configure callback throws, so a builder that escaped the callback cannot change
+    /// anything afterwards.</remarks>
     internal void Freeze() => frozen = true;
 
+    /// <summary>Checks the final settings and produces the frozen registration.</summary>
+    /// <returns>The registration AddDataGateway adds to the services.</returns>
+    /// <exception cref="InvalidOperationException">A setting is missing or invalid; the message names the
+    /// gateway.</exception>
     internal GatewayRegistration Complete()
     {
         if (catalog is null) throw Refuse("Configure a catalog with UseCatalog.");
@@ -140,6 +194,9 @@ public sealed class DataGatewayBuilder
         };
     }
 
+    /// <summary>Checks the MCP prefixes; a blank prefix means none.</summary>
+    /// <remarks>No trailing underscore: the prefix is joined to each tool name with one.</remarks>
+    /// <returns>The prefixes as supplied, or null for each one that is blank.</returns>
     private McpToolSettings ReadMcpTools()
     {
         var namePrefix = string.IsNullOrWhiteSpace(mcpNamePrefix) ? null : mcpNamePrefix;
@@ -153,6 +210,10 @@ public sealed class DataGatewayBuilder
         return settings;
     }
 
+    /// <summary>Checks each limit's range and turns them into the query library's limits.</summary>
+    /// <remarks>The filter depth's maximum is the query library's own ceiling. The row cap stays unset: each source
+    /// supplies its own.</remarks>
+    /// <returns>The limits for every source of this gateway.</returns>
     private JsonQueryLimits ReadLimits()
     {
         CheckLimit(limits.MaxJsonLength, nameof(GatewayLimits.MaxJsonLength), 1, int.MaxValue);
@@ -169,12 +230,22 @@ public sealed class DataGatewayBuilder
         };
     }
 
+    /// <summary>Refuses a limit outside its inclusive range.</summary>
+    /// <param name="value">The supplied value.</param>
+    /// <param name="field">The property name, for the message.</param>
+    /// <param name="minimum">The smallest accepted value.</param>
+    /// <param name="maximum">The largest accepted value.</param>
     private void CheckLimit(int value, string field, int minimum, int maximum)
     {
         if (value < minimum || value > maximum)
             throw Refuse(FormattableString.Invariant($"{field} must be an integer from {minimum} to {maximum}."));
     }
 
+    /// <summary>Refuses a prefix that spans lines or is too long in UTF-8.</summary>
+    /// <param name="value">The supplied text; null or blank passes.</param>
+    /// <param name="field">The parameter name, for the message.</param>
+    /// <param name="maxBytes">The largest accepted UTF-8 byte count.</param>
+    /// <returns>The trimmed text, or null when blank.</returns>
     private string? ReadMcpLine(string? value, string field, int maxBytes)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
@@ -183,14 +254,20 @@ public sealed class DataGatewayBuilder
         return value.Trim();
     }
 
+    /// <summary>Wraps each engine in a query runner, keyed by its registered name ignoring case.</summary>
+    /// <returns>A read-only copy of the engine set.</returns>
     private IReadOnlyDictionary<string, QueryRunner> CreateRunners() =>
         new System.Collections.ObjectModel.ReadOnlyDictionary<string, QueryRunner>(
             engines.ToDictionary(pair => pair.Key, pair => new QueryRunner(pair.Value), StringComparer.OrdinalIgnoreCase));
 
+    /// <summary>Refuses a setter call once configuration has ended.</summary>
     private void CheckMutable()
     {
         if (frozen) throw Refuse("Registration is already complete.");
     }
 
+    /// <summary>A configuration error that names the gateway.</summary>
+    /// <param name="reason">What is wrong and how to fix it.</param>
+    /// <returns>The exception to throw.</returns>
     private InvalidOperationException Refuse(string reason) => new($"Gateway '{name}'. {reason}");
 }

@@ -6,35 +6,61 @@ using Xunit;
 
 namespace DataGateway.Core.Tests;
 
+/// <summary>Pins <see cref="CatalogValidator"/>: the shape check on what a catalog reader returns, the source list and
+/// one source's detail, before any column mapping.</summary>
+/// <remarks>
+/// <para>The check reports every fault, in a fixed order, each with a JSON path and a correction naming the field to
+/// fix. Column semantics (identifier rules, unique names, data types, flags) belong to
+/// <see cref="CatalogMapping"/>; the tests named "belongs to mapping" pin that split.</para>
+/// <para>A catalog fault must never print the source's connection string or object name; the sentinels below are
+/// searched for in every output.</para>
+/// </remarks>
 public sealed class CatalogValidatorTests
 {
+    /// <summary>A connection string value that must never appear in any failure, message or serialized form.</summary>
     private const string ConnectionSentinel = "validator-connection-sentinel-61b";
+    /// <summary>An object name value that must never appear in any failure, message or serialized form.</summary>
     private const string ObjectSentinel = "validator-object-sentinel-61b";
+    /// <summary>The correction for a row cap out of range.</summary>
     private const string CapCorrection = "Set rowCap to an integer from 1 through 2147483646.";
+    /// <summary>The correction for a missing or blank list name.</summary>
     private const string BlankName = "Set name to a non-blank value.";
+    /// <summary>The correction for a list name with surrounding whitespace.</summary>
     private const string TrimName = "Remove surrounding whitespace from name.";
+    /// <summary>The correction for a list name that repeats an earlier one.</summary>
     private const string Duplicate = "Use a source name that is unique ignoring case.";
+    /// <summary>The correction for a null column entry.</summary>
     private const string MissingColumn = "Replace the null column entry with a column row.";
+    /// <summary>The correction for a column without a name.</summary>
     private const string MissingColumnName = "Set columnName to a non-null value.";
+    /// <summary>The correction for a detail whose source name is not the one requested.</summary>
     private const string Requested = "Return the requested source name, matching it ignoring case.";
 
+    /// <summary>A valid list row.</summary>
     private static SourceListRow ListRow() => new("widgets", "Widgets", "Synthetic measurements", "One measurement", true, 7);
+    /// <summary>A valid source row carrying the sentinels; each argument can be set to a faulty value.</summary>
     private static DataSourceRow Source(string? name = "widgets", string? connection = ConnectionSentinel,
         string? objectName = ObjectSentinel, int cap = 7, bool active = true) => new(objectName!, connection!)
         {
             Name = name!, Title = "Widgets", Description = "Synthetic measurements", Grain = "One measurement",
             IsActive = active, RowCap = cap, QueryTimeoutSeconds = 30
         };
+    /// <summary>A valid column with every flag on.</summary>
     private static DataSourceColumnRow Column() => new("amount", 2, "Amount", "Measurement", "number", "units", "one", "0.00",
         true, true, true, true, true);
+    /// <summary>A documentation-only column: described, with every flag off.</summary>
     private static DataSourceColumnRow Notes() => new("notes", 5, "Notes", "Documentation only", "text", null, null, null,
         false, false, false, false, false);
+    /// <summary>A detail built from <see cref="Source"/> and <see cref="Column"/> unless other parts are given.</summary>
     private static CatalogDetail Detail(DataSourceRow? source = null, IReadOnlyList<DataSourceColumnRow>? columns = null,
         string? provider = "fixture-target") => new(provider!, new(source ?? Source(), columns ?? [Column()]));
+    /// <summary>The invalid-catalog failure expected at <paramref name="path"/>, its message prefixed with the source
+    /// name when there is one.</summary>
     private static CatalogFailure Expected(string path, string correction, string? name = "widgets") =>
         new("InvalidCatalog", path, name is null ? correction : "Source '" + name + "'. " + correction) { SourceName = name };
 
-    // Expected records have independent literal corrections and null diagnostic defaults.
+    /// <summary>Asserts the failures match in order, field by field, and carry no diagnostic data.</summary>
+    /// <remarks>Expected records have independent literal corrections and null diagnostic defaults.</remarks>
     private static void EqualFailures(IReadOnlyList<CatalogFailure> actual, params CatalogFailure[] expected)
     {
         Assert.Equal(expected.Length, actual.Count);
@@ -52,16 +78,21 @@ public sealed class CatalogValidatorTests
             Assert.Equal(expected[index], actual[index]);
         }
     }
+    /// <summary>Asserts a one-row list fails only at <paramref name="field"/> of its first entry.</summary>
     private static void ListFailure(SourceListRow row, string field, string correction, string? name = "widgets") =>
         EqualFailures(CatalogValidator.ValidateList([row]), Expected("$.sources[0]." + field, correction, name));
+    /// <summary>Asserts a detail fails only at <paramref name="field"/> under <c>$.detail</c>.</summary>
     private static void DetailFailure(CatalogDetail detail, string field, string correction, string requested = "widgets") =>
         EqualFailures(CatalogValidator.ValidateDetail(requested, detail), Expected("$.detail." + field, correction, requested));
+    /// <summary>Asserts the shape check passes, then maps, so a test can show a fault is caught by mapping alone.</summary>
     private static CatalogResult<SourceContract> ShapeThenMap(params DataSourceColumnRow[] columns)
     {
         var detail = Detail(columns: columns);
         Assert.Empty(CatalogValidator.ValidateDetail("widgets", detail));
         return CatalogMapping.Map(detail.Rows);
     }
+    /// <summary>Asserts mapping failed with exactly this correction at <c>$.source</c>.</summary>
+    /// <returns>The failure.</returns>
     private static CatalogFailure MappingFailure(CatalogResult<SourceContract> result, string correction)
     {
         Assert.False(result.IsSuccess);
@@ -70,6 +101,8 @@ public sealed class CatalogValidatorTests
         return failure;
     }
 
+    /// <summary>Both entry points accept lists typed with or without nullable rows, so callers written either way
+    /// compile.</summary>
     [Fact]
     public void T1_public_entry_points_accept_existing_and_nullable_callers()
     {
@@ -193,6 +226,7 @@ public sealed class CatalogValidatorTests
         Assert.Equal(provider, detail.Provider);
     }
 
+    /// <summary>Null rows are one fault: nothing beneath them is checked, but the provider before them still is.</summary>
     [Fact]
     public void T13_missing_rows_stop_descendants_after_provider()
     {
@@ -202,6 +236,7 @@ public sealed class CatalogValidatorTests
             Expected("$.detail.provider", "Set provider to a non-blank value."), missing);
     }
 
+    /// <summary>A null source row does not stop the columns beside it from being checked.</summary>
     [Fact]
     public void T14_missing_source_keeps_column_siblings_inspectable()
     {
@@ -244,6 +279,7 @@ public sealed class CatalogValidatorTests
     [InlineData(1)] [InlineData(7)] [InlineData(QueryLimits.MaxRowCap)]
     public void T18_detail_cap_accepts_inclusive_bounds(int cap) => Assert.Empty(CatalogValidator.ValidateDetail("widgets", Detail(Source(cap: cap))));
 
+    /// <summary>A fault's path uses the column's position in the list, not its catalog ordinal, which may be anything.</summary>
     [Fact]
     public void T19_null_column_paths_use_supplied_indices_instead_of_ordinals() =>
         EqualFailures(CatalogValidator.ValidateDetail("widgets", Detail(columns: [Column() with { Ordinal = 99 }, null!, Column() with { Ordinal = -2 }, null!])),
@@ -291,6 +327,8 @@ public sealed class CatalogValidatorTests
     public void T24_source_wide_capability_requirement_belongs_to_mapping() => MappingFailure(ShapeThenMap(
         Notes() with { ColumnName = "amount" }, Notes()), "Switch on at least one flag in the catalog before using this source.");
 
+    /// <summary>One column with any single flag on makes the source usable, and a documentation-only column beside it
+    /// keeps its metadata.</summary>
     [Theory]
     [InlineData(0)] [InlineData(1)] [InlineData(2)] [InlineData(3)] [InlineData(4)]
     public void T24_any_single_capability_allows_documentation_only_metadata(int flag)
@@ -310,11 +348,14 @@ public sealed class CatalogValidatorTests
         Assert.True(ShapeThenMap(Column()).IsSuccess);
     }
 
+    /// <summary>A list with several faults per row: null entry, untrimmed name, case-only duplicate, bad caps and null
+    /// fields.</summary>
     private static SourceListRow?[] MultiList() =>
     [
         null, new(" widgets ", null!, "", null!, true, 0), new("widgets", "", "", "", true, 7),
         new("WIDGETS", "", null!, "", false, -1)
     ];
+    /// <summary>The faults <see cref="MultiList"/> reports, in their fixed order.</summary>
     private static CatalogFailure[] MultiListExpected() =>
     [
         Expected("$.sources[0]", "Replace the null source entry with a source row.", null),
@@ -324,7 +365,9 @@ public sealed class CatalogValidatorTests
         Expected("$.sources[3].name", Duplicate, "WIDGETS"), Expected("$.sources[3].rowCap", CapCorrection, "WIDGETS"),
         Expected("$.sources[3].description", "Set description to a non-null value.", "WIDGETS")
     ];
+    /// <summary>A detail with a fault in every field the shape check covers.</summary>
     private static CatalogDetail MultiDetail() => Detail(Source("other", "", "", 0), [null!, Column() with { ColumnName = null! }], null);
+    /// <summary>The faults <see cref="MultiDetail"/> reports, in their fixed order.</summary>
     private static CatalogFailure[] MultiDetailExpected() =>
     [
         Expected("$.detail.provider", "Set provider to a non-blank value."), Expected("$.detail.rows.source.name", Requested),
@@ -350,6 +393,8 @@ public sealed class CatalogValidatorTests
         EqualFailures(CatalogValidator.ValidateDetail("widgets", detail), MultiDetailExpected());
     }
 
+    /// <summary>A typical catalog with every data type and a documentation-only column passes both stages, and inactive
+    /// sources are checked like active ones.</summary>
     [Fact]
     public void T28_example_catalog_and_inactive_shapes_pass()
     {
@@ -370,6 +415,8 @@ public sealed class CatalogValidatorTests
         Assert.Empty(CatalogValidator.ValidateDetail("widgets", Detail(Source(active: false), columns)));
     }
 
+    /// <summary><see cref="CatalogRows"/> copies its column list, so later changes to the caller's array do not change
+    /// what is checked.</summary>
     [Fact]
     public void T29_constructor_owns_snapshot_and_rejects_null_collection()
     {
@@ -382,6 +429,7 @@ public sealed class CatalogValidatorTests
         EqualFailures(CatalogValidator.ValidateDetail("widgets", new("fixture-target", rows)), Expected("$.detail.rows.columns[1]", MissingColumn));
     }
 
+    /// <summary>Asserts a serialized failure has exactly code, path and message, cased for the serializer settings used.</summary>
     private static void AssertProjection(CatalogFailure failure, JsonElement json, bool web)
     {
         Assert.Equal(web ? new[] { "code", "path", "message" } : new[] { "Code", "Path", "Message" }, json.EnumerateObject().Select(p => p.Name));
@@ -389,11 +437,14 @@ public sealed class CatalogValidatorTests
         Assert.Equal(failure.Path, json.GetProperty(web ? "path" : "Path").GetString());
         Assert.Equal(failure.Message, json.GetProperty(web ? "message" : "Message").GetString());
     }
+    /// <summary>Asserts neither sentinel appears in <paramref name="text"/>.</summary>
     private static void AssertNoSecrets(string text)
     {
         Assert.DoesNotContain(ConnectionSentinel, text);
         Assert.DoesNotContain(ObjectSentinel, text);
     }
+    /// <summary>Serializes the failures with default, web and include-everything settings, alone and as a list, and
+    /// asserts no form carries a sentinel or any member beyond code, path and message.</summary>
     private static void CheckSerialization(IReadOnlyList<CatalogFailure> failures)
     {
         Assert.NotEmpty(failures);
@@ -440,6 +491,7 @@ public sealed class CatalogValidatorTests
         CheckSerialization(list);
     }
 
+    /// <summary>A large list reports every fault in order, not only the first.</summary>
     [Fact]
     public void T31_five_thousand_rows_report_all_22500_faults_in_order()
     {
@@ -467,6 +519,8 @@ public sealed class CatalogValidatorTests
         EqualFailures(CatalogValidator.ValidateList(rows), expected.ToArray());
     }
 
+    /// <summary>Results do not depend on the current culture (paths stay ASCII under Turkish and Arabic cultures) and
+    /// concurrent calls do not interfere.</summary>
     [Fact]
     public async Task T32_cultures_and_concurrent_calls_preserve_order_and_independence()
     {
@@ -499,6 +553,8 @@ public sealed class CatalogValidatorTests
         })));
     }
 
+    /// <summary>Validation leaves its inputs untouched, returns read-only results, and a finished result does not change
+    /// when the inputs change afterward.</summary>
     [Fact]
     public void T33_inputs_and_completed_results_own_their_contents()
     {

@@ -7,10 +7,17 @@ using Xunit;
 
 namespace DataGateway.Core.Tests;
 
+/// <summary>Pins <see cref="ErrorEnvelope.From"/>: how a failure becomes the HTTP status and JSON body a caller
+/// sees.</summary>
+/// <remarks>Public codes keep their path and message; internal and unknown codes are answered as a generic internal
+/// error, so schema names, connection details and exception data stay in the log and never reach the wire.</remarks>
 public sealed class ErrorEnvelopeTests
 {
+    /// <summary>The fixed message every redacted failure carries.</summary>
     private const string InternalMessage = "DataGateway could not complete the request because of a fault on its side, not in the request. Contact the DataGateway administrator. Tell the user, give the incidentId and stop; do not retry.";
 
+    /// <summary>The unexpected-error code always gets its fixed 500 body, even when the failure carries another path or
+    /// leaked text.</summary>
     [Fact]
     public void Unexpected_T15_code_always_has_the_fixed_500_body()
     {
@@ -21,6 +28,7 @@ public sealed class ErrorEnvelopeTests
         Assert.Equal(message, ErrorEnvelope.UnexpectedErrorMessage);
     }
 
+    /// <summary>A public code keeps its full message and path, however long, with its own HTTP status.</summary>
     [Fact]
     public void T3_public_codes_preserve_the_entire_failure_text()
     {
@@ -34,6 +42,8 @@ public sealed class ErrorEnvelopeTests
                 ErrorEnvelope.From(new(code, path, message), "abc"));
     }
 
+    /// <summary>Internal codes, unknown codes, a wrongly cased public code and an empty code all become the internal
+    /// error with root path and fixed message; nothing from the failure appears in the body.</summary>
     [Theory]
     [InlineData("InvalidCatalog")]
     [InlineData("CatalogConfiguration")]
@@ -55,6 +65,8 @@ public sealed class ErrorEnvelopeTests
         if (code.Length > 0 && code != "InternalError") Assert.DoesNotContain(code, json, StringComparison.Ordinal);
     }
 
+    /// <summary>The body's members are code, path, message, then incidentId, and incidentId is left out when there is
+    /// none.</summary>
     [Fact]
     public void T5_body_has_exact_wire_shape_and_order()
     {
@@ -69,6 +81,9 @@ public sealed class ErrorEnvelopeTests
         Assert.Equal("failure", Assert.Throws<ArgumentNullException>(() => ErrorEnvelope.From(null!, null)).ParamName);
     }
 
+    /// <summary>The query library's error codes are exactly the expected set, and each has its own wording rather than
+    /// the generic fallback.</summary>
+    /// <remarks>A new library code would otherwise reach callers with the generic sentence and no fix-it text.</remarks>
     [Fact]
     public void T6_library_vocabulary_has_the_expected_codes_and_specific_wording()
     {

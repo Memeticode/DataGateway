@@ -20,10 +20,11 @@
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-    <!-- IntelliSense: ship the XML docs that exist. CS1591 (public member without a doc comment) is silenced until
-         every public member is documented, a 1.0.0 task. -->
-    <GenerateDocumentationFile Condition="'$(IsPackable)' != 'false'">true</GenerateDocumentationFile>
-    <NoWarn Condition="'$(IsPackable)' != 'false'">$(NoWarn);CS1591</NoWarn>
+    <!-- Every project builds its XML docs, so the compiler checks every doc comment (a broken cref, a paramref to no
+         parameter, malformed XML); packages also ship them as IntelliSense. CS1591 (a public member without a doc
+         comment) stays off: the doc pass covers members by review, and a missing summary is not a build failure. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
     <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
   </PropertyGroup>
   <ItemGroup Condition="'$(IsPackable)' != 'false'">

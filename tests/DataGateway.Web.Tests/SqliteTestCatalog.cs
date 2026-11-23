@@ -6,17 +6,29 @@ using Microsoft.Data.Sqlite;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>An app-owned catalog reader over <see cref="SqliteFixture"/>'s tables, written only against the public
+/// <see cref="CatalogService{TConnection}"/> API.</summary>
+/// <remarks>It shows that an application can bring its own catalog for another database without any product
+/// change: the gateway sees only list rows and details, never the SQL. Its SQL texts are pinned by length and hash
+/// in <see cref="SqliteOperationsTests"/>, so they cannot drift unnoticed.</remarks>
 internal sealed class SqliteTestCatalog : CatalogService<SqliteConnection>
 {
+    /// <summary>Returns the shared test MCP metadata; the fixture holds no metadata table.</summary>
     public override Task<global::DataGateway.Core.Catalog.McpMetadata> QueryMcpMetadataAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(global::DataGateway.Web.Tests.McpMetadataFixture.Seed);
     }
 
+    /// <summary>The command timeout of each catalog read, in seconds.</summary>
     private readonly int timeout;
+    /// <summary>The engine name each detail carries.</summary>
     private readonly string provider;
 
+    /// <summary>Creates the reader over <paramref name="db"/>.</summary>
+    /// <param name="db">The connection context the application owns.</param>
+    /// <param name="timeout">The command timeout of each read, in seconds; must be positive.</param>
+    /// <param name="provider">The engine name to put on each detail.</param>
     internal SqliteTestCatalog(DbContext<SqliteConnection> db, int timeout, string provider) : base(db)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(timeout);
@@ -24,6 +36,7 @@ internal sealed class SqliteTestCatalog : CatalogService<SqliteConnection>
         this.provider = provider;
     }
 
+    /// <summary>Returns the active sources, mapped by the host's own table reader.</summary>
     public override async Task<IReadOnlyList<SourceListRow>> QueryCatalogAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -37,6 +50,10 @@ internal sealed class SqliteTestCatalog : CatalogService<SqliteConnection>
         return result;
     }
 
+    /// <summary>Returns one active source's detail, matched without regard to case, or null when there is none.</summary>
+    /// <remarks>On a miss it also reads the active names in the same session, so a malformed name row is reported as
+    /// a catalog fault rather than hidden behind an unknown source. Flags are read with integral values allowed,
+    /// because SQLite stores booleans as integers.</remarks>
     public override async Task<CatalogDetail?> QueryCatalogDetailAsync(string sourceName, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(sourceName);
@@ -56,6 +73,7 @@ internal sealed class SqliteTestCatalog : CatalogService<SqliteConnection>
         return result;
     }
 
+    /// <summary>Runs one catalog query and buffers its rows, checking <paramref name="token"/> around every row.</summary>
     private async Task<IReadOnlyList<dynamic>> Read(DbSession<SqliteConnection> session, string sql, object? parameters, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
@@ -69,14 +87,19 @@ internal sealed class SqliteTestCatalog : CatalogService<SqliteConnection>
         return rows;
     }
 
+    /// <summary>The list query: every active source's listing fields.</summary>
     internal const string ListSql =
         "SELECT \"name\", \"title\", \"description\", \"grain\", \"row_cap\"\n" +
         "FROM \"gateway_source\"\n" +
         "WHERE \"is_active\" = 1;";
 
+    /// <summary>The names of the active sources, read after a detail miss.</summary>
     internal const string AvailableSql =
         "SELECT \"name\" FROM \"gateway_source\" WHERE \"is_active\" = 1;";
 
+    /// <summary>The detail query: one active source joined to its columns, one row per column.</summary>
+    /// <remarks>The left join keeps a source with no columns as a single row with null column cells, which the
+    /// mapper turns into a source with no columns instead of an unknown source.</remarks>
     internal const string ReadSql =
         "SELECT s.\"id\", s.\"name\", s.\"title\", s.\"description\", s.\"grain\", s.\"row_cap\", s.\"query_timeout_seconds\", s.\"object_name\", s.\"connection_string\",\n" +
         "       c.\"column_name\", c.\"ordinal\", c.\"title\" AS \"column_title\",\n" +

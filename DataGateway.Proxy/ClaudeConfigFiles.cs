@@ -5,22 +5,67 @@ using System.Text.Json.Nodes;
 
 namespace DataGateway.Proxy;
 
+/// <summary>Finds every Claude Desktop configuration file on the machine, plans the change to each, and writes
+/// each change safely.</summary>
+/// <remarks>
+/// <para>TERM: tier A and tier B. A tier A folder is a known Claude Desktop data folder: the
+/// relocated data folder, the classic <c>%APPDATA%\Claude</c>, a packaged install's roaming <c>Claude</c> folder,
+/// and the <c>Claude-3p</c> folders directly under the two profile roots. When a tier A folder exists, registering
+/// writes its file, creating the file if needed. A tier B folder is one that may hold a configuration file; only a
+/// file that already exists there is updated, never created.</para>
+/// <para>Some places are never touched: Claude Desktop's own install and package folders, managed configuration,
+/// backups and templates, and other clients' folders (<see cref="ExcludedRelocation"/>).</para>
+/// <para>Planning reads and parses every file before anything is written (<see cref="Plan"/>). Writing
+/// (<see cref="Commit"/>) goes through a temporary file, backs up an existing file first and verifies the backup,
+/// and replaces a file only if it is still exactly what was read.</para>
+/// </remarks>
 internal static class ClaudeConfigFiles
 {
+    /// <summary>The configuration file's name in every folder.</summary>
     internal const string Filename = "claude_desktop_config.json";
+    /// <summary>One configuration file to plan.</summary>
+    /// <param name="Path">Its full path.</param>
+    /// <param name="TierA">Whether it may be created when absent (see the type's remarks).</param>
+    /// <param name="Fallback">Whether it is the classic file chosen because nothing else was found, whose folder
+    /// may need creating.</param>
     internal sealed record Target(string Path, bool TierA, bool Fallback = false);
+    /// <summary>The files found, and the candidate folders that could not be inspected.</summary>
+    /// <param name="Targets">The files, ordered by path.</param>
+    /// <param name="Errors">One printable refusal line per folder that could not be inspected.</param>
     internal sealed record Discovery(IReadOnlyList<Target> Targets, IReadOnlyList<string> Errors);
+    /// <summary>The planned change to one file: its bytes as read, its new bytes, or why it is refused.</summary>
     internal sealed class FilePlan(Target target)
     {
+        /// <summary>The file.</summary>
         internal Target Target { get; } = target;
+        /// <summary>The bytes as read; null when the file did not exist.</summary>
         internal byte[]? Original { get; set; }
+        /// <summary>The bytes to write; null when nothing changes.</summary>
         internal byte[]? Content { get; set; }
+        /// <summary>Why this file is refused; null when it can proceed.</summary>
         internal string? Reason { get; set; }
+        /// <summary>Whether this refusal stops every other file too.</summary>
+        /// <remarks>Set for a key owned by another program and for an <c>mcpServers</c> that is not an object.
+        /// An unreadable or unparseable file only stops itself.</remarks>
         internal bool Barrier { get; set; }
+        /// <summary>The status line for a file that proceeds, such as registered, updated, removed or skipped.</summary>
         internal string Status { get; set; } = "";
     }
+    /// <summary>The outcome of committing one plan.</summary>
+    /// <param name="Success">Whether the file was written or rightly skipped.</param>
+    /// <param name="Status">The status line to print.</param>
     internal sealed record Result(bool Success, string Status);
 
+    /// <summary>Finds the configuration files to plan, in tier A and tier B folders.</summary>
+    /// <remarks>
+    /// <para>A file found by two routes is planned once, as tier A if either route is. A candidate folder that
+    /// cannot be inspected, or that is a file, becomes one error line and is left out; the other folders still
+    /// count.</para>
+    /// <para>When registering finds no file and no error, the classic <c>%APPDATA%\Claude</c> file is the target,
+    /// and its folder is created if needed.</para>
+    /// </remarks>
+    /// <param name="context">The machine.</param>
+    /// <param name="register">Whether this is a registration, which alone may fall back to the classic file.</param>
     internal static Discovery Discover(RegistrationContext context, bool register)
     {
         var files = context.Files;
@@ -103,6 +148,9 @@ internal static class ClaudeConfigFiles
             .ThenBy(target => target.Path, StringComparer.Ordinal).ToArray(), errors);
     }
 
+    /// <summary>Whether a folder must never be written: inside Claude Desktop's install or package folders or its
+    /// modified-copy folder, or with a path segment that marks another client, managed configuration, a backup or a
+    /// template.</summary>
     private static bool ExcludedRelocation(string path, RegistrationContext context)
     {
         foreach (var root in new[] { Path.Combine(context.AppData, "Claude-modified"),
@@ -120,6 +168,19 @@ internal static class ClaudeConfigFiles
             segment.Contains(".json.", StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>Reads one file and plans its change, without writing anything.</summary>
+    /// <remarks>
+    /// <para>The file must be UTF-8 JSON (a BOM is allowed) whose root is an object, with no duplicate member at
+    /// any depth and no invalid escaped string; anything else refuses this file only, and the file stays as it
+    /// is.</para>
+    /// <para>Registering refuses a key whose entry runs a different program. It replaces this proxy's other
+    /// entries for the same gateway URL (old names for the same thing), and keeps entries for other URLs, which
+    /// are other gateways. A file that would come out identical gets no new content.</para>
+    /// </remarks>
+    /// <param name="files">The file operations.</param>
+    /// <param name="target">The file.</param>
+    /// <param name="request">The command.</param>
+    /// <param name="executable">This program's full path, the entry's <c>command</c>.</param>
     internal static FilePlan Plan(IRegistrationFiles files, Target target, RegistrationRequest request, string executable)
     {
         var plan = new FilePlan(target);
@@ -205,13 +266,20 @@ internal static class ClaudeConfigFiles
         }
     }
 
+    /// <summary>A JSON string value, or null for anything else.</summary>
     private static string? StringValue(JsonNode? value) => value is JsonValue scalar && scalar.TryGetValue<string>(out var text) ? text : null;
+    /// <summary>An entry's <c>command</c>, or null when it has no string command.</summary>
     private static string? Command(JsonNode? value) => value is JsonObject entry && entry.TryGetPropertyValue("command", out var command) ? StringValue(command) : null;
-    // The same gateway address as Uri compares it: scheme and host case, default port and dot segments do not matter.
+    /// <summary>Whether a stored entry's URL is the requested gateway URL.</summary>
+    /// <remarks>The same gateway address as Uri compares it: scheme and host case, default port and dot segments do not matter.</remarks>
     private static bool SameUrl(string? stored, string? requested) =>
         Uri.TryCreate(stored, UriKind.Absolute, out var a) && Uri.TryCreate(requested, UriKind.Absolute, out var b) && a == b;
+    /// <summary>An entry's first argument, which for this proxy is the gateway URL.</summary>
     private static string? UrlOf(JsonNode? entry) =>
         entry is JsonObject value && value["args"] is JsonArray args && args.Count > 0 ? StringValue(args[0]) : null;
+    /// <summary>Throws a <see cref="JsonException"/> for a duplicate member name at any depth.</summary>
+    /// <remarks>Reading each string also throws for an invalid escaped surrogate, so a file with one is refused
+    /// too.</remarks>
     private static void CheckDuplicateNames(JsonElement element)
     {
         if (element.ValueKind == JsonValueKind.Object)
@@ -229,6 +297,15 @@ internal static class ClaudeConfigFiles
             _ = element.GetString();
     }
 
+    /// <summary>Writes the merged configuration, indented, copying every member that did not change as its
+    /// original raw text.</summary>
+    /// <remarks>Only the changed server entry is written from the parsed model. Every other root member and server
+    /// entry keeps its original text, so number formats, escapes and spacing inside the user's other settings come
+    /// through untouched.</remarks>
+    /// <param name="merged">The configuration after the change.</param>
+    /// <param name="originalRootRaw">The original raw text of each root member.</param>
+    /// <param name="originalServerRaw">The original raw text of each server entry.</param>
+    /// <param name="changedServerKey">The key that was written, or null when unregistering.</param>
     private static byte[] Serialize(JsonObject merged, Dictionary<string, string> originalRootRaw,
         Dictionary<string, string> originalServerRaw, string? changedServerKey)
     {
@@ -261,6 +338,17 @@ internal static class ClaudeConfigFiles
         return buffer.ToArray();
     }
 
+    /// <summary>Writes one plan, or reports why it was not written.</summary>
+    /// <remarks>
+    /// <para>The file is replaced in steps: check it is still the bytes that were read; if it exists, copy it to a
+    /// timestamped backup beside it and check the copy; write the new content to a temporary file in the same
+    /// folder; check the original once more; then move the temporary file over it. Any failed step stops the write
+    /// and leaves the original in place.</para>
+    /// <para>The second check catches a change made while the temporary file was written. A temporary file left
+    /// behind by a failed step is removed, and a failed removal is reported with the failure.</para>
+    /// </remarks>
+    /// <param name="files">The file operations.</param>
+    /// <param name="plan">The plan.</param>
     internal static Result Commit(IRegistrationFiles files, FilePlan plan)
     {
         if (plan.Reason is not null) return new(false, "refused: " + plan.Reason);

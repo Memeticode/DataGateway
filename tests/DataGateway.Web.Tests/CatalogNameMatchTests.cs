@@ -9,6 +9,8 @@ namespace DataGateway.Web.Tests;
 /// <summary>A source name the catalog database matches more loosely than DataGateway is an unknown source, not a fault.</summary>
 public sealed class CatalogNameMatchTests
 {
+    /// <summary>The PostgreSQL catalog answers a blank name as unknown before opening a connection, as the SQL Server
+    /// reader does.</summary>
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
@@ -20,6 +22,8 @@ public sealed class CatalogNameMatchTests
         Assert.Equal(0, calls);
     }
 
+    /// <summary>A returned row is kept only when its name equals the requested one ignoring case; a row the database
+    /// matched through trailing spaces or accent folding is dropped.</summary>
     [Theory]
     [InlineData("Sales", "Sales", true)]
     [InlineData("sales", "Sales", true)]

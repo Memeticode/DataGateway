@@ -10,12 +10,20 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>The xunit collection for tests that capture the process console with <see cref="ConsoleCapture"/>; its
+/// tests never run in parallel, so one test's output cannot land in another's capture.</summary>
 [CollectionDefinition("Console capture", DisableParallelization = true)]
 public sealed class ConsoleCaptureCollection;
 
+/// <summary>Pins what a failure writes to the console and standard error: one safe summary line per failure (code,
+/// incident id, exception type), never the exception's message, stack trace or the caller's text.</summary>
+/// <remarks>The console is where an operator looks first and is often collected by a hosting platform, so it gets a
+/// summary only; the full, still sanitized record goes to the error log file (<see cref="ErrorLogTests"/>).</remarks>
 [Collection("Console capture")]
 public sealed class ErrorLogConsoleTests
 {
+    /// <summary>An unexpected failure's console line names the incident id, the code and the exception type, but not the
+    /// exception's message or stack trace.</summary>
     [Fact]
     public async Task Unexpected_T12_console_summary_contains_id_but_no_exception_details()
     {
@@ -34,6 +42,8 @@ public sealed class ErrorLogConsoleTests
         UnexpectedErrorTests.NoFrameworkError(host);
     }
 
+    /// <summary>When the logger itself throws, the caller still gets the 500 answer, and standard error gets one notice
+    /// with the incident id and exception type names only.</summary>
     [Fact]
     public async Task Unexpected_T12_failed_logger_keeps_500_and_reports_types_only()
     {
@@ -57,6 +67,8 @@ public sealed class ErrorLogConsoleTests
         Assert.Empty(host.Lines());
     }
 
+    /// <summary>When writing the error answer fails, that is logged as a second failure with its own incident id, the
+    /// connection is aborted, and standard error gets one notice without the fault's message.</summary>
     [Fact]
     public async Task Unexpected_T12_failed_error_reply_is_second_failure_then_abort()
     {
@@ -83,6 +95,8 @@ public sealed class ErrorLogConsoleTests
         UnexpectedErrorTests.NoFrameworkError(host);
     }
 
+    /// <summary>Log level settings turn off other logging, but failure records still reach the file and the console:
+    /// configuration cannot silence them.</summary>
     [Fact]
     public async Task T14_serilog_levels_apply_but_cannot_hide_failures()
     {
@@ -115,6 +129,8 @@ public sealed class ErrorLogConsoleTests
         Assert.DoesNotContain(console, l => l.Contains("Microsoft.Hosting.Lifetime", StringComparison.Ordinal));
     }
 
+    /// <summary>A refused request writes exactly one console summary, which cannot be forged by caller text containing a
+    /// newline and a fake log prefix, while the framework's own log events still reach the console.</summary>
     [Fact]
     public async Task T15_console_is_one_safe_summary_and_framework_events_still_flow()
     {
@@ -159,6 +175,8 @@ public sealed class ErrorLogConsoleTests
                 Assert.True(!line.Contains(marker, StringComparison.OrdinalIgnoreCase), "Caller marker found in console.");
     }
 
+    /// <summary>When the error log file cannot be written, the caller still gets the answer, the console still gets the
+    /// summary, and the logging library's complaint goes to standard error.</summary>
     [Fact]
     public async Task T16_unwritable_file_reports_on_stderr_and_still_answers()
     {

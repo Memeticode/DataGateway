@@ -10,6 +10,8 @@ namespace DataGateway.Web.Tests;
 /// Windows-signed-in callers are served, and its catalog and database files stay the README quickstart's.</summary>
 public sealed class WindowsAuthSampleTests
 {
+    /// <remarks>The signed-in call sends the current user's own Windows credentials over a real Negotiate handshake,
+    /// so it proves the sample's sign-in, not a stand-in for it.</remarks>
     [Fact]
     public async Task Anonymous_callers_are_challenged_and_windows_callers_are_served()
     {
@@ -56,6 +58,8 @@ public sealed class WindowsAuthSampleTests
         finally { Directory.Delete(directory, recursive: true); }
     }
 
+    /// <remarks>The README shows this code as the quickstart; comparing the files with its marked regions means the
+    /// code a reader copies is the code this test runs.</remarks>
     [Theory]
     [InlineData("Catalog", "SampleCatalog.cs")]
     [InlineData("Database", "SampleDatabase.cs")]
@@ -69,5 +73,6 @@ public sealed class WindowsAuthSampleTests
         Assert.Equal(expected, actual);
     }
 
+    /// <summary>A JSON request body.</summary>
     private static StringContent Json(string body) => new(body, Encoding.UTF8, "application/json");
 }

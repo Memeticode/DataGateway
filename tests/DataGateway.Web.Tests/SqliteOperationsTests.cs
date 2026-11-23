@@ -15,16 +15,45 @@ using Xunit.Abstractions;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>The SQLite engine and an app-owned SQLite catalog inside the normal web host: list, describe and query over
+/// HTTP and MCP, catalog changes seen at once, catalog shape faults, boolean and count semantics, and a real missing
+/// table.</summary>
+/// <remarks>
+/// <para>Every success is compared with an oracle written by hand (literals, not the product's mapper), and every
+/// call is made twice, once on the route and once as an MCP tool, which must return the same document. Failures must
+/// also match their log line by incident id and leak neither fixture connection.</para>
+/// <para>This proves a second database works end to end with no product change beyond registering its engine and
+/// catalog.</para>
+/// </remarks>
 public sealed class SqliteOperationsTests(ITestOutputHelper output)
 {
+    /// <summary>The expected list answer: the two active sources, never the inactive one.</summary>
     private const string ListOracle = """
         {"sources":[{"name":"synthetic_items","title":"Synthetic","description":"Invented SQLite proof data.","grain":"One item","rowCap":3},{"name":"synthetic_other","title":"Synthetic","description":"Invented SQLite proof data.","grain":"One item","rowCap":3}]}
         """;
+    /// <summary>The expected answer to <see cref="SqliteFixture.Detail"/>: three rows of four, capped, with a true, a
+    /// false and a null flag.</summary>
     private const string DetailOracle = """
         {"source":"synthetic_items","columns":[{"name":"label","dataType":"text"},{"name":"id","dataType":"number"},{"name":"flag","dataType":"bool"},{"name":"amount","dataType":"number"}],"rows":[{"label":"50%_[x]\\end","id":2,"flag":true,"amount":0},{"label":"other","id":3,"flag":false,"amount":1},{"label":"50AAZxZ\\end","id":4,"flag":null,"amount":0}],"rowCount":3,"more":true,"hint":"The result set was capped at 3 rows."}
         """;
+    /// <summary>A query request body for <c>synthetic_items</c> around <paramref name="query"/>.</summary>
     private static string Request(string query) => "{\"source\":\"synthetic_items\",\"query\":" + query + "}";
 
+    /// <summary>Sends one operation on its route and as its MCP tool, and checks both against
+    /// <paramref name="expected"/>.</summary>
+    /// <remarks>On a failure it also checks that each answer's incident id has exactly one log line with the right
+    /// operation, the exact request body, the source name and no exception text. When <paramref name="probe"/> is
+    /// given, it checks that each call cost exactly two catalog connections and three catalog commands.</remarks>
+    /// <param name="host">The started host.</param>
+    /// <param name="fixture">The database, whose connections the leak scan plants.</param>
+    /// <param name="operation">The tool name: <c>list_sources</c>, <c>describe_source</c> or <c>query_source</c>.</param>
+    /// <param name="body">The request body; null sends <c>{}</c> on the route and no arguments to the tool.</param>
+    /// <param name="expected">The expected document; for a failure, with its incident id written as
+    /// <c>INCIDENT</c>.</param>
+    /// <param name="status">The expected HTTP status.</param>
+    /// <param name="probe">The probe on the catalog's connections, for the cost check.</param>
+    /// <param name="expectedSourceName">The source name the failure's log line must carry.</param>
+    /// <returns>The route's raw body.</returns>
     private async Task<string> Pair(LoggedHost host, SqliteFixture fixture, string operation,
         string? body, string expected, int status = 200, SqliteProbe? probe = null, string? expectedSourceName = null)
     {
@@ -80,6 +109,8 @@ public sealed class SqliteOperationsTests(ITestOutputHelper output)
         }
     }
 
+    /// <summary>Replaces a body's incident id with <c>INCIDENT</c> after checking it is 32 lowercase hex
+    /// digits.</summary>
     private static string Normalize(string body)
     {
         var node = JsonNode.Parse(body)!;
@@ -88,6 +119,12 @@ public sealed class SqliteOperationsTests(ITestOutputHelper output)
         return node.ToJsonString(new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
     }
 
+    /// <summary>The catalog's SQL is pinned by length and hash; the reader refuses a non-positive timeout, a null name
+    /// and a cancelled token before connecting; the host composes with the SQLite engine; and list and describe answer
+    /// from the file, match names without regard to case, refuse missing and inactive sources alike, and see catalog
+    /// edits on the next call.</summary>
+    /// <remarks>Ends with a source whose columns were deleted, which the gateway refuses with its own message instead
+    /// of serving an empty schema.</remarks>
     [Fact]
     public async Task T5_catalog_routes_normal_composition_freshness_and_fallback()
     {
@@ -141,6 +178,9 @@ public sealed class SqliteOperationsTests(ITestOutputHelper output)
         Assert.Equal("Catalog an accessible column before using this source.", sentinel.Failure!.Message);
     }
 
+    /// <summary>The app-owned reader maps each catalog shape (list, found, missing, inactive, no columns) with the
+    /// exact SQL, the caller's name as the bound parameter and the configured timeout, and closes each command before
+    /// starting the next.</summary>
     [Theory]
     [InlineData("list")]
     [InlineData("found")]
@@ -196,6 +236,9 @@ public sealed class SqliteOperationsTests(ITestOutputHelper output)
         output.WriteLine(kind + ": " + string.Join(" -> ", applicationProbe.Events));
     }
 
+    /// <summary>A catalog cell the reader cannot map (an overflowing cap or ordinal, a flag of 2, a null title, a
+    /// fractional ordinal, a null column name) answers CatalogUnavailable, logs only the exception type, never the
+    /// cell, and leaves every catalog resource closed.</summary>
     [Theory]
     [InlineData("cap")]
     [InlineData("ordinal")]
@@ -254,6 +297,10 @@ public sealed class SqliteOperationsTests(ITestOutputHelper output)
         output.WriteLine(fault + ": " + string.Join(" -> ", wireProbe.Events));
     }
 
+    /// <summary>The standard query answers with JSON numbers, booleans and null in column order; the source's own
+    /// timeout and the bound parameters reach each command; the engine reads one row past the cap to know there are
+    /// more, then stops.</summary>
+    /// <remarks>Each command must also be created only after its own connection opened.</remarks>
     [Fact]
     public async Task T7_detail_wire_types_and_keep_plus_one()
     {
@@ -311,6 +358,10 @@ public sealed class SqliteOperationsTests(ITestOutputHelper output)
         output.WriteLine("detail lifecycle: " + string.Join(" -> ", probe.Events));
     }
 
+    /// <summary>Boolean <c>eq</c>, <c>in</c> and <c>is_null</c> filters find the right rows; the compiled query keeps
+    /// CLR booleans while the driver receives Int64 0 and 1.</summary>
+    /// <remarks>SQLite has no boolean type, so the engine converts only at binding; the row limit stays a plain
+    /// int.</remarks>
     [Theory]
     [InlineData("eq", "true", "1,2,5", false)]
     [InlineData("eq", "false", "3", false)]
@@ -351,6 +402,9 @@ public sealed class SqliteOperationsTests(ITestOutputHelper output)
         }
     }
 
+    /// <summary>A count without group_by returns Int64; the private matched-row count is read but removed from the
+    /// answer; and the hint says nothing matched only when no row matched, not when the counted column is all
+    /// null.</summary>
     [Theory]
     [InlineData("", 4L, 5L, "Complete result set.")]
     [InlineData(",\"filters\":[{\"col\":\"id\",\"op\":\"gt\",\"value\":99}]", 0L, 0L, "Nothing found that matched your query.")]
@@ -379,6 +433,8 @@ public sealed class SqliteOperationsTests(ITestOutputHelper output)
         output.WriteLine($"count_flag Int64 {count}; matched Int64 {matched}; private key removed by runner");
     }
 
+    /// <summary>min, max, sum and avg on a bool column are refused as InvalidAggregateFunction without opening the
+    /// source.</summary>
     [Theory]
     [InlineData("min")]
     [InlineData("max")]
@@ -403,6 +459,9 @@ public sealed class SqliteOperationsTests(ITestOutputHelper output)
         Assert.All(probe.Commands, command => Assert.Contains("gateway_source", command.CommandText));
     }
 
+    /// <summary>A source whose table does not exist fails as SourceUnavailable at the command step with SQLite's own
+    /// exception and error number; the log carries the driver's message, which names neither the fixture folder nor
+    /// the file; nothing leaks to the answer, logs or console.</summary>
     [Fact]
     public async Task T9_missing_object_provider_identity_wire_logs_and_leaks()
     {
@@ -452,6 +511,9 @@ public sealed class SqliteOperationsTests(ITestOutputHelper output)
     }
 
     // Independent describe oracle: literals and invented metadata, no product mapper.
+    /// <summary>The expected describe answer for <c>synthetic_items</c>, built from literals.</summary>
+    /// <remarks>Written by hand so that a change to the product's schema text fails here instead of being copied into
+    /// the expectation.</remarks>
     private static string DescribeOracle()
     {
         var names = new[] { "id", "label", "flag", "amount" };

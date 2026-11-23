@@ -9,12 +9,21 @@ using Xunit.Sdk;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the <see cref="LeakScan"/> oracle itself: how it splits a connection string into parts, which text
+/// each ownership rule rejects, and that its failures print labels, never values.</summary>
+/// <remarks>Every leak test in the suite trusts this scan; if it missed a part or printed one, those tests would pass
+/// while a secret leaked, or leak the secret into test output themselves.</remarks>
 public sealed class LeakScanTests
 {
+    /// <summary>An invented connection with every part kind and some settings the scan must ignore.</summary>
     private const string Connection = "Server=tcp:fake-host,1433;UID=fake-user;PWD=fake-pass;Database=Catalog;Application Name=fake-app;Encrypt=False";
+    /// <summary>A well-formed incident id.</summary>
     private const string Id = "0123456789abcdef0123456789abcdef";
+    /// <summary>A synthetic scan over <see cref="Connection"/>.</summary>
     private static LeakScan Scan() => LeakScan.Synthetic(("fixture", Connection));
+    /// <summary>Serializes a value to a JSON element.</summary>
     private static JsonElement Value(object value) => JsonSerializer.SerializeToElement(value);
+    /// <summary>A clean failure log line with the given fields added or replaced.</summary>
     private static JsonElement Line(params (string Key, object? Value)[] extras)
     {
         var fields = new Dictionary<string, object?>
@@ -26,6 +35,9 @@ public sealed class LeakScanTests
         foreach (var (key, value) in extras) fields[key] = value;
         return Value(fields);
     }
+    /// <summary>Asserts the scan fails, that its message names <paramref name="label"/>, and that it prints none of
+    /// <paramref name="absent"/>.</summary>
+    /// <returns>The failure message.</returns>
     private static string Rejected(Action action, string label, params string[] absent)
     {
         var error = Assert.Throws<XunitException>(action);
@@ -56,6 +68,8 @@ public sealed class LeakScanTests
         foreach (var host in new[] { "localhost", "127.0.0.1" })
             Assert.All(LeakScan.Synthetic(("loop", "Server=" + host)).Parts.Where(p => p.Kind != PartKind.Connection), p => Assert.False(p.Distinctive));
     }
+    /// <summary>A password too short to scan for in ordinary text refuses a real scan, yet is still found in driver
+    /// text, where its exact value is what a driver would quote.</summary>
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
@@ -109,6 +123,8 @@ public sealed class LeakScanTests
         Assert.Empty(Scan().Found(text, Rule.Caller));
         Assert.DoesNotMatch(LeakScan.KeywordForm, SqlServerEngine.Unparseable);
     }
+    /// <summary>Matching ignores case, sees through JSON escapes, never matches inside numbers, and names a leaking
+    /// property by its parent's place, not by the leaking name.</summary>
     [Fact]
     public void T6_matching_decodes_json_and_never_uses_numbers_or_unsafe_property_locations()
     {
@@ -124,6 +140,7 @@ public sealed class LeakScanTests
         var message = Rejected(() => scan.Json("parent", Value(new Dictionary<string, string> { ["fake-pass"] = "ordinary" }), Rule.DataGateway), "parent", "fake-pass");
         Assert.True(message.StartsWith("Connection text in parent:", StringComparison.Ordinal), "Property failure used an unsafe location.");
     }
+    /// <summary>A failure, a collection assertion and the scan's own display print labels only, never part values.</summary>
     [Fact]
     public void T7_failures_and_display_are_labels_only()
     {
@@ -235,6 +252,8 @@ public sealed class LeakScanTests
         integrated.Armed();
         Assert.DoesNotContain(integrated.Parts, p => p.Kind is PartKind.User or PartKind.Password);
     }
+    /// <summary>A framework warning written through the real host's file log is scanned when the lines are read: a
+    /// secret in its exception or a keyword form in its properties fails, ordinary loopback and timing text passes.</summary>
     [Theory]
     [InlineData(1)] [InlineData(2)] [InlineData(3)]
     public async Task T11_framework_warning_channels_are_judged_by_the_real_file_reader(int kind)
@@ -279,6 +298,8 @@ public sealed class LeakScanTests
         Rejected(() => Scan().TextResponse("page", response, ""), "a connection keyword form", "planted");
     }
 
+    /// <summary>A real connection with no server, user or password keywords is still found whole, in rows too, so a
+    /// connection that the keyword form would miss cannot leak through data.</summary>
     [Fact]
     public void Page_T11_real_whole_connection_is_distinctive_without_a_keyword_form()
     {

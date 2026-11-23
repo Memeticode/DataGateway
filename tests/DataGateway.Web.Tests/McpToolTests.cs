@@ -16,8 +16,16 @@ using Xunit.Abstractions;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins parity between the MCP tools and the JSON routes on the real host: every README example and every
+/// documented failure gives the tool the same JSON document and the same failure line fields as the route.</summary>
+/// <remarks>A tool is a thin wrapper over its route, so a model and a direct caller must see one contract. The
+/// tests also prove that bad arguments, protocol errors and faults while writing an answer never leak exception
+/// text, and that the MCP SDK logs no warning or error of its own.</remarks>
 public sealed class McpToolTests(ITestOutputHelper output)
 {
+    /// <summary>Tool arguments reach the route as the same JSON text (number spelling, duplicate members, order and
+    /// non-ASCII kept), and each kind of tool result has its fixed shape: one text block, or two for an unexpected
+    /// error with the incident id once in the guidance.</summary>
     [Fact]
     public void T15_wire_preserves_values_order_and_text_shape()
     {
@@ -34,6 +42,8 @@ public sealed class McpToolTests(ITestOutputHelper output)
         Assert.Equal(1, McpWire.Text(unexpected, 1).Split(id).Length - 1);
     }
 
+    /// <summary>Every README example gives the tool the route's answer, and the README's tool table matches the real
+    /// tool names, routes and arguments.</summary>
     [Fact]
     public async Task T8_readme_examples_and_tool_table()
     {
@@ -77,12 +87,16 @@ public sealed class McpToolTests(ITestOutputHelper output)
         NoSdkFailure(wire.ListHost); NoSdkFailure(wire.SourceHost);
     }
 
+    /// <summary>The README's documented failure triggers that a tool call can reproduce: those with a JSON object body
+    /// and no sign-in or raw-body mode.</summary>
     public static IEnumerable<object[]> Triggers() => ReadmeTests.Triggers().Where(row =>
     {
         var trigger = (ReadmeTests.Trigger)row[0];
         return trigger.Mode is not ("anonymous" or "body") && trigger.Body.StartsWith('{');
     });
 
+    /// <summary>Each documented failure gives the tool the route's error document and stop guidance, and two failure
+    /// lines that differ only in incident, operation and request bookkeeping.</summary>
     [Theory]
     [MemberData(nameof(Triggers))]
     public async Task T9_every_documented_failure_and_line_has_parity(ReadmeTests.Trigger trigger)
@@ -115,6 +129,8 @@ public sealed class McpToolTests(ITestOutputHelper output)
         NoSdkFailure(host);
     }
 
+    /// <summary>Asserts two failure lines are equal once the fields that differ per request are removed and exception
+    /// text is compared without stack frames.</summary>
     internal static void EqualLines(JsonElement a, JsonElement b)
     {
         var left = JsonNode.Parse(a.GetRawText())!.AsObject(); var right = JsonNode.Parse(b.GetRawText())!.AsObject();
@@ -128,9 +144,11 @@ public sealed class McpToolTests(ITestOutputHelper output)
         Assert.True(JsonNode.DeepEquals(left, right), "Failure line fields differ: " + string.Join(", ", differences));
     }
 
+    /// <summary>Exception text without its stack-frame lines.</summary>
     internal static string WithoutFrames(string detail) => string.Join("\n", detail.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n')
         .Where(line => !line.StartsWith("   at ", StringComparison.Ordinal) && !line.TrimStart().StartsWith("--- End of", StringComparison.Ordinal)));
 
+    /// <summary>Tool arguments that are missing, of the wrong type, extra or unknown, with a few valid ones mixed in.</summary>
     public static IEnumerable<object?[]> BadArguments()
     {
         foreach (var (name, body) in new (string, string?)[]
@@ -144,6 +162,8 @@ public sealed class McpToolTests(ITestOutputHelper output)
         }) yield return [name, body];
     }
 
+    /// <summary>Bad tool arguments are refused exactly as the route refuses the same body, never with the SDK's own
+    /// invocation error.</summary>
     [Theory]
     [MemberData(nameof(BadArguments))]
     public async Task T10_bad_arguments_are_route_refusals(string name, string? body)
@@ -167,6 +187,11 @@ public sealed class McpToolTests(ITestOutputHelper output)
         }
     }
 
+    /// <summary>Records and bounds what the MCP SDK itself answers before any tool runs (unknown tool, non-object or
+    /// deeply nested arguments, malformed JSON-RPC, wrong Accept or protocol): no exception text, and no gateway log
+    /// line.</summary>
+    /// <remarks>These answers belong to the SDK, not the gateway, so the test writes them to the output for review
+    /// and pins only what must hold. Duplicate argument members pass to the tool, where the last one wins.</remarks>
     [Fact]
     public async Task T10_sdk_owned_protocol_observations()
     {
@@ -233,12 +258,15 @@ public sealed class McpToolTests(ITestOutputHelper output)
         Assert.Empty(wire.SourceHost.Lines());
     }
 
+    /// <summary>The JSON-RPC document of a reply, from plain JSON or an event stream.</summary>
     private static JsonElement ProtocolDocument(string text)
     {
         var data = text.Split('\n').FirstOrDefault(line => line.StartsWith("data: ", StringComparison.Ordinal));
         return JsonSerializer.Deserialize<JsonElement>(data is null ? text : data[6..]);
     }
 
+    /// <summary>A fault while writing a tool's answer becomes the generic unexpected-error result with guidance, and
+    /// the full exception text goes only to the log.</summary>
     [Theory]
     [InlineData("list_sources")]
     [InlineData("describe_source")]
@@ -277,6 +305,8 @@ public sealed class McpToolTests(ITestOutputHelper output)
         NoSdkFailure(host);
     }
 
+    /// <summary>A catalog that cannot be created is caught inside the tool as CatalogUnavailable, with no exception
+    /// text in the log.</summary>
     [Fact]
     public async Task T12_dependency_activation_fault_is_caught_inside_tool()
     {
@@ -294,6 +324,9 @@ public sealed class McpToolTests(ITestOutputHelper output)
         NoSdkFailure(host);
     }
 
+    /// <summary>With the SDK logging at its most verbose, every tool, failure and protocol case above leaves no
+    /// connection part in any log line, tool result or console output, and the console's failure summaries match the
+    /// file.</summary>
     [Fact]
     public async Task T13_verbose_sdk_logs_and_console_are_checked()
     {
@@ -378,6 +411,7 @@ public sealed class McpToolTests(ITestOutputHelper output)
         }
     }
 
+    /// <summary>Asserts the MCP SDK logged no warning, error or exception.</summary>
     internal static void NoSdkFailure(LoggedHost host) => Assert.DoesNotContain(host.AllLines(), line =>
         line.GetProperty("SourceContext").GetString()!.StartsWith("ModelContextProtocol", StringComparison.Ordinal) &&
         (line.TryGetProperty("@l", out var level) && level.GetString() is "Warning" or "Error" or "Fatal" || line.TryGetProperty("@x", out _)));

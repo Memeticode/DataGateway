@@ -13,8 +13,19 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the provider boundary across the product projects: which projects may reference a database driver
+/// or data-access package, and that no public signature outside them carries a driver type.</summary>
+/// <remarks>
+/// <para>Core and the DataGateway library stay provider-free, so one library serves any database. DataGateway.Data
+/// alone uses Dapper.Data for scoped connections, each engine package brings its own driver, and the host's catalog
+/// readers may reference drivers directly.</para>
+/// <para>The checks read project files, restore graphs, source text and reflected public types, so a reference that
+/// is declared but unused, transitive, or hidden in a generic or delegate signature still fails.</para>
+/// </remarks>
 public sealed class CatalogArchitectureTests
 {
+    /// <summary>Each product project's package and project references are exactly the allowed ones, and its sources use
+    /// no driver, Dapper, catalog SQL or SQL Server dialect text outside the places allowed to.</summary>
     [Fact]
     public void T10_project_references_and_source_enforce_the_provider_boundary()
     {
@@ -68,6 +79,9 @@ public sealed class CatalogArchitectureTests
         }
     }
 
+    /// <summary>No exported type or public member of Core, Data or the library exposes a driver type, except the
+    /// connection type parameter of the catalog service, the engine base and <c>UseCatalog</c>, which is constrained to
+    /// <see cref="DbConnection"/>.</summary>
     [Fact]
     public void T10_public_signatures_are_exact_and_recursively_provider_free()
     {
@@ -119,6 +133,8 @@ public sealed class CatalogArchitectureTests
         }
     }
 
+    /// <summary>The compiled assemblies reference no provider assembly beyond those allowed: Dapper.Data for Data, and
+    /// the host's own driver and Dapper.Data for the web host.</summary>
     [Fact]
     public void T10_product_assembly_references_exclude_direct_provider_dependencies()
     {
@@ -133,6 +149,8 @@ public sealed class CatalogArchitectureTests
         }
     }
 
+    /// <summary>Every target in each provider-free project's restore graph holds only allowed packages, including
+    /// transitive ones; the engine and host graphs carry the pinned driver versions.</summary>
     [Fact]
     public void T10_each_restored_product_graph_has_the_intended_transitive_closure_in_all_targets()
     {
@@ -169,6 +187,7 @@ public sealed class CatalogArchitectureTests
         }
     }
 
+    /// <summary>Pins the predicates the other tests rely on, so a weakened predicate cannot make them pass vacuously.</summary>
     [Fact]
     public void T10_predicates_reject_direct_nested_and_delegate_provider_types_but_accept_neutral_contracts_and_web_transitives()
     {
@@ -206,6 +225,10 @@ public sealed class CatalogArchitectureTests
         Assert.False(AllowedGraphEntry("DataGateway", "DataGateway.Data.PostgreSql"));
     }
 
+    /// <summary>The DataGateway library has exactly its project settings, project references and packages, reads no
+    /// configuration or environment, knows nothing of sign-in, and exports only its builder, extensions and limits.</summary>
+    /// <remarks>Sign-in belongs to the host; the API page must not mention it, so a host that uses no sign-in or another
+    /// scheme gets a page that is still correct.</remarks>
     [Fact]
     public void T11_library_has_only_the_intended_dependencies_and_no_host_dependencies()
     {
@@ -256,14 +279,21 @@ public sealed class CatalogArchitectureTests
                 .Select(attribute => attribute.AssemblyName).Order(StringComparer.Ordinal));
     }
 
+    /// <summary>Whether <paramref name="layer"/>'s restore graph may contain the package <paramref name="name"/>.</summary>
     private static bool AllowedGraphEntry(string layer, string name) =>
         (layer is "DataGateway.Web" or "DataGateway.Data.SqlServer") ||
         ((layer is "DataGateway.Data" or "DataGateway") && (name is "Dapper" or "Dapper.Data")) ||
         (!ProviderName(name) && (layer != "DataGateway" ||
             !new[] { "Npgsql", "Sqlite", "DataGateway.Data.SqlServer", "DataGateway.Data.PostgreSql" }
                 .Any(fragment => name.Contains(fragment, StringComparison.OrdinalIgnoreCase))));
+    /// <summary>Whether a file is a source file rather than build output.</summary>
     private static bool IsSource(string path) => !path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Any(part => part is "obj" or "bin");
+    /// <summary>Whether a package, assembly or namespace name belongs to a database provider or data-access package.</summary>
     private static bool ProviderName(string name) => name.Contains("SqlClient", StringComparison.OrdinalIgnoreCase) || name.StartsWith("Dapper", StringComparison.OrdinalIgnoreCase) || name.Contains("Cryptography.Pkcs", StringComparison.OrdinalIgnoreCase);
+    /// <summary>Whether <paramref name="type"/>, or any element, generic argument, constraint or delegate signature
+    /// inside it, is a provider or connection type.</summary>
+    /// <param name="type">The type to inspect.</param>
+    /// <param name="allowed">A generic parameter that is allowed even though it is constrained to a connection type.</param>
     private static bool ForbiddenType(Type type, Type? allowed = null)
     {
         if (type.IsGenericParameter && type == allowed) return false;

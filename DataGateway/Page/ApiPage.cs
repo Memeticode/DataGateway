@@ -6,10 +6,20 @@ using Scalar.AspNetCore;
 
 namespace DataGateway.Page;
 
+/// <summary>Each gateway's API document (OpenAPI 3.1) and its Scalar page for trying the operations by hand.</summary>
+/// <remarks>Each gateway gets its own document, holding only its list, describe and query POSTs. The page and its
+/// assets are mapped in their own group, so the host decides who may open it, independently of the API.</remarks>
 internal static class ApiPage
 {
+    /// <summary>The base title of the document and the page, before the gateway name replaces it.</summary>
     internal const string Title = "DataGateway";
 
+    /// <summary>Registers the gateway's OpenAPI document and the transformers that describe its operations.</summary>
+    /// <remarks>The host policy, when set, adds its 401 code to every operation and replaces the 401 description with the
+    /// host's own. That response does not require <c>incidentId</c>: an unrecorded refusal, such as the first leg of a
+    /// host's access challenge, is not a failure and carries none.</remarks>
+    /// <param name="services">The host's service collection.</param>
+    /// <param name="registration">The gateway the document describes.</param>
     internal static void AddDocument(IServiceCollection services, GatewayRegistration registration) =>
         services.AddOpenApi(registration.DocumentName, options =>
         {
@@ -43,6 +53,12 @@ internal static class ApiPage
             });
         });
 
+    /// <summary>Maps <c>/openapi/v1.json</c> and the Scalar page under the gateway's page group.</summary>
+    /// <remarks>The document route is claimed when its endpoint is built, once parent group prefixes are known, so two
+    /// gateways cannot serve their documents at the same address.</remarks>
+    /// <param name="group">The gateway's page group.</param>
+    /// <param name="registration">The gateway.</param>
+    /// <param name="registry">Records the document route against other gateways.</param>
     internal static void Map(RouteGroupBuilder group, GatewayRegistration registration, GatewayRegistry registry)
     {
         var document = group.MapGet("/openapi/v1.json", async (HttpContext context) =>
@@ -69,10 +85,18 @@ internal static class ApiPage
         });
     }
 
-    // The page loads nothing from outside the machine; calls go straight to DataGateway.
+    /// <summary>The page settings every gateway shares.</summary>
+    /// <remarks>The page loads nothing from outside the machine; calls go straight to DataGateway.</remarks>
+    /// <param name="options">The Scalar options.</param>
     internal static void Configure(ScalarOptions options) =>
         options.WithTitle(Title).DisableDefaultFonts().DisableTelemetry().DisableAgent();
 
+    /// <summary>The page settings for one request: the gateway's name as title, and the address of its document.</summary>
+    /// <remarks>The document address is worked out from the page's own request path, so it stays right under any
+    /// parent group prefix the host adds.</remarks>
+    /// <param name="options">The Scalar options.</param>
+    /// <param name="registration">The gateway.</param>
+    /// <param name="context">The page request.</param>
     internal static void Configure(ScalarOptions options, GatewayRegistration registration, HttpContext context)
     {
         Configure(options);

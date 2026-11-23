@@ -11,14 +11,29 @@ using ModelContextProtocol.Server;
 
 namespace DataGateway.Mcp;
 
+/// <summary>Maps each gateway's stateless MCP endpoint and gives every POST its gateway's tools, server info and
+/// instructions.</summary>
+/// <remarks>
+/// <para>The MCP SDK keeps one set of transport options for the whole process, so the gateway registers the
+/// transport once and resolves the gateway per request: each endpoint carries a <see cref="GatewayBinding"/>, which
+/// <see cref="ConfigureSessionOptions"/> reads.</para>
+/// <para>Stateless mode: every POST is served alone and nothing is held between calls, so the server text and tool
+/// list are read from the catalog on each POST and a catalog edit reaches a client on its next read.</para>
+/// </remarks>
 internal static class McpEndpoint
 {
+    /// <summary>Marks a service collection whose MCP server is already registered, so a second gateway does not register it again.</summary>
     private sealed class RegistrationMarker
     {
     }
 
+    /// <summary>Endpoint metadata that tells the shared session hook which gateway an MCP endpoint serves.</summary>
+    /// <param name="Registration">The gateway.</param>
+    /// <param name="Failures">The gateway's failure log.</param>
     private sealed record GatewayBinding(GatewayRegistration Registration, FailureLog Failures);
 
+    /// <summary>Registers the MCP server and its stateless HTTP transport, once per service collection.</summary>
+    /// <param name="services">The host's service collection.</param>
     internal static void EnsureConfigured(IServiceCollection services)
     {
         lock (services)
@@ -29,21 +44,21 @@ internal static class McpEndpoint
         }
     }
 
+    /// <summary>The gateway's transport setup: stateless, with the per-request session hook.</summary>
+    /// <remarks><see cref="RefuseSharedTransport"/> recognizes this method as the gateway's own setup.</remarks>
+    /// <param name="options">The SDK's transport options.</param>
     private static void ConfigureTransport(HttpServerTransportOptions options)
     {
         options.Stateless = true;
         options.ConfigureSessionOptions = ConfigureSessionOptions;
     }
 
-    /// <summary>Refuses an app that also configures the MCP SDK's HTTP transport.</summary>
-    /// <remarks>The SDK keeps one set of transport options for every MCP endpoint in the process. DataGateway's
-    /// stateless mode would silently remove the app's own server-to-client features, or the app's session setup would
-    /// silently replace DataGateway's tools, depending on registration order. Failing at startup says so plainly.
-    /// Every IConfigureOptions or IPostConfigureOptions registration for the transport is detected (Configure,
-    /// PostConfigure, WithHttpTransport or the app's own class); only the SDK's own setup and DataGateway's are not conflicts.</remarks>
-    // MapMcp reads the default (unnamed) options; a registration for another name never reaches it. The options library's
-    // own configure and post-configure classes (with or without dependencies) carry that name; a null name means all
-    // names. An app's own class, whose target cannot be read, is counted.
+    /// <summary>Whether an options setup applies to the default transport options, the ones MapMcp reads.</summary>
+    /// <remarks>MapMcp reads the default (unnamed) options; a registration for another name never reaches it. The options library's
+    /// own configure and post-configure classes (with or without dependencies) carry that name; a null name means all
+    /// names. An app's own class, whose target cannot be read, is counted.</remarks>
+    /// <param name="setup">An <c>IConfigureOptions</c> or <c>IPostConfigureOptions</c> registration.</param>
+    /// <returns>True unless the setup is named for other options.</returns>
     private static bool ReachesDefault(object setup)
     {
         var type = setup.GetType();
@@ -53,9 +68,19 @@ internal static class McpEndpoint
         return name is null || name == Options.DefaultName;
     }
 
-    // The SDK's own defaults, registered by every WithHttpTransport call (ModelContextProtocol.AspNetCore 2.1.0); not a conflict.
+    /// <summary>The type name of the SDK's own transport setup.</summary>
+    /// <remarks>The SDK's own defaults, registered by every WithHttpTransport call (ModelContextProtocol.AspNetCore 2.1.0); not a conflict.</remarks>
     private const string SdkTransportSetup = "ModelContextProtocol.AspNetCore.HttpServerTransportOptionsSetup";
 
+    /// <summary>Refuses an app that also configures the MCP SDK's HTTP transport.</summary>
+    /// <remarks>The SDK keeps one set of transport options for every MCP endpoint in the process. DataGateway's
+    /// stateless mode would silently remove the app's own server-to-client features, or the app's session setup would
+    /// silently replace DataGateway's tools, depending on registration order. Failing at startup says so plainly.
+    /// Every IConfigureOptions or IPostConfigureOptions registration for the transport is detected (Configure,
+    /// PostConfigure, WithHttpTransport or the app's own class); only the SDK's own setup and DataGateway's are not conflicts.</remarks>
+    /// <param name="services">The application's services.</param>
+    /// <param name="gateway">The gateway being mapped, for the message.</param>
+    /// <exception cref="InvalidOperationException">Another setup configures the default transport options.</exception>
     internal static void RefuseSharedTransport(IServiceProvider services, string gateway)
     {
         var ours = ((Action<HttpServerTransportOptions>)ConfigureTransport).Method;
@@ -72,11 +97,28 @@ internal static class McpEndpoint
                 "from its own app, or remove the app's MCP HTTP transport configuration.");
     }
 
+    /// <summary>Carries a metadata failure out of the SDK's session hook to the endpoint wrapper, which answers it as
+    /// the gateway's JSON error.</summary>
+    /// <param name="failure">The metadata failure.</param>
     private sealed class MetadataUnavailable(CatalogFailure failure) : Exception
     {
+        /// <summary>The metadata failure to answer.</summary>
         internal CatalogFailure Failure { get; } = failure;
     }
 
+    /// <summary>Sets one POST's server info, instructions and tools from its gateway's catalog.</summary>
+    /// <remarks>
+    /// <para>Runs for every MCP endpoint in the process; one without a <see cref="GatewayBinding"/> is left as it
+    /// is.</para>
+    /// <para>When the metadata cannot be read, only <c>initialize</c> and <c>tools/list</c> fail, with the gateway's
+    /// error body (HTTP 503 for <c>CatalogUnavailable</c>): they exist to present that text. Any other message goes on with tools that carry no title
+    /// or description, and a <c>tools/call</c> answers the failure as a tool error (see
+    /// <see cref="GatewayCatalog"/>).</para>
+    /// </remarks>
+    /// <param name="context">The POST.</param>
+    /// <param name="options">The options for the server that serves this POST.</param>
+    /// <param name="token">The request's cancellation.</param>
+    /// <returns>A task that completes once the options are set.</returns>
     private static async Task ConfigureSessionOptions(HttpContext context, McpServerOptions options,
         CancellationToken token)
     {
@@ -116,6 +158,14 @@ internal static class McpEndpoint
             read.IsSuccess ? read.Value : null, catalog)];
     }
 
+    /// <summary>Maps the gateway's <c>/mcp</c> endpoint and wraps the SDK's handler with the gateway's logging scope and
+    /// error handling.</summary>
+    /// <remarks>The wrapper is added when the endpoint is built because the handler is the SDK's. It buffers the body,
+    /// so the session hook can read the envelope again, and starts the request trail before the SDK runs.</remarks>
+    /// <param name="group">The gateway's endpoint group.</param>
+    /// <param name="registration">The gateway.</param>
+    /// <param name="failures">The gateway's failure log.</param>
+    /// <exception cref="InvalidOperationException">The app also configures the MCP SDK's HTTP transport.</exception>
     internal static void Map(RouteGroupBuilder group, GatewayRegistration registration, FailureLog failures)
     {
         RefuseSharedTransport(((IEndpointRouteBuilder)group).ServiceProvider, registration.Name);
@@ -157,6 +207,9 @@ internal static class McpEndpoint
     /// request, the SDK cancels the call, waits for it to return, then rethrows the abort out of the endpoint. The call
     /// has already written its one line, or none if nothing failed. Before the server exists (sign-in, body read), an
     /// abort keeps the catch-all's line.</remarks>
+    /// <param name="context">The request.</param>
+    /// <param name="error">The exception that left the endpoint.</param>
+    /// <returns>True when the catch-all should drop the exception.</returns>
     internal static bool EndedByCaller(HttpContext context, Exception error) =>
         error is OperationCanceledException or IOException
         && context.RequestAborted.IsCancellationRequested

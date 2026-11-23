@@ -6,6 +6,13 @@ namespace DataGateway.Core.Queries;
 /// The caller's query is never read; its path, rather than the message, identifies the member.</summary>
 public static class RefusalMessage
 {
+    /// <summary>The correction for one query library refusal.</summary>
+    /// <remarks>The wording is chosen by code and by the clause the path starts in, so a caller learns which flag
+    /// or rule to check. For a structural limit refusal, <paramref name="detail"/> names the limit exceeded.</remarks>
+    /// <param name="code">The refusal code.</param>
+    /// <param name="path">The refusal's path, relative to the query member.</param>
+    /// <param name="detail">The library's limit detail, such as the maximum exceeded; null when there is none.</param>
+    /// <returns>The message.</returns>
     public static string For(JsonQueryErrorCode code, string path, string? detail)
     {
         ArgumentNullException.ThrowIfNull(path);
@@ -45,6 +52,9 @@ public static class RefusalMessage
     }
 
     // Only the vocabulary's six members may choose wording; a path can start with caller text.
+    /// <summary>The query clause a path starts in, or null when it starts with anything else.</summary>
+    /// <param name="path">The refusal's path.</param>
+    /// <returns>One of the six clause names, or null.</returns>
     private static string? Clause(string path)
     {
         var end = path.IndexOfAny(['.', '[']);

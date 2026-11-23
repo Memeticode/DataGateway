@@ -8,10 +8,17 @@ using Xunit;
 namespace DataGateway.Web.Tests;
 
 /// <summary>The stdio proxy (src/DataGateway.Proxy) run as a child process against the real DataGateway.Web host on a synthetic catalog.</summary>
+/// <remarks>The proxy must be invisible: a client sees the same tools, instructions, results and failures through it
+/// as when it talks to the gateway directly, and the proxy adds only its own unreachable and refused errors.</remarks>
 public sealed class ProxyTests
 {
+    /// <summary>The proxy's exact unreachable error, with the incident ID replaced by a placeholder.</summary>
     private const string UnreachableText = """{"code":"ServiceUnreachable","path":"$","message":"DataGateway could not be reached from this computer. Do not retry; tell the user to check the network connection and that DataGateway is running. The details are in the proxy log, found by the incidentId.","incidentId":"<incident>"}""";
 
+    /// <summary>The proxy reports the gateway's server info, instructions and three tools exactly, under the default
+    /// and a named protocol version.</summary>
+    /// <remarks>The settings that would rename the server are set to values that must be ignored: the title and about
+    /// text come from the catalog.</remarks>
     [Theory]
     [InlineData(null)]
     [InlineData("2025-11-25")]
@@ -106,6 +113,8 @@ public sealed class ProxyTests
         Assert.Equal("QueryCancelled", Assert.Single(host.Lines()).GetProperty("Code").GetString());
     }
 
+    /// <summary>While the gateway is stopped, a call gets the unreachable error with an incident ID the proxy also
+    /// logs; once a gateway listens on the same address again, the same proxy's next call works.</summary>
     [Fact]
     public async Task T5_a_stopped_server_gives_service_unreachable_and_the_next_call_works_when_it_returns()
     {
@@ -137,6 +146,8 @@ public sealed class ProxyTests
         Assert.NotEqual(true, (await McpWire.Call(client, "list_sources", "{}")).IsError);
     }
 
+    /// <summary>A gateway that is down at start makes the proxy exit with code 1 and nothing on stdout; bad arguments
+    /// exit with code 2 and the usage line.</summary>
     [Fact]
     public async Task T6_a_server_that_is_down_at_start_stops_the_proxy_before_it_answers_anything()
     {
@@ -154,6 +165,7 @@ public sealed class ProxyTests
         }
     }
 
+    /// <remarks>Stdout is the MCP channel; a single log line there would corrupt the client's JSON-RPC stream.</remarks>
     [Fact]
     public async Task T7_stdout_holds_only_json_rpc_and_logs_go_to_stderr_and_a_file()
     {
@@ -189,7 +201,8 @@ public sealed class ProxyTests
         });
     }
 
-    // A port nothing listens on now: the test starts a server there later, or expects none.
+    /// <summary>A loopback port nothing listens on now.</summary>
+    /// <remarks>The test starts a server there later, or expects none.</remarks>
     private static int FreePort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);

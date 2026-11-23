@@ -20,13 +20,30 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the query runner: it hands the stored connection text and compiled query to its engine unchanged,
+/// keeps at most the query's rows without copying them, and maps each failure onto the gateway's codes by phase.</summary>
+/// <remarks>
+/// <para>Phases: before the connection opens, a bad connection string is InvalidCatalog and other expected failures
+/// SourceUnavailable; after it opens, a timeout is QueryTimeout and other expected failures SourceUnavailable; a
+/// cancelled caller is QueryCancelled in any phase. An exception the runner does not expect is a bug and propagates as
+/// the same instance, so it is answered as an unexpected error rather than disguised as an outage.</para>
+/// <para>No failure text may carry the connection string or any part of it; every failure is scanned for the
+/// synthetic markers.</para>
+/// </remarks>
 public sealed class QueryRunnerTests
 {
+    /// <summary>A synthetic SQL Server connection string with planted markers (user, password, application name,
+    /// timeouts) that must never reach a failure's text.</summary>
     private const string S = "Server=tcp:127.0.0.1,1;Database=Synthetic;User ID=fake-sensitive-reader;Password=fake-sensitive-password;Application Name=synthetic-app;Encrypt=False;Pooling=False;Connect Timeout=90;ConnectRetryCount=9";
+    /// <summary>The InvalidCatalog message for a connection string that cannot be used.</summary>
     private const string InvalidMessage = "The source's catalog connection string cannot be used. Ask the data steward to correct the source's catalog row.";
+    /// <summary>The QueryCancelled message.</summary>
     private const string CancelMessage = "The query was cancelled because the caller ended the request. Submit a new request if still needed.";
+    /// <summary>The SourceUnavailable message.</summary>
     private const string UnavailableMessage = "The source's database could not run the query. The DataGateway administrator should check the source. Tell the user, give the incidentId and stop; do not retry.";
 
+    /// <summary>The engine receives the catalog's connection text exactly as stored, with or without explicit timeout
+    /// settings, whatever the source's timeout.</summary>
     [Theory]
     [InlineData(1, true)]
     [InlineData(7, true)]
@@ -43,6 +60,8 @@ public sealed class QueryRunnerTests
         Assert.True((await runner.RunAsync(Source(stored, seconds), Compile(), CancellationToken.None)).IsSuccess);
     }
 
+    /// <summary>A blank, incomplete or unparseable connection string is InvalidCatalog at step <c>connect</c> before
+    /// the engine reads anything, with no connection text in the failure.</summary>
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
@@ -62,6 +81,8 @@ public sealed class QueryRunnerTests
         Assert.Equal(0, calls);
     }
 
+    /// <summary>A token cancelled before the run gives QueryCancelled with no step, and the engine is never called,
+    /// even for a malformed connection.</summary>
     [Theory]
     [InlineData(S)]
     [InlineData("malformed-sensitive-marker")]
@@ -78,6 +99,8 @@ public sealed class QueryRunnerTests
         Assert.Equal(0, calls);
     }
 
+    /// <summary>A caller who cancels while the engine runs gets QueryCancelled, even when the engine then fails with
+    /// another error or returns every row.</summary>
     [Theory]
     [InlineData("io")]
     [InlineData("cancel")]
@@ -102,6 +125,9 @@ public sealed class QueryRunnerTests
         Assert.Equal(1, calls);
     }
 
+    /// <summary>A successful run passes the connection, the same compiled query and the runner's own deadline token,
+    /// and returns the engine's own row objects with their keys, values and value types; cancelling afterwards changes
+    /// nothing.</summary>
     [Fact]
     public async Task T13_success_preserves_boundary_arguments_order_and_provider_values()
     {
@@ -142,6 +168,8 @@ public sealed class QueryRunnerTests
         Assert.Equal(1, calls);
     }
 
+    /// <summary>Each expected driver failure gets its code and step from whether the connection had opened, keeps the
+    /// driver exception for the log, and carries the matching fixed message.</summary>
     [Theory]
     [InlineData(false, "invalid", "SourceUnavailable")]
     [InlineData(false, "disposed", "SourceUnavailable")]
@@ -178,6 +206,9 @@ public sealed class QueryRunnerTests
         Assert.Equal(1, calls);
     }
 
+    /// <summary>Exceptions the runner treats as bugs: null references, unsupported operations, bad casts and SQL type
+    /// errors in any phase, plus argument or format errors after open, overflow before open, and a cancellation the
+    /// caller did not ask for.</summary>
     public static IEnumerable<object[]> Bugs()
     {
         foreach (var connected in new[] { false, true })
@@ -192,6 +223,8 @@ public sealed class QueryRunnerTests
         yield return [true, false, "format"];
     }
 
+    /// <summary>A bug propagates as the same exception instance, even when the caller has also cancelled.</summary>
+    /// <remarks>Reporting a bug as QueryCancelled would hide it whenever a caller happened to leave.</remarks>
     [Theory]
     [MemberData(nameof(Bugs))]
     public async Task T14_bugs_propagate_as_the_same_exception_even_on_cancel(bool connected, bool cancelled, string kind)
@@ -209,6 +242,8 @@ public sealed class QueryRunnerTests
         Assert.Null(QueryRunner.Classify(error, connected, cancelled, timedOut: false, 3, new SqlServerEngine().RecognizeFailure(error)));
     }
 
+    /// <summary>Against a listener that accepts but never answers, the real SQL Server engine gives up within the
+    /// connection's connect timeout, or promptly when the caller cancels.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -236,6 +271,8 @@ public sealed class QueryRunnerTests
         finally { listener.Stop(); }
     }
 
+    /// <summary>The driver's own message reaches the internal log line unchanged, while the line still carries no
+    /// connection text.</summary>
     [Fact]
     public async Task T16_provider_message_reaches_the_line_unchanged()
     {
@@ -250,6 +287,10 @@ public sealed class QueryRunnerTests
         Assert.Contains("SourceUnavailable", line.Summary());
     }
 
+    /// <summary>SQL Server binding keeps each parameter's name and value object, and binds dates as
+    /// <c>datetime2</c>.</summary>
+    /// <remarks><c>datetime2</c> holds dates back to year 1; the older <c>datetime</c> type cannot, so a filter on
+    /// 0001-01-01 would fail.</remarks>
     [Fact]
     public void T17_binding_preserves_names_values_and_date_range()
     {
@@ -268,6 +309,8 @@ public sealed class QueryRunnerTests
         }
     }
 
+    /// <summary>The example host registers one runner for all requests and applies configured structural limits, with
+    /// the catalog connection as its only connection string.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -299,6 +342,8 @@ public sealed class QueryRunnerTests
         finally { Environment.SetEnvironmentVariable(DataGatewayConfiguration.ConnectionSetting, saved); }
     }
 
+    /// <summary>The runner's public surface is one constructor taking an engine, null arguments are refused, and the
+    /// cancellation token of <c>RunAsync</c> is required.</summary>
     [Fact]
     public async Task T18_exact_public_surface_and_argument_guards()
     {
@@ -314,6 +359,8 @@ public sealed class QueryRunnerTests
         Assert.False(token.HasDefaultValue);
     }
 
+    /// <summary>The runner keeps at most the query's limit of the engine's row objects, unchanged and uncopied, sets
+    /// <c>more</c> when a row was left out, and the answer serializes the same as plain dictionaries would.</summary>
     [Theory]
     [InlineData(0, false)]
     [InlineData(2, false)]
@@ -348,6 +395,8 @@ public sealed class QueryRunnerTests
             System.Text.Json.JsonSerializer.Serialize(answer, System.Text.Json.JsonSerializerOptions.Web));
     }
 
+    /// <summary>The runner reads one row past the limit to learn whether more exist, reads no further, and disposes
+    /// the row stream.</summary>
     [Fact]
     public async Task T9_probe_stops_enumeration_and_disposes()
     {
@@ -375,6 +424,8 @@ public sealed class QueryRunnerTests
         Assert.True(disposed);
     }
 
+    /// <summary>A cancellation, I/O error or timeout after some rows were read gives a failure, never a partial
+    /// answer, and the row stream is disposed.</summary>
     [Theory]
     [InlineData("cancel", "QueryCancelled")]
     [InlineData("io", "SourceUnavailable")]
@@ -403,6 +454,9 @@ public sealed class QueryRunnerTests
         Assert.True(disposed);
     }
 
+    /// <summary>The runner reaches the database only through its engine's streamed read, the shared engine base owns
+    /// the reader with the command timeout and token, the SQL Server adapter keeps no read path of its own, and no
+    /// buffered or copying path remains.</summary>
     [Fact]
     public void T11_only_unbuffered_path_and_no_row_copy()
     {
@@ -434,6 +488,7 @@ public sealed class QueryRunnerTests
         }
     }
 
+    /// <summary>A synthetic source with two columns, a row cap of 500 and the given connection and timeout.</summary>
     private static SourceContract Source(string connection = S, int queryTimeoutSeconds = 3) => CatalogMapping.Map(new CatalogRows(
         new DataSourceRow("dbo.synthetic_view", connection)
         { QueryTimeoutSeconds = queryTimeoutSeconds, Id = 7319,
@@ -441,6 +496,8 @@ public sealed class QueryRunnerTests
         }, [new("amount", 1, "Amount", "Synthetic amount", "number", null, null, null, true, true, true, false, false),
             new("day", 2, "Day", "Synthetic day", "date", null, null, null, true, true, false, false, false)])).Value;
 
+    /// <summary>Validates <paramref name="json"/> against <see cref="Source"/>, failing the test if it is
+    /// refused.</summary>
     private static ValidatedQuery Validate(string json = "{}")
     {
         var result = QueryBuilding.Validate(Source(), json, QueryLimits.ForRowCap(500));
@@ -448,14 +505,17 @@ public sealed class QueryRunnerTests
         return result.Value;
     }
 
+    /// <summary>Validates and compiles <paramref name="json"/> with the SQL Server engine.</summary>
     private static CompiledQuery Compile(string json = "{}") => new SqlServerEngine().Compile(Validate(json));
 
+    /// <summary>Two rows with a decimal, a date, a boolean, text and a null.</summary>
     private static dynamic[] Rows() =>
     [
         new Dictionary<string, object?> { ["amount"] = 12.5m, ["day"] = new DateTime(2024, 12, 31), ["flag"] = true, ["text"] = "text", ["empty"] = null },
         new Dictionary<string, object?> { ["amount"] = -1m, ["day"] = new DateTime(2025, 1, 1), ["flag"] = false, ["text"] = "second", ["empty"] = null }
     ];
 
+    /// <summary>A new exception of the kind a test names.</summary>
     private static Exception Error(string kind) => kind switch
     {
         "invalid" => new InvalidOperationException(), "disposed" => new ObjectDisposedException("synthetic"),
@@ -466,11 +526,14 @@ public sealed class QueryRunnerTests
         _ => throw new ArgumentOutOfRangeException(nameof(kind))
     };
 
+    /// <summary>Asserts that the engine received the stored connection text unchanged, without printing it.</summary>
     private static void Prepared(string stored, string prepared)
     {
         Assert.True(string.Equals(stored, prepared, StringComparison.Ordinal), "Stored text changed.");
     }
 
+    /// <summary>Asserts a failed result with <paramref name="code"/> at its path and <paramref name="step"/>, scans
+    /// its text for the connection, and returns the failure.</summary>
     private static CatalogFailure Failure(CatalogResult<QueryRows> result,
         string code, string? step, string connection = S)
     {
@@ -486,6 +549,8 @@ public sealed class QueryRunnerTests
         return failure;
     }
 
+    /// <summary>Asserts that <paramref name="text"/> holds no part of either connection string and none of the
+    /// planted markers.</summary>
     private static void Safe(string text, string connection)
     {
         LeakScan.Synthetic(("S", S), ("connection under test", connection)).Text("query failure", text, Rule.DataGateway);
@@ -493,11 +558,16 @@ public sealed class QueryRunnerTests
             Assert.True(!text.Contains(marker, StringComparison.OrdinalIgnoreCase), "Diagnostic marker found in query failure.");
     }
 
+    /// <summary>A logger that keeps each formatted message and fails if an exception is logged.</summary>
     private sealed class Recorder : ILogger
     {
+        /// <summary>The formatted messages, in order.</summary>
         public List<string> Lines { get; } = [];
+        /// <summary>No scopes.</summary>
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        /// <summary>Every level is enabled.</summary>
         public bool IsEnabled(LogLevel level) => true;
+        /// <summary>Keeps the message; an attached exception fails the test.</summary>
         public void Log<TState>(LogLevel level, EventId id, TState state, Exception? exception,
             Func<TState, Exception?, string> formatter)
         {

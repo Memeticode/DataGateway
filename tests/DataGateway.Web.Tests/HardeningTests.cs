@@ -22,9 +22,12 @@ namespace DataGateway.Web.Tests;
 /// <summary>Pins how DataGateway behaves inside a host that configures things its own way, and its query and failure edges.</summary>
 public sealed class HardeningTests
 {
+    /// <summary>The three operations, in the order the wire tests call them.</summary>
     private static readonly string[] Operations = ["list", "describe", "query"];
 
-    // a host's own JSON settings never change DataGateway's wire, over HTTP or MCP, answer or error.
+    /// <summary>A host's own JSON settings never change DataGateway's wire, over HTTP or MCP, answer or error.</summary>
+    /// <remarks>The gateway serializes with its own options; a host that sets a naming policy, null handling or encoder
+    /// for its other endpoints must not change what callers of the gateway receive.</remarks>
     [Fact]
     public async Task T1_host_json_settings_never_change_the_wire()
     {
@@ -42,6 +45,9 @@ public sealed class HardeningTests
         Assert.Contains("\"code\":\"", plain[^1]);
     }
 
+    /// <summary>Calls every operation and an unknown-source describe over both HTTP and MCP, and returns the answers
+    /// with incident ids masked.</summary>
+    /// <param name="configureHostJson">The host's own JSON setup, or <see langword="null"/> for none.</param>
     private static async Task<string[]> Replies(Action<IServiceCollection>? configureHostJson)
     {
         using var fixture = new SqliteFixture();
@@ -67,10 +73,8 @@ public sealed class HardeningTests
         return [.. replies.Select(reply => Regex.Replace(reply, "\"incidentId\":\"[0-9a-f]{32}\"", "\"incidentId\":\"*\""))];
     }
 
-    // the MCP SDK shares one set of HTTP transport options per process, so an app that configures them
-    // for its own MCP server is refused at startup instead of silently changing either server.
-    // The API document describes the wire the replies actually use, whatever the host's own JSON settings.
-    // A host's number handling is left out on purpose: it changes only how loosely a number is described.
+    /// <summary>The API document describes the wire the replies actually use, whatever the host's own JSON settings.</summary>
+    /// <remarks>A host's number handling is left out on purpose: it changes only how loosely a number is described.</remarks>
     [Theory]
     [InlineData("snake")]
     [InlineData("pascal")]
@@ -88,6 +92,8 @@ public sealed class HardeningTests
         Assert.Contains("\"rowCount\"", plain);
     }
 
+    /// <summary>Serves the API page in a host with the given JSON settings and returns its OpenAPI document.</summary>
+    /// <param name="hostJson">Changes to the host's JSON options, or <see langword="null"/> for none.</param>
     private static async Task<string> ApiDocument(Action<JsonSerializerOptions>? hostJson)
     {
         using var fixture = new SqliteFixture();
@@ -103,6 +109,10 @@ public sealed class HardeningTests
         return await host.Client.GetStringAsync("/docs/openapi/v1.json");
     }
 
+    /// <summary>An app that configures the MCP SDK's HTTP transport itself, in any of four ways, is refused when the
+    /// gateway is mapped.</summary>
+    /// <remarks>The MCP SDK shares one set of HTTP transport options per process, so an app that configures them for its
+    /// own MCP server is refused at startup instead of silently changing either server.</remarks>
     [Theory]
     [InlineData("before")]
     [InlineData("after")]
@@ -124,6 +134,8 @@ public sealed class HardeningTests
         Assert.StartsWith("Gateway 'a'. This app also configures the MCP SDK's HTTP transport (HttpServerTransportOptions)", error.Message);
     }
 
+    /// <summary>An app that adds the MCP server without transport settings, or configures only a differently named
+    /// options instance, still maps the gateway and answers.</summary>
     [Theory]
     [InlineData("bare")]
     [InlineData("bare-transport")]
@@ -156,7 +168,7 @@ public sealed class HardeningTests
         Assert.NotEqual(true, result.IsError);
     }
 
-    // The source timeout is one deadline for the whole query, even when every single read is fast.
+    /// <summary>The source timeout is one deadline for the whole query, even when every single read is fast.</summary>
     [Fact]
     public async Task T4_slow_rows_that_each_beat_the_timeout_still_end_in_QueryTimeout()
     {
@@ -170,6 +182,8 @@ public sealed class HardeningTests
         Assert.InRange(engine.RowsServed, 1, 5);
     }
 
+    /// <summary>The query deadline starts once the connection is open: a slow connect is bounded by the connection
+    /// string's own connect timeout, not by the query timeout.</summary>
     [Fact]
     public async Task T5_connecting_is_governed_by_the_connection_string_not_the_query_deadline()
     {
@@ -179,6 +193,7 @@ public sealed class HardeningTests
         Assert.Equal(2, result.Value.RowCount);
     }
 
+    /// <summary>A caller who cancels before the deadline gets QueryCancelled, not QueryTimeout, and the read stops promptly.</summary>
     [Fact]
     public async Task T6_a_caller_cancel_inside_the_deadline_is_still_QueryCancelled()
     {
@@ -191,6 +206,8 @@ public sealed class HardeningTests
         Assert.InRange(engine.RowsServed, 0, 5);
     }
 
+    /// <summary>Rows that a provider which ignores cancellation delivers after the deadline are refused with
+    /// QueryTimeout instead of being returned.</summary>
     [Theory]
     [InlineData(1, 3, 1500)]
     [InlineData(2, 1, 800)]
@@ -201,6 +218,8 @@ public sealed class HardeningTests
         Assert.Equal("QueryTimeout", result.Failure?.Code);
     }
 
+    /// <summary>A driver that reports the deadline's cancellation as an I/O error still produces QueryTimeout, with the
+    /// driver's exception kept.</summary>
     [Fact]
     public async Task T6c_a_cancel_the_engine_reports_as_an_io_error_after_the_deadline_is_QueryTimeout()
     {
@@ -209,6 +228,8 @@ public sealed class HardeningTests
         Assert.IsType<IOException>(result.Failure!.DriverException);
     }
 
+    /// <summary>A source timeout longer than a cancellation timer can represent is clamped to the longest deadline the
+    /// timer allows, instead of meaning no deadline or throwing.</summary>
     [Fact]
     public void T6d_a_timeout_longer_than_the_timer_allows_gets_the_longest_deadline_not_none()
     {
@@ -219,7 +240,7 @@ public sealed class HardeningTests
         Assert.False(timer.IsCancellationRequested);
     }
 
-    // DataGateway's own broken assumptions are unexpected errors; real provider faults stay SourceUnavailable.
+    /// <summary>DataGateway's own broken assumptions are unexpected errors; real provider faults stay SourceUnavailable.</summary>
     [Fact]
     public void T7_only_provider_faults_are_classified_as_source_failures()
     {
@@ -229,7 +250,7 @@ public sealed class HardeningTests
         Assert.Equal("SourceUnavailable", QueryRunner.Classify(new InvalidOperationException("pool"), connected: true, cancelled: false, timedOut: false, 30, provider: null)?.Code);
     }
 
-    // the SourceUnavailable message gives one instruction: tell the user, do not retry.
+    /// <summary>The SourceUnavailable message gives one instruction: tell the user, do not retry.</summary>
     [Fact]
     public void T8_source_unavailable_message_does_not_also_say_try_again()
     {
@@ -239,7 +260,7 @@ public sealed class HardeningTests
         Assert.EndsWith(" Tell the user, give the incidentId and stop; do not retry.", failure.Message, StringComparison.Ordinal);
     }
 
-    // describe refuses the same null fields list refuses.
+    /// <summary>Describe refuses the same null fields list refuses.</summary>
     [Fact]
     public void T9_detail_rows_get_the_same_null_checks_as_list_rows()
     {
@@ -253,7 +274,7 @@ public sealed class HardeningTests
             failures.Select(failure => failure.Path));
     }
 
-    // a logging provider that throws never turns a refusal into a 500 or escapes the boundary.
+    /// <summary>A logging provider that throws never turns a refusal into a 500 or escapes the boundary.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -265,6 +286,8 @@ public sealed class HardeningTests
         Assert.Contains(expected, answer => answer.StartsWith("404 ", StringComparison.Ordinal));
     }
 
+    /// <summary>Calls each operation once with a refused request and returns status and body, incident ids masked.</summary>
+    /// <param name="throwing">A logging provider that throws, or <see langword="null"/> for none.</param>
     private static async Task<string[]> Answers(ThrowingFailureLogs? throwing)
     {
         using var fixture = new SqliteFixture();
@@ -285,7 +308,7 @@ public sealed class HardeningTests
         return [.. answers];
     }
 
-    // one keep loop serves DatabaseEngine and third-party engines alike.
+    /// <summary>One keep loop serves <see cref="DatabaseEngine{TConnection}"/> and third-party engines alike.</summary>
     [Fact]
     public void T11_the_keep_loop_has_one_home()
     {
@@ -297,7 +320,7 @@ public sealed class HardeningTests
         Assert.Equal([nameof(KeptRows)], owners);
     }
 
-    // the catch-all needs its failure log; there is no fallback that cannot resolve.
+    /// <summary>The catch-all needs its failure log; there is no fallback that cannot resolve.</summary>
     [Fact]
     public void T12_catch_all_has_no_unused_entry_and_a_required_log()
     {
@@ -307,17 +330,24 @@ public sealed class HardeningTests
         Assert.False(answer.GetParameters().Single(parameter => parameter.Name == "failures").IsOptional);
     }
 
+    /// <summary>A trivial compiled query that keeps <paramref name="keep"/> rows.</summary>
     private static CompiledQuery Query(int keep) => new("select 1", new Dictionary<string, object>(), keep, false, []);
 
     /// <summary>An engine whose connect and rows take measured time; its rows honour the token unless told not to.</summary>
     private sealed class PacedEngine(TimeSpan beforeOpen, TimeSpan perRow, int rows, bool honoursCancel = true) : IDatabaseEngine
     {
+        /// <summary>How many rows the engine produced before the read ended.</summary>
         internal int RowsServed;
+        /// <summary>The provider name, <c>synthetic</c>.</summary>
         public string ProviderName => "synthetic";
+        /// <summary>Not used: the tests pass compiled queries directly.</summary>
         public CompiledQuery Compile(ValidatedQuery query) => throw new NotSupportedException();
+        /// <summary>Accepts any connection.</summary>
         public void ValidateSourceConnection(string? connection) { }
+        /// <summary>Recognizes no failure.</summary>
         public ProviderFailure? RecognizeFailure(Exception error) => null;
 
+        /// <summary>Waits before reporting the connection opened, then streams the paced rows to the consumer.</summary>
         public async Task<QueryRows> ReadSourceAsync(string connection, CompiledQuery query, int commandTimeoutSeconds, Action opened,
             Func<IAsyncEnumerable<IDictionary<string, object?>>, Task<QueryRows>> consume, CancellationToken cancellationToken)
         {
@@ -326,6 +356,7 @@ public sealed class HardeningTests
             return await consume(Rows(cancellationToken));
         }
 
+        /// <summary>Yields the rows one by one, each after its delay.</summary>
         private async IAsyncEnumerable<IDictionary<string, object?>> Rows([EnumeratorCancellation] CancellationToken token = default)
         {
             for (var i = 0; i < rows; i++)
@@ -340,17 +371,23 @@ public sealed class HardeningTests
     /// <summary>An app's own options class for the MCP SDK's HTTP transport.</summary>
     private sealed class AppTransportSetup : IConfigureOptions<HttpServerTransportOptions>
     {
+        /// <summary>Turns off stateless mode, as an app with its own MCP server might.</summary>
         public void Configure(HttpServerTransportOptions options) => options.Stateless = false;
     }
 
     /// <summary>An engine whose wait is cut by the deadline and which reports that cancel as an I/O error, as some drivers do.</summary>
     private sealed class CancelAsIoEngine : IDatabaseEngine
     {
+        /// <summary>The provider name, <c>synthetic</c>.</summary>
         public string ProviderName => "synthetic";
+        /// <summary>Not used: the tests pass compiled queries directly.</summary>
         public CompiledQuery Compile(ValidatedQuery query) => throw new NotSupportedException();
+        /// <summary>Accepts any connection.</summary>
         public void ValidateSourceConnection(string? connection) { }
+        /// <summary>Recognizes no failure.</summary>
         public ProviderFailure? RecognizeFailure(Exception error) => null;
 
+        /// <summary>Waits until cancelled, then throws an <see cref="IOException"/> in place of the cancellation.</summary>
         public async Task<QueryRows> ReadSourceAsync(string connection, CompiledQuery query, int commandTimeoutSeconds, Action opened,
             Func<IAsyncEnumerable<IDictionary<string, object?>>, Task<QueryRows>> consume, CancellationToken cancellationToken)
         {
@@ -364,20 +401,28 @@ public sealed class HardeningTests
     /// <summary>A logging provider whose DataGateway.Failure logger throws from Log, and from BeginScope or the scope's end.</summary>
     private sealed class ThrowingFailureLogs(bool scopeThrowsOnEnd) : ILoggerProvider
     {
+        /// <summary>A throwing logger for the failure category, a null logger for every other.</summary>
         public ILogger CreateLogger(string categoryName) =>
             categoryName == DataGatewayExtensions.FailureLogCategory ? new Throwing(scopeThrowsOnEnd) : NullLogger.Instance;
+        /// <summary>Nothing to release.</summary>
         public void Dispose() { }
 
+        /// <summary>A scope whose end throws.</summary>
         private sealed class EndThrows : IDisposable
         {
+            /// <summary>Throws, as a failing sink would.</summary>
             public void Dispose() => throw new IOException("synthetic sink is down");
         }
 
+        /// <summary>The failure logger that throws from every write and from its scope.</summary>
         private sealed class Throwing(bool scopeThrowsOnEnd) : ILogger
         {
+            /// <summary>Throws now, or returns a scope that throws when it ends.</summary>
             public IDisposable BeginScope<TState>(TState state) where TState : notnull =>
                 scopeThrowsOnEnd ? new EndThrows() : throw new IOException("synthetic sink is down");
+            /// <summary>Every level is enabled, so every write reaches <see cref="Log"/>.</summary>
             public bool IsEnabled(LogLevel logLevel) => true;
+            /// <summary>Throws.</summary>
             public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
                 throw new IOException("synthetic sink is down");
         }

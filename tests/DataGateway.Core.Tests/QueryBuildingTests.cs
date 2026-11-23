@@ -9,10 +9,24 @@ using Xunit;
 
 namespace DataGateway.Core.Tests;
 
+/// <summary>Pins <see cref="QueryBuilding.Validate"/> and the SQL Server engine's compile step: a caller's JSON query
+/// becomes exactly this SQL, these bindings and these output columns, or is refused with the library's code and
+/// path.</summary>
+/// <remarks>
+/// <para>Every identifier in the SQL comes from the catalog, never from the caller, and every caller value is a
+/// binding. <see cref="AssertCatalogOnly"/> checks that on every compiled query here, so a change that lets caller
+/// text into the SQL fails many tests at once.</para>
+/// <para>The row plan fetches one row more than it keeps; the first binding is always that fetch count.</para>
+/// </remarks>
 public sealed class QueryBuildingTests
 {
+    /// <summary>A grouped query using every aggregate function, sorted by an aggregate output and a group column.</summary>
     private const string Grouped = """{"group_by":["region"],"aggregates":[{"fn":"sum","col":"line_total"},{"fn":"avg","col":"quantity"},{"fn":"min","col":"order_date"},{"fn":"max","col":"region"},{"fn":"count","col":"is_return"}],"order_by":[{"col":"sum_line_total","dir":"desc"},{"col":"region","dir":"asc"}],"limit":5}""";
 
+    /// <summary>A synthetic source whose columns cover each data type and a spread of flags, including a filter-only
+    /// column and a column with every flag off.</summary>
+    /// <param name="objectName">The catalog view name, for the view-name tests.</param>
+    /// <param name="reserved">Use two columns named after SQL keywords instead.</param>
     private static SourceContract Contract(string objectName = "sales.order_lines", bool reserved = false)
     {
         var source = new DataSourceRow(objectName, "fixture-connection-removed")
@@ -37,6 +51,7 @@ public sealed class QueryBuildingTests
         return mapped.Value;
     }
 
+    /// <summary>Golden SQL for select with sort and limit, and for an empty query that selects every selectable column.</summary>
     [Fact]
     public void T2_golden_sql_parameters_and_output_columns()
     {
@@ -48,6 +63,9 @@ public sealed class QueryBuildingTests
             501, 500, "region:text, customer_code:text, order_date:date, line_total:number, quantity:number, is_return:bool", 501);
     }
 
+    /// <summary>Golden SQL for grouping with aggregates, grouping alone, and an ungrouped aggregate.</summary>
+    /// <remarks>The ungrouped aggregate adds a matched-row count column, so the answer can tell that nothing matched
+    /// from an aggregate over zero rows; it is not an output column.</remarks>
     [Fact]
     public void T3_golden_sql_parameters_and_output_columns()
     {
@@ -62,6 +80,8 @@ public sealed class QueryBuildingTests
             501, 500, "count_region:number", 501);
     }
 
+    /// <summary>Golden SQL for every filter operator, nested and/or groups, and booleans written as SQL literals rather
+    /// than bindings.</summary>
     [Fact]
     public void T4_golden_sql_parameters_and_output_columns()
     {
@@ -72,6 +92,7 @@ public sealed class QueryBuildingTests
         Assert.DoesNotContain(result0.Compiled.Parameters.Values, value => value is bool);
     }
 
+    /// <summary>Golden SQL for hostile filter values: each one arrives as a binding, and the SQL text never changes.</summary>
     [Fact]
     public void T5_golden_sql_parameters_and_output_columns()
     {
@@ -80,6 +101,7 @@ public sealed class QueryBuildingTests
             3, 2, "customer_code:text", 3, "x'; DROP TABLE sales.order_lines; --", "a]b", "[c]", "/* d */", @"%50\%\_off\\\[x]%", "%'--");
     }
 
+    /// <summary>A column name or sort direction carrying SQL is refused, never quoted into the SQL.</summary>
     [Theory]
     [InlineData("""{"select":["customer_code]; DROP TABLE x; --"]}""", "UnknownColumn", "select[0]")]
     [InlineData("""{"select":["[region]"]}""", "UnknownColumn", "select[0]")]
@@ -88,6 +110,8 @@ public sealed class QueryBuildingTests
     [InlineData("""{"order_by":[{"col":"region","dir":"desc; DROP"}]}""", "InvalidSortDirection", "order_by[0].dir")]
     public void T5_caller_identifiers_are_refused(string json, string code, string path) => Refusal(json, code, path);
 
+    /// <summary>The fetch count reaches the SQL as the one top binding, the keep count reaches the compiled query, and
+    /// the shared limits are not changed by planning.</summary>
     [Fact]
     public void T6_row_plan_is_applied_to_sql_without_changing_limits()
     {
@@ -117,6 +141,8 @@ public sealed class QueryBuildingTests
         AssertCatalogOnly(contract, maximum, maxCompiled);
     }
 
+    /// <summary>A repeated, string or fractional limit is refused; compiling twice gives the same SQL and bindings; and
+    /// the builder leaves JSON parsing to the query library.</summary>
     [Fact]
     public void T7_one_limit_read_and_repeat_compilation_changes_nothing()
     {
@@ -142,6 +168,9 @@ public sealed class QueryBuildingTests
             Assert.DoesNotContain(forbidden, source, StringComparison.Ordinal);
     }
 
+    /// <summary>In a like pattern only <c>%</c> is a wildcard: SQL Server's <c>_</c> and <c>[</c> wildcards are escaped in
+    /// the binding, while the validated query keeps the caller's pattern unchanged.</summary>
+    /// <remarks>The same pattern then means the same thing on every engine.</remarks>
     [Theory]
     [InlineData("ab_c", "ab[_]c")]
     [InlineData("[xy]z", "[[]xy]z")]
@@ -167,6 +196,7 @@ public sealed class QueryBuildingTests
         Assert.Equal(pattern, pair.Validated.CloneQuery().GetOneComponent<BasicStringCondition>("where").Value);
     }
 
+    /// <summary>Like patterns are escaped inside nested and/or groups too.</summary>
     [Fact]
     public void T8_like_walks_root_or_and_inside_or_without_changing_sql()
     {
@@ -175,6 +205,8 @@ public sealed class QueryBuildingTests
             501, 500, "region:text", 501, "a[_]b", "[[]xy]", "a[_][[]b");
     }
 
+    /// <summary>Like and contains on the same text bind differently: like escapes SQL Server wildcards, contains wraps
+    /// the text in <c>%</c> with an escape clause.</summary>
     [Fact]
     public void T9_like_and_contains_keep_distinct_bindings_and_sql()
     {
@@ -183,6 +215,7 @@ public sealed class QueryBuildingTests
             501, 500, "region:text", 501, "A[_]1", @"%A\_1%");
     }
 
+    /// <summary>One query for each refusal code the library raises, including each structural limit.</summary>
     public static IEnumerable<object[]> RequestRefusals()
     {
         yield return ["not json", "InvalidJson"];
@@ -211,6 +244,8 @@ public sealed class QueryBuildingTests
         yield return ["""{"x'; --":1,"x'; --":2}""", "InvalidJson"];
     }
 
+    /// <summary>The gateway keeps the library's code and path, replaces its message with the gateway's own fix-it text,
+    /// and logs it at step <c>query</c>.</summary>
     [Theory]
     [MemberData(nameof(RequestRefusals))]
     public void T8_library_refusal_triple_is_unchanged(string json, string code)
@@ -253,6 +288,7 @@ public sealed class QueryBuildingTests
     [InlineData("""{"aggregates":[{"fn":"count","col":"customer_code"}]}""", "aggregates[0].col")]
     public void T9_each_missing_capability_is_refused(string json, string path) => Refusal(json, "ColumnOperationNotAllowed", path);
 
+    /// <summary>A column with every flag off is unknown to every clause, exactly like a column that does not exist.</summary>
     [Theory]
     [InlineData("internal_note")]
     [InlineData("secret_col")]
@@ -265,6 +301,7 @@ public sealed class QueryBuildingTests
         Refusal(JsonSerializer.Serialize(new { aggregates = new[] { new { fn = "count", col = column } } }), "UnknownColumn", "aggregates[0].col");
     }
 
+    /// <summary>A catalog view name of one or two bare identifiers is bracket-quoted part by part.</summary>
     [Theory]
     [InlineData("dbo.vSynthetic", "[dbo].[vSynthetic]")]
     [InlineData("synthetic", "[synthetic]")]
@@ -276,6 +313,7 @@ public sealed class QueryBuildingTests
             501, 500, "region:text", 501);
     }
 
+    /// <summary>View and column names that are SQL keywords work, because they are always quoted.</summary>
     [Fact]
     public void T10_reserved_names_remain_catalog_identifiers()
     {
@@ -285,6 +323,8 @@ public sealed class QueryBuildingTests
             501, 500, "group:text, sum_select:number", 501);
     }
 
+    /// <summary>A view name the library would refuse is an invalid catalog with a fixed message that does not repeat the
+    /// name; a caller's own bad query is still reported as the caller's error.</summary>
     [Theory]
     [InlineData("dbo.[v]")]
     [InlineData("dbo.my view")]
@@ -319,6 +359,8 @@ public sealed class QueryBuildingTests
         Assert.Equal("query", requestFailure.Step);
     }
 
+    /// <summary>A validated query serializes as its row plan and output columns only, never the view or connection, and
+    /// its columns and the compiled bindings are read-only.</summary>
     [Fact]
     public void T11_output_json_hides_query_and_parameters_are_read_only()
     {
@@ -337,6 +379,7 @@ public sealed class QueryBuildingTests
         AssertCatalogOnly(contract, validated, compiled);
     }
 
+    /// <summary>Missing arguments and limits not built by <see cref="QueryLimits"/> throw instead of becoming a refusal.</summary>
     [Fact]
     public void T12_programming_errors_escape()
     {
@@ -349,6 +392,9 @@ public sealed class QueryBuildingTests
         Assert.Equal("limits", Assert.Throws<ArgumentException>(() => QueryBuilding.Validate(contract, """{"select":["region"]}""", JsonQueryLimits.Default)).ParamName);
     }
 
+    /// <summary>Validates <paramref name="json"/> against <see cref="Contract"/> and asserts it is refused with this code
+    /// and path at step <c>query</c>.</summary>
+    /// <returns>The refusal, for further checks.</returns>
     private static CatalogFailure Refusal(string json, string code, string path)
     {
         var result = QueryBuilding.Validate(Contract(), json, QueryLimits.ForRowCap(500));
@@ -361,6 +407,9 @@ public sealed class QueryBuildingTests
 
     // Keep the prescribed exact SQL projection-cardinality assertion verbatim.
 #pragma warning disable xUnit2013
+    /// <summary>Asserts compiled SQL reads one catalog view, quotes only catalog and output names, numbers its bindings
+    /// <c>@p0</c> upward with the fetch count first, and uses no word outside a small SQL vocabulary.</summary>
+    /// <remarks>This is the guard against caller text in the SQL: any token it does not recognize fails the test.</remarks>
     private static void AssertCatalogOnly(SourceContract contract, ValidatedQuery validated, CompiledQuery compiled)
     {
         var sql = compiled.Sql;
@@ -398,6 +447,8 @@ public sealed class QueryBuildingTests
     }
 #pragma warning restore xUnit2013
 
+    /// <summary>Asserts the bindings are <c>@p0</c>, <c>@p1</c> and so on with exactly these values and types; dates
+    /// carry no time zone kind.</summary>
     private static void AssertParameters(CompiledQuery compiled, params object[] values)
     {
         var expected = values.Select((value, i) => new KeyValuePair<string, object>($"@p{i}", value))
@@ -413,9 +464,18 @@ public sealed class QueryBuildingTests
         }
     }
 
+    /// <summary>Asserts the output columns as a comma-separated list of <c>name:type</c>.</summary>
     private static void AssertColumns(ValidatedQuery validated, string expected) =>
         Assert.Equal(expected.Split(", "), validated.Columns.Select(c => $"{c.Name}:{c.DataType}"));
 
+    /// <summary>Validates and compiles a query and asserts its exact SQL, row plan, output columns and bindings.</summary>
+    /// <param name="contract">The source to query.</param>
+    /// <param name="json">The caller's query.</param>
+    /// <param name="sql">The exact SQL expected.</param>
+    /// <param name="fetch">Rows the plan fetches.</param>
+    /// <param name="keep">Rows the plan keeps.</param>
+    /// <param name="columns">The output columns, as for <see cref="AssertColumns"/>.</param>
+    /// <param name="parameters">The binding values in order, starting with the fetch count.</param>
     private static (ValidatedQuery Validated, CompiledQuery Compiled) Check(SourceContract contract, string json,
         string sql, int fetch, int keep, string columns, params object[] parameters)
     {

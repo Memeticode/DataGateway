@@ -8,13 +8,34 @@ using ModelContextProtocol.Server;
 
 namespace DataGateway.Mcp;
 
+/// <summary>One gateway MCP tool: runs its operation on the call's arguments and answers with the operation's JSON,
+/// or with the error body as a tool error.</summary>
+/// <remarks>
+/// <para>A hand-built <see cref="McpServerTool"/>, not an attribute-declared one: the definition (name, title,
+/// description, schema) is built at run time from the catalog's MCP text and the host's prefixes.</para>
+/// <para>Every failure is a tool result, never a protocol error: the calling model reads the code, path and message
+/// and can act on them. Each failure writes one log line, as on the HTTP routes.</para>
+/// </remarks>
+/// <typeparam name="T">The operation's answer type.</typeparam>
+/// <param name="definition">The tool definition clients list.</param>
+/// <param name="operation">The canonical tool name, logged as the operation.</param>
+/// <param name="run">Runs the operation on the JSON body built from the arguments.</param>
+/// <param name="getFailures">Finds the gateway's failure log in the call's services.</param>
 internal sealed class DataGatewayTool<T>(Tool definition, string operation,
     Func<IServiceProvider, byte[], RequestTrail, CancellationToken, Task<CatalogResult<T>>> run,
     Func<IServiceProvider, FailureLog> getFailures) : McpServerTool where T : class
 {
+    /// <summary>The tool definition clients list.</summary>
     public override Tool ProtocolTool => definition;
+    /// <summary>None: the tool declares no attributes.</summary>
     public override IReadOnlyList<object> Metadata => [];
 
+    /// <summary>Runs one tool call.</summary>
+    /// <remarks>The arguments are rewritten as a JSON body, so the call goes through the same parsing and checks as the
+    /// matching HTTP route.</remarks>
+    /// <param name="request">The call, with its arguments, services and caller.</param>
+    /// <param name="cancellationToken">The call's cancellation.</param>
+    /// <returns>The answer, a tool error with the error body, or the unexpected-error result.</returns>
     public override async ValueTask<CallToolResult> InvokeAsync(RequestContext<CallToolRequestParams> request,
         CancellationToken cancellationToken = default)
     {

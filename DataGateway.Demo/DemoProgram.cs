@@ -1,9 +1,23 @@
 namespace DataGateway.Demo;
 
+/// <summary>The demo's parsed command line.</summary>
+/// <param name="DataGateway">The gateway's root URL, where the routes are mapped.</param>
+/// <param name="Source">The source to exercise, or null for the first one listed.</param>
 public sealed record DemoArguments(Uri DataGateway, string? Source);
 
+/// <summary>The demo's entry point: a console client that calls a running gateway, checks every answer against
+/// the documented wire format, and prints each step.</summary>
+/// <remarks>It knows nothing about the catalog in advance: it learns source names from list and column abilities
+/// from describe, so it runs against any registered source. It reads no configuration and needs no reference to
+/// the gateway's code; the URL is its only input.</remarks>
 public static class DemoProgram
 {
+    /// <summary>Parses the arguments: one absolute http or https root URL, optionally followed by
+    /// <c>--source &lt;name&gt;</c>.</summary>
+    /// <remarks>The URL must be a bare root, with no credentials, path, query or fragment: each route is sent as
+    /// an absolute path from that root, so a path in the URL would be silently dropped.</remarks>
+    /// <param name="args">The command-line arguments.</param>
+    /// <returns>The arguments, or null with the usage text to print.</returns>
     public static (DemoArguments? Arguments, string? Error) Parse(IReadOnlyList<string> args)
     {
         const string usage = "FIX THE CALL: supply one absolute http(s) root URL and optionally --source <name>. Usage: dotnet run --project DataGateway.Demo -- http://localhost:5000 [--source <name>]";
@@ -15,6 +29,13 @@ public static class DemoProgram
         return (new(uri, args.Count == 3 ? args[2] : null), null);
     }
 
+    /// <summary>Runs the demo and returns its exit code.</summary>
+    /// <remarks>Two clients share the base address: one signs in with the current Windows account, one sends no
+    /// credentials, for the step that checks the anonymous challenge. Ctrl+C cancels the run cleanly instead of
+    /// killing the process.</remarks>
+    /// <param name="args">The command-line arguments; see <see cref="Parse"/>.</param>
+    /// <returns>0 when every step passed; 1 when a check failed, the run stopped, was cancelled or the gateway was
+    /// unreachable; 2 for bad arguments.</returns>
     public static async Task<int> Main(string[] args)
     {
         var parsed = Parse(args);

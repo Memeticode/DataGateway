@@ -3,11 +3,35 @@ using System.Text.RegularExpressions;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>One worked example from the host README: a request and the answer it gets, joined by the example's name.</summary>
+/// <param name="Name">The example's name, from its marker.</param>
+/// <param name="Route">The route the request is posted to.</param>
+/// <param name="Request">The request body as written, or null for an answer shown without a request.</param>
+/// <param name="Status">The HTTP status the answer documents.</param>
+/// <param name="Answer">The documented answer body.</param>
+/// <param name="Anonymous">Whether the example is sent without sign-in (marker option <c>signin=none</c>).</param>
 public sealed record ReadmeExample(string Name, string? Route, string? Request, int? Status, JsonElement? Answer, bool Anonymous);
+/// <summary>One row of the README's error table.</summary>
+/// <param name="Code">The error code.</param>
+/// <param name="Status">The HTTP status the code is sent with.</param>
+/// <param name="When">The table's plain-English cause.</param>
+/// <param name="Paths">Every JSON path the code can name, from the path cell.</param>
 public sealed record ReadmeError(string Code, int Status, string When, IReadOnlyList<string> Paths);
 
+/// <summary>Reads the machine-checkable parts of a README: the marked JSON examples and the error table, so tests can
+/// replay them against a real host.</summary>
+/// <remarks>Each JSON block must sit directly under an <c>&lt;!-- example ... --&gt;</c> marker, and a malformed block
+/// throws <see cref="FormatException"/> instead of being skipped. A skipped block would leave a documented example
+/// untested and free to drift from what the gateway really answers.</remarks>
 public static class ReadmeExamples
 {
+    /// <summary>Parses every marked JSON example in <paramref name="markdown"/>, pairing each request with its answer.</summary>
+    /// <remarks>Only the 401 sign-in challenge on the list route may appear as an answer with no request, since it
+    /// documents what any unsigned call gets.</remarks>
+    /// <param name="markdown">The README text.</param>
+    /// <returns>One example per name.</returns>
+    /// <exception cref="FormatException">A block has no marker, a marker is repeated, a block is unclosed, a
+    /// request lacks its route, an answer lacks its status, or an answer has no request.</exception>
     public static IReadOnlyList<ReadmeExample> Parse(string markdown)
     {
         var examples = new Dictionary<string, ReadmeExample>(StringComparer.Ordinal);
@@ -47,6 +71,10 @@ public static class ReadmeExamples
         return examples.Values.ToArray();
     }
 
+    /// <summary>Parses the table that follows the <c>&lt;!-- error-table --&gt;</c> marker.</summary>
+    /// <param name="markdown">The README text.</param>
+    /// <returns>The table's rows, in order.</returns>
+    /// <exception cref="FormatException">The marker, header or a row is missing or malformed, or a path cell is not code.</exception>
     public static IReadOnlyList<ReadmeError> ErrorTable(string markdown)
     {
         var marker = markdown.IndexOf("<!-- error-table -->", StringComparison.Ordinal);

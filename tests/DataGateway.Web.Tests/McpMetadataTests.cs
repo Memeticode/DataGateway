@@ -12,10 +12,22 @@ using static DataGateway.Web.Tests.NamedGatewayMcpWire;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the catalog-owned MCP metadata (server title, about text, tool titles and descriptions): where it
+/// is read, how it is validated, and what a client sees when it is invalid or cannot be read.</summary>
+/// <remarks>
+/// <para>The metadata is read from the catalog on each presentation request (initialize and tools/list), with no
+/// snapshot, so an edit in the catalog reaches the next client without a restart.</para>
+/// <para>Invalid metadata refuses startup, naming the table and field to fix. Once running, invalid or unreadable
+/// metadata fails only the presentation requests, with CatalogUnavailable; tool calls keep their own routing,
+/// errors and log fields.</para>
+/// </remarks>
 public sealed class McpMetadataTests
 {
+    /// <summary>A raw MCP initialize request.</summary>
     private const string Initialize = """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"retail","version":"1"}}}""";
 
+    /// <summary>The API page and document are titled with the gateway name and never read the MCP metadata, which
+    /// belongs to MCP clients only.</summary>
     [Fact]
     public async Task T8_page_and_document_use_gateway_name_without_metadata_reads()
     {
@@ -43,6 +55,8 @@ public sealed class McpMetadataTests
         Assert.Equal(counts, state.Counts);
     }
 
+    /// <summary>A metadata edit reaches an open client on its next explicit tool listing and a new client on connect,
+    /// while instructions a client already received stay as they were.</summary>
     [Fact]
     public async Task T2_edits_refresh_on_connection_and_explicit_listing_without_a_snapshot()
     {
@@ -76,6 +90,8 @@ public sealed class McpMetadataTests
         pair.Capture.Stateless("/north/mcp");
     }
 
+    /// <summary>Every invalid metadata shape: blank, oversized and multi-line texts per field, and a missing server row,
+    /// a missing, unknown or duplicate tool row.</summary>
     public static IEnumerable<object[]> InvalidRows()
     {
         foreach (var field in new[] { "server.title", "server.about", "tool.title", "tool.description" })
@@ -95,6 +111,7 @@ public sealed class McpMetadataTests
         yield return ["duplicate.tool", ""];
     }
 
+    /// <summary>The seed metadata with one invalid shape from <see cref="InvalidRows"/> applied.</summary>
     private static McpMetadata Fault(string field, string value)
     {
         var seed = McpMetadataFixture.Seed;
@@ -112,6 +129,7 @@ public sealed class McpMetadataTests
         };
     }
 
+    /// <summary>The catalog table and column the startup error must name for a fault.</summary>
     private static string Field(string field) => field switch
     {
         "server.title" => "mcpserver.title",
@@ -122,6 +140,7 @@ public sealed class McpMetadataTests
         _ => "mcptool.tool_name"
     };
 
+    /// <summary>Invalid metadata stops startup with an error naming the gateway and the catalog field to fix.</summary>
     [Theory]
     [MemberData(nameof(InvalidRows))]
     public async Task T3_invalid_metadata_refuses_startup_naming_table_and_field(string field, string value)
@@ -133,6 +152,8 @@ public sealed class McpMetadataTests
         Assert.Contains("Gateway 'a'", error.Message);
     }
 
+    /// <summary>Metadata that turns invalid after startup makes initialize and tools/list answer 503 CatalogUnavailable,
+    /// with no session and no tool list, and logs the field at fault.</summary>
     [Theory]
     [MemberData(nameof(InvalidRows))]
     public async Task T3_invalid_metadata_at_read_time_refuses_initialize_and_listing(string field, string value)
@@ -155,6 +176,9 @@ public sealed class McpMetadataTests
         Assert.Equal(2, pair.Host.Logs.Failures.Length);
     }
 
+    /// <summary>The 1,000-character limit applies to a tool description after tool names are prefixed and the
+    /// description is rewritten, and a description of exactly 1,000 characters is allowed, at startup and at read
+    /// time.</summary>
     [Theory]
     [InlineData(999)]
     [InlineData(1000)]
@@ -195,6 +219,8 @@ public sealed class McpMetadataTests
         Assert.Contains("at most 1,000 characters", Assert.IsType<string>(host.Logs.Failures.Last().Fields["Message"]));
     }
 
+    /// <summary>With invalid or unreadable metadata, each tool call still reaches its own tool and answers
+    /// CatalogUnavailable at that tool's own path, with its own request, step and source in the log line.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -233,6 +259,8 @@ public sealed class McpMetadataTests
         pair.Capture.Stateless("/north/mcp");
     }
 
+    /// <summary>With invalid or unreadable metadata, a call for a missing or inactive source still answers
+    /// UnknownSource exactly as the route does and as it did when the metadata was healthy, with the same log fields.</summary>
     [Theory]
     [InlineData(false, "retail_missing")]
     [InlineData(true, "retail_missing")]
@@ -277,6 +305,8 @@ public sealed class McpMetadataTests
         Assert.Empty(pair.Ea.Executed);
     }
 
+    /// <summary>Tool names inside the server title are renamed with the tool prefix, and the title's surrounding spaces
+    /// are kept.</summary>
     [Theory]
     [InlineData(false, "  Retail describe_source  ")]
     [InlineData(true, "  Retail retail_describe_source  ")]
@@ -302,6 +332,8 @@ public sealed class McpMetadataTests
         Assert.Contains(tools, tool => tool.Name == (prefixed ? "retail_describe_source" : "describe_source"));
     }
 
+    /// <summary>MCP messages that need no metadata (responses, notifications, requests without an id), which must be
+    /// accepted as when healthy, and the two presentation requests, which must fail with 503.</summary>
     public static IEnumerable<object[]> CompareEnvelopes()
     {
         foreach (var invalid in new[] { false, true })
@@ -316,6 +348,8 @@ public sealed class McpMetadataTests
         }
     }
 
+    /// <summary>Unavailable metadata fails only initialize and tools/list; every other message gets its healthy
+    /// answer and no log line, and the request body is read to its end either way.</summary>
     [Theory]
     [MemberData(nameof(CompareEnvelopes))]
     public async Task Compare_T3_only_presentation_requests_fail_for_unavailable_metadata(bool invalid, string envelope, int status)
@@ -354,6 +388,8 @@ public sealed class McpMetadataTests
         }
     }
 
+    /// <summary>A tools/call sent as UTF-8 or UTF-16 gets the same answer with unavailable metadata as with healthy
+    /// metadata, and the request body is read to its end.</summary>
     [Theory]
     [InlineData(false, "describe")]
     [InlineData(true, "describe")]
@@ -398,6 +434,7 @@ public sealed class McpMetadataTests
         }
     }
 
+    /// <summary>Posts an MCP envelope in the given text encoding.</summary>
     private static async Task<HttpResponseMessage> EncodedCall(NamedGatewayMcpPair pair, string envelope, Encoding encoding)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "/north/mcp")
@@ -410,6 +447,7 @@ public sealed class McpMetadataTests
         return await pair.Http.SendAsync(request, pair.Token);
     }
 
+    /// <summary>The text of a failed tool call's one content block, from a JSON or event-stream reply.</summary>
     private static string CallText(string text)
     {
         var data = text.Split('\n').FirstOrDefault(line => line.StartsWith("data: ", StringComparison.Ordinal));
@@ -420,6 +458,7 @@ public sealed class McpMetadataTests
         return content.GetProperty("text").GetString()!;
     }
 
+    /// <summary>The about text opens the server instructions exactly as stored, surrounding spaces included.</summary>
     [Theory]
     [InlineData("  Retail data.  ")]
     [InlineData("Retail data.")]

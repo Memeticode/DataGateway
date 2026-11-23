@@ -6,8 +6,13 @@ using Xunit;
 
 namespace DataGateway.Core.Tests;
 
+/// <summary>Pins <see cref="RowCap.Plan"/>: how many rows a query fetches and keeps under a source's row cap.</summary>
+/// <remarks>The plan fetches one row more than it keeps, so the answer can say whether rows were left out (its
+/// <c>more</c> flag) without a second count query.</remarks>
 public sealed class RowCapTests
 {
+    /// <summary>With no limit, the plan keeps the cap and fetches one more, and the largest cap still fits in an
+    /// <see cref="int"/>.</summary>
     [Theory]
     [InlineData(1, 2)]
     [InlineData(500, 501)]
@@ -32,6 +37,9 @@ public sealed class RowCapTests
         Assert.Equal(requested, plan.Keep);
     }
 
+    /// <summary>A requested limit below 1 or above the cap throws.</summary>
+    /// <remarks>The validator refuses such limits before planning, so reaching here is a defect in DataGateway, not a
+    /// caller error.</remarks>
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -42,6 +50,8 @@ public sealed class RowCapTests
         Assert.Equal("requestedLimit", Assert.Throws<ArgumentOutOfRangeException>(() =>
             RowCap.Plan(requested, QueryLimits.ForRowCap(500))).ParamName);
 
+    /// <summary>Limits that are missing, have no maximum, or exceed <see cref="QueryLimits.MaxRowCap"/> throw: they must
+    /// come from <see cref="QueryLimits"/>.</summary>
     [Fact]
     public void T5_missing_unbounded_and_overflowing_limits_are_datagateway_bugs()
     {
@@ -56,6 +66,8 @@ public sealed class RowCapTests
             RowCap.Plan(null, JsonQueryLimits.Default with { MaxLimit = int.MaxValue })).ParamName);
     }
 
+    /// <summary><see cref="QueryRows"/> serializes as rows, rowCount, more, and holds the caller's rows as given, without
+    /// copying or converting values.</summary>
     [Fact]
     public void T8_exact_web_shape_and_lossless_rows_without_copy()
     {

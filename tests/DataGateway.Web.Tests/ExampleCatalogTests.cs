@@ -17,14 +17,35 @@ using static DataGateway.Web.Tests.CatalogEngineTests;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the two shipped catalog services, <see cref="SqlServerCatalog"/> and <see cref="PostgreSqlCatalog"/>,
+/// and the shared reader behind them: their public surface, their SQL byte for byte, and how strictly they map, time
+/// out, cancel, clean up and fail.</summary>
+/// <remarks>
+/// <para>TERM integral: whether the provider may return a boolean flag as an integer 0 or 1 (SQL Server) instead of
+/// only a real boolean (PostgreSQL). TERM sentinel: the one row the detail query's left join returns for a source
+/// with no columns, with every column cell null. TERM fallback: when the detail query finds no source, a second query
+/// on the same connection reads the available names and checks they are well formed before the source is reported
+/// unknown.</para>
+/// <para>Every bad cell fails with one fixed message and no inner exception, because the catalog holds each source's
+/// connection string and object name, and a message built from the cell could leak them
+/// (<see cref="T12_Secret_values_never_enter_diagnostics_or_assertion_output"/>).</para>
+/// </remarks>
 public sealed class ExampleCatalogTests
 {
+    /// <summary>The five column capability flags.</summary>
     private static readonly string[] Flags = ["can_select", "can_filter", "can_sort", "can_group", "can_aggregate"];
+    /// <summary>The column fields that may be null.</summary>
     private static readonly string[] Optional = ["unit", "magnitude", "display_format"];
+    /// <summary>The fields of a list row.</summary>
     private static readonly string[] ListFields = ["name", "title", "description", "grain", "row_cap"];
+    /// <summary>A distinctive object name that must never appear in a diagnostic.</summary>
     private const string SecretObject = "synthetic_object_private_5b25f7e0_long_witness";
+    /// <summary>A distinctive connection value that must never appear in a diagnostic.</summary>
     private const string SecretConnection = "synthetic_connection_private_6f28a1d3_long_witness";
 
+    /// <summary>Both services require a database context and a positive timeout, refuse an already cancelled token before
+    /// opening anything, answer a blank source name as unknown without a catalog call, and let a factory failure
+    /// propagate unchanged.</summary>
     [Fact]
     public async Task T1_Services_have_required_context_timeout_and_observe_precancellation()
     {
@@ -81,6 +102,9 @@ public sealed class ExampleCatalogTests
         Assert.Equal(3, pgCalls);
     }
 
+    /// <summary>The list, detail and available-names SQL of both services equal the documented text byte for byte,
+    /// with its line endings, size and SHA-256.</summary>
+    /// <remarks>Size and hash are pinned too, so even a whitespace or line-ending change fails.</remarks>
     [Fact]
     public void T2_Six_SQL_copies_match_engine_bytes()
     {
@@ -127,6 +151,8 @@ public sealed class ExampleCatalogTests
         }
     }
 
+    /// <summary>Mapping list rows keeps every field exactly (no trimming), refuses a missing, null or mistyped field, and
+    /// returns rows that do not change when the input rows do.</summary>
     [Fact]
     public void T3_List_projection_is_complete_strict_and_detached()
     {
@@ -165,6 +191,8 @@ public sealed class ExampleCatalogTests
         Bad(() => CatalogTableReader.MapList([null!]));
     }
 
+    /// <summary>Mapping a detail keeps every source and column field exactly, keeps the query's column order and the
+    /// provider name, and is detached from the input rows.</summary>
     [Fact]
     public void T4_Detail_projection_preserves_every_field_provider_and_column_order()
     {
@@ -188,6 +216,8 @@ public sealed class ExampleCatalogTests
         }
     }
 
+    /// <summary>Every detail field that is missing, mistyped, or null where required is refused, on the first row and on
+    /// a later row; only unit, magnitude and display format may be null.</summary>
     [Fact]
     public void T5_Detail_rejects_every_missing_wrong_and_required_null_cell()
     {
@@ -214,6 +244,8 @@ public sealed class ExampleCatalogTests
         Bad(() => CatalogTableReader.MapDetail([SourceRow(), null!], "provider", false));
     }
 
+    /// <summary>The sentinel row maps to a source with no columns only when every column cell is present and null; a
+    /// partly null row is refused.</summary>
     [Fact]
     public void T6_Left_join_sentinel_requires_every_column_cell_present_and_null()
     {
@@ -252,6 +284,8 @@ public sealed class ExampleCatalogTests
         }
     }
 
+    /// <summary>Ids and ordinals accept any integer type within 32 bits, row caps must be from 1 to the gateway maximum,
+    /// and flags accept 0 or 1 only from an integral provider; everything else is refused.</summary>
     [Fact]
     public void T7_Integral_boolean_and_row_cap_rules_match_each_provider()
     {
@@ -343,6 +377,9 @@ public sealed class ExampleCatalogTests
         }
     }
 
+    /// <summary>Each read uses one connection, the caller's token and the service's timeout, binds the source name as a
+    /// string parameter (never in the SQL text), and runs the fallback on the same connection only when the source is
+    /// not found.</summary>
     [Fact]
     public async Task T8_Commands_forward_timeout_token_source_and_same_connection_fallback()
     {
@@ -447,6 +484,8 @@ public sealed class ExampleCatalogTests
         }
     }
 
+    /// <summary>Cancellation during open, execute, read, cleanup or the fallback ends the read with that token, and the
+    /// read waits for the connection's cleanup to finish before it completes.</summary>
     [Fact]
     public async Task T9_Cancellation_after_entry_and_during_cleanup_is_observed()
     {
@@ -519,6 +558,8 @@ public sealed class ExampleCatalogTests
         }
     }
 
+    /// <summary>A failure at any stage, including a bad second row, propagates without returning partial rows or a
+    /// default value, and the connection is still disposed.</summary>
     [Fact]
     public async Task T10_Failures_throw_without_partial_or_default_results()
     {
@@ -574,6 +615,8 @@ public sealed class ExampleCatalogTests
         }
     }
 
+    /// <summary>Each read opens a fresh connection and returns new objects, so a later read reflects catalog changes and
+    /// leaves earlier results untouched.</summary>
     [Fact]
     public async Task T11_Repeated_reads_are_fresh_buffered_and_detached()
     {
@@ -636,6 +679,8 @@ public sealed class ExampleCatalogTests
         Assert.NotSame(firstDetail.Rows.Columns, secondDetail.Rows.Columns);
     }
 
+    /// <summary>A source's object name and connection never appear in a mapping error, in the detail's JSON or text form,
+    /// or even in this test class's own assertion messages.</summary>
     [Fact]
     public void T12_Secret_values_never_enter_diagnostics_or_assertion_output()
     {
@@ -680,17 +725,23 @@ public sealed class ExampleCatalogTests
         }
     }
 
+    /// <summary>A probe database that allows the fallback's second result set.</summary>
     private static SourceProbe Probe() => new() { AllowNextResult = true };
+    /// <summary>A database context that opens a new probe connection per read.</summary>
     private static DbContext<ProbeConnection> Context() => DbContext<ProbeConnection>.FromFactory(() => new ProbeConnection());
+    /// <summary>Runs the SQL Server list or detail read against the probe.</summary>
     private static async Task<object?> Read(bool detail, CancellationToken token) => detail
         ? await CatalogTableReader.DetailAsync(Context(), SqlServerCatalog.ReadSql, SqlServerCatalog.AvailableSql,
             "synthetic", SqlServerEngine.ProviderName, true, 43, token)
         : await CatalogTableReader.ListAsync(Context(), SqlServerCatalog.ListSql, 41, token);
 
+    /// <summary>One service's three SQL texts and provider name: SQL Server when <paramref name="integral"/>, else PostgreSQL.</summary>
     private static (string List, string Read, string Available, string Provider) Sql(bool integral) => integral
         ? (SqlServerCatalog.ListSql, SqlServerCatalog.ReadSql, SqlServerCatalog.AvailableSql, SqlServerEngine.ProviderName)
         : (PostgreSqlCatalog.ListSql, PostgreSqlCatalog.ReadSql, PostgreSqlCatalog.AvailableSql, PostgreSqlEngine.ProviderName);
 
+    /// <summary>Asserts a service's public shape: sealed, derived from the catalog service, one constructor taking the
+    /// context and an optional 15-second timeout, and exactly the three overridden read methods.</summary>
     private static void CheckSurface(Type service, Type connection)
     {
         Assert.True(service.IsPublic);
@@ -718,12 +769,14 @@ public sealed class ExampleCatalogTests
         Assert.All(methods, method => Assert.NotEqual(method, method.GetBaseDefinition()));
     }
 
+    /// <summary>Asserts the operation ends in cancellation for <paramref name="token"/>.</summary>
     private static async Task Cancelled(Func<Task> operation, CancellationToken token)
     {
         var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operation().WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.Equal(token, error.CancellationToken);
     }
 
+    /// <summary>Asserts the operation fails with the fixed bad-cell error, and returns it.</summary>
     private static InvalidCastException Bad(Action operation)
     {
         var error = Assert.Throws<InvalidCastException>(operation);
@@ -731,6 +784,7 @@ public sealed class ExampleCatalogTests
         return error;
     }
 
+    /// <summary>Asserts the fixed bad-cell message and that no inner exception carries the cell.</summary>
     private static void CheckBad(InvalidCastException error)
     {
         Assert.Equal("The catalog cell shape is invalid.", error.Message);
@@ -738,6 +792,7 @@ public sealed class ExampleCatalogTests
         Assert.Null(error.InnerException);
     }
 
+    /// <summary>Removes <paramref name="field"/> or sets it to null, DBNull or an object of the wrong type.</summary>
     private static void Mutate(Dictionary<string, object?> row, string field, string kind)
     {
         if (kind == "missing")
@@ -746,6 +801,7 @@ public sealed class ExampleCatalogTests
             row[field] = kind == "null" ? null : kind == "dbnull" ? DBNull.Value : new object();
     }
 
+    /// <summary>A sentinel row whose column cells are null, DBNull, or a mix of both.</summary>
     private static Dictionary<string, object?> Sentinel(string kind)
     {
         var row = SourceRow();
@@ -754,8 +810,10 @@ public sealed class ExampleCatalogTests
         return row;
     }
 
+    /// <summary><paramref name="value"/> as each of the eight integer types.</summary>
     private static object[] Integers(int value) => [(sbyte)value, (byte)value, (short)value, (ushort)value, value, (uint)value, (long)value, (ulong)value];
 
+    /// <summary>The mapped column's value for a flag field name.</summary>
     private static bool FlagValue(DataSourceColumnRow column, string field) => field switch
     {
         "can_select" => column.CanSelect,
@@ -766,6 +824,8 @@ public sealed class ExampleCatalogTests
         _ => throw new ArgumentException("Unknown synthetic flag.")
     };
 
+    /// <summary>A detail row with padded, non-ASCII text, secret values and alternating flags, to catch any trimming or
+    /// field mix-up.</summary>
     private static Dictionary<string, object?> RichRow(int ordinal)
     {
         var row = SourceRow();
@@ -788,6 +848,7 @@ public sealed class ExampleCatalogTests
         return row;
     }
 
+    /// <summary>The detail <see cref="RichRow"/> rows must map to.</summary>
     private static CatalogDetail ExpectedDetail(Dictionary<string, object?> first, Dictionary<string, object?> second, string provider) =>
         new(provider, new CatalogRows(new DataSourceRow((string)first["object_name"]!, (string)first["connection_string"]!)
         { QueryTimeoutSeconds = 30,
@@ -801,6 +862,7 @@ public sealed class ExampleCatalogTests
         }, [new(" column \u03a9 2", 2, " title 2", " description 2", " type 2", " unit \u03b2 ", null, " format ", true, false, true, false, true),
             new(" column \u03a9 1", 1, " title 1", " description 1", " type 1", null, " magnitude ", null, false, true, false, true, false)]));
 
+    /// <summary>Asserts a list row matches its raw row.</summary>
     private static void AssertList(IDictionary<string, object?> expected, SourceListRow actual)
     {
         Assert.Equal(expected["name"], actual.Name);
@@ -811,6 +873,7 @@ public sealed class ExampleCatalogTests
         Assert.Equal(expected["row_cap"], actual.RowCap);
     }
 
+    /// <summary>Asserts a source matches its raw row, comparing the secret fields without printing them.</summary>
     private static void AssertSource(IDictionary<string, object?> expected, DataSourceRow actual)
     {
         Assert.Equal(expected["id"], actual.Id);
@@ -826,6 +889,7 @@ public sealed class ExampleCatalogTests
         Assert.True(sameObject, "Catalog object differs.");
     }
 
+    /// <summary>Asserts a column matches its raw row.</summary>
     private static void AssertColumn(IDictionary<string, object?> expected, DataSourceColumnRow actual)
     {
         Assert.Equal(expected["column_name"], actual.ColumnName);
@@ -843,6 +907,9 @@ public sealed class ExampleCatalogTests
         Assert.Equal(expected["can_aggregate"], actual.CanAggregate);
     }
 
+    /// <summary>Asserts two details are equal field by field, comparing the secret fields without printing them.</summary>
+    /// <remarks>A plain equality assertion would print both records on failure, connection string included; the boolean
+    /// checks keep a failing test from leaking what it compares.</remarks>
     private static void AssertDetail(CatalogRows expected, CatalogDetail actual, string provider)
     {
         Assert.Equal(provider, actual.Provider);
@@ -880,6 +947,8 @@ public sealed class ExampleCatalogTests
         }
     }
 
+    /// <summary>Asserts every connection was opened and disposed, and every command's reader was disposed and asked for
+    /// one further result set.</summary>
     private static void CheckCompleted(SourceProbe probe, int connections, int commands)
     {
         Assert.Equal(connections, probe.Connections.Count);
@@ -891,14 +960,17 @@ public sealed class ExampleCatalogTests
         Assert.Equal(commands, probe.NextResults);
     }
 
+    /// <summary>Fails if <paramref name="text"/> contains either secret value.</summary>
     private static void SafeText(string text)
     {
         Assert.False(text.Contains(SecretObject, StringComparison.Ordinal), "Private object leaked.");
         Assert.False(text.Contains(SecretConnection, StringComparison.Ordinal), "Private connection leaked.");
     }
 
+    /// <summary>A cell value whose text form throws, to prove a mapping error never formats the cell.</summary>
     private sealed class Poison
     {
+        /// <summary>Throws.</summary>
         public override string ToString() => throw new InvalidOperationException("Cell must not be formatted.");
     }
 }

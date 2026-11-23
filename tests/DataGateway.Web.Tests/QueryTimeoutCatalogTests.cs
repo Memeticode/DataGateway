@@ -17,12 +17,23 @@ using static DataGateway.Web.Tests.CatalogEngineTests;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the per-source query timeout: each source's <c>query_timeout_seconds</c> in the catalog sets its
+/// deadline, its command timeout and the number its timeout message names.</summary>
+/// <remarks>The value is a required integer from 1 through 86400. A bad cell is refused with one safe correction that
+/// names the source and the column, never the cell's text; callers see InternalError while the log carries the
+/// correction. The host's old global timeout setting is refused, so a stale configuration cannot silently stop
+/// applying.</remarks>
 public sealed class QueryTimeoutCatalogTests
 {
+    /// <summary>The source name every refusal must name.</summary>
     private const string Requested = "requested_source";
+    /// <summary>The catalog path of the timeout value in a refusal.</summary>
     private const string Path = "$.detail.rows.source.queryTimeoutSeconds";
+    /// <summary>The one correction every timeout refusal carries.</summary>
     private const string Correction = "Source 'requested_source'. Set query_timeout_seconds to an integer from 1 through 86400.";
 
+    /// <summary>Two sources served by one shared runner each keep their own deadline: the one-second source times out
+    /// while the thirty-second source, run at the same time, succeeds.</summary>
     [Fact]
     public async Task T1_two_sources_share_a_runner_and_keep_independent_deadlines()
     {
@@ -74,6 +85,8 @@ public sealed class QueryTimeoutCatalogTests
         Assert.Equal($"The query ran longer than the {seconds}-second command timeout and was stopped. Narrow the query once (filters, an aggregate or fewer rows) and say what you narrowed; if it times out again, tell the user, give the incidentId and stop.", result.Failure.Message);
     }
 
+    /// <summary>Timeout cells the catalog reader must refuse: missing, null, out of range, text, fractional, boolean,
+    /// integers beyond <see cref="int"/> and an enum.</summary>
     public static IEnumerable<object?[]> InvalidCells()
     {
         yield return ["missing", null];
@@ -83,6 +96,9 @@ public sealed class QueryTimeoutCatalogTests
             yield return ["value", value];
     }
 
+    /// <summary>The reader refuses a bad timeout with its own exception type carrying no inner exception or data, the
+    /// gateway turns it into the safe correction, and a cancelled caller still gets CatalogCancelled.</summary>
+    /// <remarks>Carrying nothing but the correction keeps a planted cell's text out of answers and logs.</remarks>
     [Theory]
     [MemberData(nameof(InvalidCells))]
     public async Task T3_reader_refusal_is_typed_and_gateway_retains_only_safe_context(string kind, object? value)
@@ -105,6 +121,8 @@ public sealed class QueryTimeoutCatalogTests
         Assert.Equal("CatalogCancelled", (await cancellationWins.SourceAsync(Requested, cancel.Token)).Failure!.Code);
     }
 
+    /// <summary>An app-supplied catalog detail is validated with the same range and correction as a read one, and an
+    /// in-range value reaches the source contract.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -134,6 +152,8 @@ public sealed class QueryTimeoutCatalogTests
         }
     }
 
+    /// <summary>The reader accepts the same integer cell types for the timeout as for the row cap, including the small
+    /// types when the provider reports them.</summary>
     [Theory]
     [InlineData(1)]
     [InlineData(86400)]
@@ -153,6 +173,7 @@ public sealed class QueryTimeoutCatalogTests
         }
     }
 
+    /// <summary>Validation reports the timeout right after the row cap, so failures come in a fixed order.</summary>
     [Fact]
     public void T3_detail_checks_timeout_immediately_after_row_cap()
     {
@@ -161,6 +182,8 @@ public sealed class QueryTimeoutCatalogTests
         Assert.Equal(Correction, failures[1].Message);
     }
 
+    /// <summary>A bad timeout answers InternalError to the caller, while the one log line carries InvalidCatalog with
+    /// the correction, the catalog step and the source name, and no trace of the cell's text.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -193,6 +216,9 @@ public sealed class QueryTimeoutCatalogTests
         Assert.DoesNotContain("planted confidential cell", body + string.Join("\n", host.AllLines().Select(l => l.GetRawText())));
     }
 
+    /// <summary>The removed host setting <c>DataGateway:Limits:CommandTimeoutSeconds</c> stops startup with any value,
+    /// from configuration or the environment, and the message points to each source's
+    /// <c>query_timeout_seconds</c>.</summary>
     [Theory]
     [InlineData(false, "41")]
     [InlineData(true, "41")]
@@ -230,6 +256,9 @@ public sealed class QueryTimeoutCatalogTests
         }
     }
 
+    /// <summary>The example catalogs' constructor timeout (15 seconds by default) is the command timeout of both
+    /// catalog reads, on SQL Server and PostgreSQL.</summary>
+    /// <remarks>This timeout bounds catalog reads only; source queries use each source's own value.</remarks>
     [Theory]
     [InlineData(false, 15)]
     [InlineData(false, 60)]
@@ -254,18 +283,27 @@ public sealed class QueryTimeoutCatalogTests
         Assert.All(probe.Commands, command => Assert.Equal(seconds, command.CommandTimeout));
     }
 
+    /// <summary>An engine whose source read is a test-supplied function, so a test can see the command timeout the
+    /// runner passes and fail the read on cue.</summary>
     private sealed class TimeoutEngine : DataGateway.Data.IDatabaseEngine
     {
+        /// <summary>The SQL Server provider name.</summary>
         public string ProviderName => "sqlserver";
+        /// <summary>Compiles with the SQL Server engine.</summary>
         public CompiledQuery Compile(ValidatedQuery query) => new SqlServerEngine().Compile(query);
+        /// <summary>Accepts every connection.</summary>
         public void ValidateSourceConnection(string? connection) { }
+        /// <summary>Recognizes nothing as a provider failure.</summary>
         public DataGateway.Data.ProviderFailure? RecognizeFailure(Exception error) => null;
+        /// <summary>The source read to run, with the same arguments as <see cref="ReadSourceAsync"/>.</summary>
         internal Func<string, CompiledQuery, int, Action, Func<IAsyncEnumerable<IDictionary<string, object?>>, Task<QueryRows>>, CancellationToken, Task<QueryRows>> Execute = null!;
+        /// <summary>Runs <see cref="Execute"/>.</summary>
         public Task<QueryRows> ReadSourceAsync(string connection, CompiledQuery query, int commandTimeoutSeconds,
             Action opened, Func<IAsyncEnumerable<IDictionary<string, object?>>, Task<QueryRows>> consume, CancellationToken cancellationToken) =>
             Execute(connection, query, commandTimeoutSeconds, opened, consume, cancellationToken);
     }
 
+    /// <summary>An app-supplied catalog detail for the requested source with the given timeout and row cap.</summary>
     private static CatalogDetail Detail(int seconds, int rowCap = 500) => new("sqlserver", new CatalogRows(
         new DataSourceRow("dbo.synthetic", "Server=synthetic;Database=synthetic")
         {
@@ -273,6 +311,8 @@ public sealed class QueryTimeoutCatalogTests
             IsActive = true, RowCap = rowCap, QueryTimeoutSeconds = seconds
         }, [new("id", 1, "Id", "Synthetic", "number", null, null, null, true, true, true, true, true)]));
 
+    /// <summary>Asserts the safe timeout refusal: InvalidCatalog at the timeout's path with the correction, the catalog
+    /// step and the source name, and no driver exception or exception type.</summary>
     private static void SafeFailure(CatalogFailure failure)
     {
         Assert.Equal("InvalidCatalog", failure.Code);

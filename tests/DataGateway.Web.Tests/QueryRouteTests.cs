@@ -24,15 +24,33 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the example host's <c>POST /query</c> route end to end: request parsing, validation against the
+/// source's catalog, compilation, the row cap, failures and cancellation.</summary>
+/// <remarks>
+/// <para>Each failure answers one JSON error (code, path, message, incident ID) and writes exactly one log line;
+/// neither the answer nor any log line may carry connection text, the source's real object name or a driver's
+/// message. A body that cannot be parsed is refused before the catalog is read, and a refused query before the source
+/// is run.</para>
+/// <para>A caller who leaves gets no answer written; the run is cancelled and logged as a warning.</para>
+/// </remarks>
 public sealed class QueryRouteTests
 {
+    /// <summary>A synthetic source connection to a port nothing listens on, with planted credentials.</summary>
     private const string SourceConnection = "Server=tcp:127.0.0.1,1;Database=Synthetic;User ID=fake-query-reader;Password=fake-query-password;Encrypt=False;Pooling=False;Connect Timeout=1;ConnectRetryCount=0";
+    /// <summary>A synthetic catalog connection with the same planted credentials.</summary>
     private const string Connection = "Server=tcp:127.0.0.1,1;Database=Catalog;User ID=fake-query-reader;Password=fake-query-password;Encrypt=False;Pooling=False";
+    /// <summary>The message for a body that is not valid JSON.</summary>
     private const string M1 = "The request body is not valid JSON. Send {\"source\": \"<name>\", \"query\": {...}} with a name from list sources.";
+    /// <summary>The message for a body that is not exactly one source and one query.</summary>
     private const string M2 = "Send a JSON object with exactly two properties, source and query: {\"source\": \"<name>\", \"query\": {...}}. Take the name from list sources and the query vocabulary from describe source.";
+    /// <summary>The message for a source that is not a JSON string.</summary>
     private const string M3 = "source must be a JSON string: the name of a source from list sources.";
+    /// <summary>The InternalError message, which names no detail of the fault.</summary>
     private const string M4 = "DataGateway could not complete the request because of a fault on its side, not in the request. Contact the DataGateway administrator. Tell the user, give the incidentId and stop; do not retry.";
 
+    /// <summary>A plain and a grouped query each answer the exact JSON (catalog column names, text escaping, decimal
+    /// scale), run the same SQL and parameters the library compiles, match the source name ignoring case, and the
+    /// route accepts only POST.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -65,6 +83,8 @@ public sealed class QueryRouteTests
         AssertLogSafe(logs);
     }
 
+    /// <summary>The route fetches one row past the effective limit (the request's limit or the source's cap), keeps
+    /// at most the limit, sets <c>more</c> and the matching hint, and answers the same over HTTP and MCP.</summary>
     [Theory]
     [InlineData(1, 2, 1, true, 2)]
     [InlineData(1, 1, 1, false, 2)]
@@ -105,6 +125,9 @@ public sealed class QueryRouteTests
         Assert.Empty(logs.Errors);
     }
 
+    /// <summary>A refusal never shows a pattern value in its escaped form.</summary>
+    /// <remarks>The SQL Server engine escapes a literal underscore as <c>[_]</c>; that form is internal and must not
+    /// leak into an answer, even when the refusal comes from another filter.</remarks>
     [Fact]
     public async Task T11_like_refusal_does_not_echo_bracketed_value()
     {
@@ -126,6 +149,9 @@ public sealed class QueryRouteTests
         Assert.DoesNotContain("[_]", McpWire.Text(tool));
     }
 
+    /// <summary>A body that is not one JSON object with exactly the members <c>source</c> and <c>query</c>, spelled
+    /// exactly and each once, with a string source, is refused at the request step before the catalog is
+    /// read.</summary>
     [Theory]
     [InlineData("", "InvalidJson", "$")]
     [InlineData("/*x*/{}", "InvalidJson", "$")]
@@ -149,6 +175,7 @@ public sealed class QueryRouteTests
     [InlineData("{\"source\":{},\"query\":{}}", "InvalidStructure", "$.source")]
     public Task T12_malformed(string text, string code, string path) => BadBody(Encoding.UTF8.GetBytes(text), code, path);
 
+    /// <summary>Invalid UTF-8 inside a value is InvalidJson; inside a member name it is InvalidStructure.</summary>
     [Fact]
     public async Task T12_invalid_utf8()
     {
@@ -157,6 +184,7 @@ public sealed class QueryRouteTests
             await BadBody([.. Encoding.UTF8.GetBytes(prefix), 255,254, .. Encoding.UTF8.GetBytes(suffix)],code,"$");
     }
 
+    /// <summary>A query that is not a JSON object is refused by the query library itself, at <c>$.query</c>.</summary>
     [Theory]
     [InlineData("[]")]
     [InlineData("null")]
@@ -164,6 +192,10 @@ public sealed class QueryRouteTests
     [InlineData("5")]
     public Task T12_library_judges_root(string query) => Refused(query, "InvalidJson", "$.query", "The query must be one JSON object whose only members are select, filters, group_by, aggregates, order_by and limit, each used once and with the type querySchema shows. Correct it against querySchema from describe source.");
 
+    /// <summary>The query's raw length limit is exact, a repeated member is refused, and a query nested 64 deep is
+    /// judged by the library while one nested 65 deep is refused as invalid JSON at the body.</summary>
+    /// <remarks>The body parser allows one level more than the library's depth of 64, for the wrapping body object,
+    /// so it never refuses a query the library would judge.</remarks>
     [Fact]
     public async Task T13_raw_length_duplicates_and_depth()
     {
@@ -187,6 +219,8 @@ public sealed class QueryRouteTests
         await BadBody(Encoding.UTF8.GetBytes(Body(deep65)),"InvalidJson","$");
     }
 
+    /// <summary>One query for each refusal the query library can give, with its code, path and message, and which
+    /// structural limit to lower for it (-1 for none; 0 list values, 1 conditions, 2 filter depth).</summary>
     public static IEnumerable<object[]> Refusals()
     {
         yield return ["{\"select\":[\"missing\"]}", "UnknownColumn", "$.query.select[0]", "The column at path is not a queryable column of this source. Use a column from describe source whose flag for this clause is true.", -1];
@@ -210,12 +244,17 @@ public sealed class QueryRouteTests
         yield return ["{\"select\":null}", "InvalidStructure", "$.query.select", "The member at path is null, an empty filter group, or not the list or value querySchema expects there. Correct it against querySchema from describe source.", -1];
     }
 
+    /// <summary>Every library refusal reaches the caller with the library's own code and path, rooted at
+    /// <c>$.query</c>, and the gateway's message, after one catalog read and no source run.</summary>
     [Theory]
     [MemberData(nameof(Refusals))]
     public Task T14_all_library_refusals(string query, string code, string path, string message, int structural) =>
         Refused(query, code, path, message, structural < 0 ? null : new Dictionary<string,string?>
         { [structural switch { 0 => "DataGateway:Limits:MaxInValues", 1 => "DataGateway:Limits:MaxFilterConditions", _ => "DataGateway:Limits:MaxFilterDepth" }] = structural == 2 ? "1" : "2" });
 
+    /// <summary>Each catalog failure gives its public answer, never runs the source, and writes one log line with the
+    /// internal code: an unknown or inactive source lists the active names, a catalog with no usable column or a
+    /// cancelled catalog read answers InternalError.</summary>
     [Theory]
     [InlineData("unknown",404,"UnknownSource","$.source")]
     [InlineData("inactive",404,"UnknownSource","$.source")]
@@ -260,6 +299,9 @@ public sealed class QueryRouteTests
         AssertSafe(body); AssertLogSafe(logs);
     }
 
+    /// <summary>Each source failure gives its public answer and one log line with the step it failed at; a bad stored
+    /// connection or an object name that is not a safe identifier answers InternalError and is logged as
+    /// InvalidCatalog.</summary>
     [Theory]
     [InlineData("driver",503,"SourceUnavailable","$.source","connect")]
     [InlineData("timeout",504,"QueryTimeout","$.query","command")]
@@ -289,6 +331,8 @@ public sealed class QueryRouteTests
         Assert.DoesNotContain("bad name; DROP",body+logs.Text);
     }
 
+    /// <summary>A caller who leaves before or while the body is read gets nothing written, the catalog is not read and
+    /// nothing is logged.</summary>
     [Theory]
     [InlineData("pre")]
     [InlineData("io")]
@@ -314,6 +358,9 @@ public sealed class QueryRouteTests
         Assert.Empty(logs.Errors);
     }
 
+    /// <summary>A caller who leaves during the catalog read, the run, after the run, after the catalog or while the
+    /// answer is written gets nothing written; each stage but the write logs one cancellation warning with its
+    /// code.</summary>
     [Theory]
     [InlineData("catalog")]
     [InlineData("run")]
@@ -375,6 +422,8 @@ public sealed class QueryRouteTests
         AssertLogSafe(logs);
     }
 
+    /// <summary>An HTTP client that aborts its request cancels the running query, which is logged once as a
+    /// QueryCancelled warning.</summary>
     [Fact]
     public async Task T18_http_abort_reaches_runner()
     {
@@ -403,6 +452,8 @@ public sealed class QueryRouteTests
         Assert.Equal(LogLevel.Warning, Assert.Single(logs.Levels));
     }
 
+    /// <summary>Two queries running at once each read the catalog, compile their own query and get their own
+    /// rows.</summary>
     [Fact]
     public async Task T19_concurrent_queries_are_independent()
     {
@@ -442,6 +493,8 @@ public sealed class QueryRouteTests
         "{\"select\":[\"region\"],\"limit\":8}", "StructuralLimitExceeded", "$.query.limit",
         "The query is over a configured limit: limit 8 exceeds the maximum of 7. Ask for no more rows than the maximum, or leave limit out to get the first rows, with more set to true when rows were left out.");
 
+    /// <summary>Markup or SQL written into a query's member names or values may appear in the refusal's path, which
+    /// names where the problem is, but never in its message.</summary>
     [Theory]
     [InlineData("{\"filters\":[{\"col\":\"region\",\"op\":\"eq\",\"value\":\"x\",\"<img src=x onerror=alert(1)>\":1}]}", "InvalidJson", "$.query.filters[0].<img src=x onerror=alert(1)>", "The member at path is unknown, repeated, missing its col or op, combines and with or, or is not the JSON type querySchema expects. Correct it against querySchema from describe source.")]
     [InlineData("{\"x'; DROP TABLE t; --\":1,\"x'; DROP TABLE t; --\":2}", "InvalidJson", "$.query.x'; DROP TABLE t; --", "The query must be one JSON object whose only members are select, filters, group_by, aggregates, order_by and limit, each used once and with the type querySchema shows. Correct it against querySchema from describe source.")]
@@ -449,6 +502,8 @@ public sealed class QueryRouteTests
     public Task T16_hostile_query_text_stays_only_in_the_path(string query, string code, string path, string message) =>
         Refused(query, code, path, message);
 
+    /// <summary>Asserts that <paramref name="bytes"/> as a body are refused with the given code and path at the request
+    /// step, before the catalog is read.</summary>
     private static async Task BadBody(byte[] bytes,string code,string path)
     {
         using var settings = new SettingsScope();
@@ -468,6 +523,13 @@ public sealed class QueryRouteTests
         AssertSafe(body); AssertLogSafe(logs);
     }
 
+    /// <summary>Asserts that <paramref name="query"/> is refused exactly as the query library refuses it, with the
+    /// gateway's message, one catalog read, no source run and one log line at the query step.</summary>
+    /// <param name="query">The query object to send.</param>
+    /// <param name="code">The refusal code the library assigns.</param>
+    /// <param name="path">The JSON path the refusal names.</param>
+    /// <param name="message">The message the caller must receive.</param>
+    /// <param name="limits">Host settings that lower a structural limit for this query.</param>
     private static async Task Refused(string query,string code,string path,string message,IDictionary<string,string?>? limits=null)
     {
         using var settings = new SettingsScope();
@@ -497,6 +559,8 @@ public sealed class QueryRouteTests
         AssertSafe(body); AssertLogSafe(logs);
     }
 
+    /// <summary>Asserts an error answer's status, code, path, member order and, when given, message.</summary>
+    /// <returns>The answer's text.</returns>
     private static async Task<string> Error(HttpResponseMessage response,int status,string code,string path,string? message=null)
     {
         Assert.Equal(status,(int)response.StatusCode);
@@ -508,11 +572,18 @@ public sealed class QueryRouteTests
         return text;
     }
 
+    /// <summary>A request body for <paramref name="query"/> on <paramref name="source"/>.</summary>
     private static string Body(string query,string source="synthetic_sales") => "{\"source\":"+JsonSerializer.Serialize(source)+",\"query\":"+query+"}";
+    /// <summary>Posts <paramref name="query"/> to the route.</summary>
     private static Task<HttpResponseMessage> Post(HttpClient client,string query,string source="synthetic_sales") => client.PostAsync("/query",new StringContent(Body(query,source)));
+    /// <summary>A client for the host's one listening address.</summary>
     private static HttpClient Client(WebApplication app) => new() { BaseAddress = new Uri(Assert.Single(app.Urls)) };
+    /// <summary>A SQL Server engine whose source read reports the connection open and then runs
+    /// <paramref name="run"/>.</summary>
     private static IDatabaseEngine Engine(Func<CompiledQuery,CancellationToken,Task<IReadOnlyList<dynamic>>> run) =>
         FakeRows.Engine(new SqlServerEngine(), FakeRows.From((_,query,opened,token) => { opened(); return run(query,token); }));
+    /// <summary>A catalog that lists the synthetic source and serves its detail through <paramref name="read"/>, with
+    /// fixed startup reads.</summary>
     private static HostCatalogState Catalog(RecordedLogs logs, Func<string,CancellationToken,Task<(IReadOnlyList<dynamic> Rows,IReadOnlyList<dynamic> Available)>>? read = null)
     {
         var selected = read ?? ((string _, CancellationToken _) => Batch(Rows()));
@@ -521,8 +592,11 @@ public sealed class QueryRouteTests
         catalog.StartupDetail = (name, _) => Task.FromResult<CatalogDetail?>(CatalogTableReader.MapDetail(Rows(), "sqlserver", true));
         return catalog;
     }
+    /// <summary>The given rows as a completed read.</summary>
     private static Task<IReadOnlyList<dynamic>> Data(params Dictionary<string,object?>[] rows) => Task.FromResult<IReadOnlyList<dynamic>>(rows);
+    /// <summary>The given detail rows, with no available-source list, as a completed read.</summary>
     private static Task<(IReadOnlyList<dynamic> Rows,IReadOnlyList<dynamic> Available)> Batch(IReadOnlyList<dynamic> rows) => Task.FromResult<(IReadOnlyList<dynamic>,IReadOnlyList<dynamic>)>((rows,[]));
+    /// <summary>The synthetic source's joined catalog rows, one per column, with a cap of 7.</summary>
     private static Dictionary<string,object?>[] Rows(string objectName="hidden_schema.order_lines",string connection=SourceConnection) => Columns().Select(c => new Dictionary<string,object?>
     {
         ["id"] = 7319, ["object_name"] = objectName, ["connection_string"] = connection, ["name"] = "synthetic_sales", ["title"] = "Synthetic sales", ["description"] = "Invented lines", ["grain"] = "One line", ["row_cap"] = 7, ["query_timeout_seconds"] = 1,
@@ -530,6 +604,8 @@ public sealed class QueryRouteTests
         ["unit"] = null, ["magnitude"] = null, ["display_format"] = null,
         ["can_select"] = c.CanSelect, ["can_filter"] = c.CanFilter, ["can_sort"] = c.CanSort, ["can_group"] = c.CanGroup, ["can_aggregate"] = c.CanAggregate
     }).ToArray();
+    /// <summary>The synthetic source's columns, each with a different set of permissions, including one that is not
+    /// queryable at all.</summary>
     private static DataSourceColumnRow[] Columns() => [
         new("region",1,"Region","Invented region","text",null,null,null,true,true,true,true,true),
         new("OrderDay",2,"Day","Invented day","date",null,null,null,true,true,true,true,true),
@@ -537,9 +613,14 @@ public sealed class QueryRouteTests
         new("is_return",4,"Return","Invented return","bool",null,null,null,true,true,false,true,false),
         new("note",5,"Note","Invented note","text",null,null,null,true,false,false,false,false),
         new("internal_code",6,"Internal","Invented internal","text",null,null,null,false,false,false,false,false) ];
+    /// <summary>The synthetic source's contract, for computing what the library expects.</summary>
     private static SourceContract Contract() => CatalogMapping.Map(new(new DataSourceRow("hidden_schema.order_lines",SourceConnection)
         { QueryTimeoutSeconds = 30, Id = 7319, Name="synthetic_sales",Title="Synthetic sales",Description="Invented lines",Grain="One line",RowCap = 7, IsActive =true },Columns())).Value;
 
+    /// <summary>The example host with synthetic sign-in, the given catalog, engine and settings, on a free loopback
+    /// port.</summary>
+    /// <remarks>With no catalog, the detail is read through the real SQL Server catalog against a closed port, so the
+    /// driver's own failure is tested.</remarks>
     private static WebApplication Host(RecordedLogs logs, HostCatalogState? catalog, IDatabaseEngine? engine, IDictionary<string,string?>? settings = null)
     {
         if (catalog is null)
@@ -565,6 +646,7 @@ public sealed class QueryRouteTests
         return app;
     }
 
+    /// <summary>A request context with a valid query body, the given abort token and response stream.</summary>
     private static DefaultHttpContext Context(CancellationToken token,Stream response)
     {
         var context = new DefaultHttpContext { RequestAborted=token };
@@ -572,16 +654,23 @@ public sealed class QueryRouteTests
         context.Response.Body=response;
         return context;
     }
+    /// <summary>A request body whose read aborts the request and then fails with an I/O, JSON or cancellation
+    /// error.</summary>
     private sealed class CancellingStream(CancellationTokenSource abort,string kind) : MemoryStream
     {
+        /// <summary>Aborts the request and throws the chosen error.</summary>
         public override ValueTask<int> ReadAsync(Memory<byte> buffer,CancellationToken cancellationToken=default)
         { abort.Cancel(); throw kind switch { "json" => new JsonException("fake-input-secret"), "cancelled" => new OperationCanceledException("fake-input-secret"), _ => new IOException("fake-input-secret") }; }
     }
+    /// <summary>A response stream whose write aborts the request and then fails.</summary>
     private sealed class AbortedWriteStream(CancellationTokenSource abort) : MemoryStream
     {
+        /// <summary>Aborts the request and throws.</summary>
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer,CancellationToken cancellationToken=default)
         { abort.Cancel(); throw new IOException("fake-driver-secret"); }
     }
+    /// <summary>A driver-style exception of the named kind, each carrying a planted marker that must never be
+    /// shown.</summary>
     private static Exception DriverFailure(string kind) => kind switch
     {
         "pool" => new InvalidOperationException("fake-driver-secret"),
@@ -597,6 +686,7 @@ public sealed class QueryRouteTests
         _ => throw new ArgumentOutOfRangeException(nameof(kind))
     };
 
+    /// <summary>Asserts a JSON error answer with exactly code, path, message and incident ID.</summary>
     private static void AssertError(HttpResponseMessage response, string text, string code, string path)
     {
         Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
@@ -608,6 +698,8 @@ public sealed class QueryRouteTests
         Assert.False(string.IsNullOrWhiteSpace(json.RootElement.GetProperty("message").GetString()));
     }
 
+    /// <summary>The log scan catches a password or an unrecognized connection keyword in an ordinary log entry, and
+    /// its own failure message does not print the planted value.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -621,6 +713,7 @@ public sealed class QueryRouteTests
         Assert.False(failure.Message.Contains(planted, StringComparison.Ordinal), "Log scan printed a planted value.");
     }
 
+    /// <summary>The log scan catches a driver's planted marker in an ordinary log entry without printing it.</summary>
     [Fact]
     public void AssertLogSafe_catches_diagnostic_marker_in_non_failure_entries()
     {
@@ -632,6 +725,8 @@ public sealed class QueryRouteTests
         Assert.False(failure.Message.Contains(planted, StringComparison.OrdinalIgnoreCase), "Log scan printed a planted value.");
     }
 
+    /// <summary>Asserts that no log entry, and no failure line's fields, carry connection text or a planted
+    /// marker.</summary>
     private static void AssertLogSafe(RecordedLogs logs)
     {
         var scan = LeakScan.Synthetic(("route catalog", Connection), ("route source", SourceConnection));
@@ -641,6 +736,8 @@ public sealed class QueryRouteTests
             scan.LogLine("query line", JsonSerializer.SerializeToElement(new Dictionary<string, object?>(fields) { ["SourceContext"] = FailureLog.Category }));
     }
 
+    /// <summary>Asserts that <paramref name="text"/> carries no connection text, server address, planted marker or the
+    /// source's real object name.</summary>
     private static void AssertSafe(string text)
     {
         LeakScan.Synthetic(("route catalog", Connection), ("route source", SourceConnection)).Text("route body and logs", text, Rule.Foreign);
@@ -648,11 +745,16 @@ public sealed class QueryRouteTests
             Assert.True(!text.Contains(marker, StringComparison.OrdinalIgnoreCase), "Diagnostic marker found in route output.");
     }
 
+    /// <summary>Isolates a test from the machine's settings: points user secrets at a scratch folder, sets the catalog
+    /// connection, clears every limit variable, and restores all of it afterwards.</summary>
     private sealed class SettingsScope : IDisposable
     {
+        /// <summary>Each changed variable's value before the scope.</summary>
         private readonly Dictionary<string, string?> original = new();
+        /// <summary>The scratch folder for user secrets, removed on dispose.</summary>
         private readonly string scratch = TestFiles.InRepo("tests/DataGateway.Web.Tests/obj/query-settings/" + Guid.NewGuid());
 
+        /// <summary>Applies the isolated settings.</summary>
         public SettingsScope()
         {
             Directory.CreateDirectory(scratch);
@@ -662,12 +764,14 @@ public sealed class QueryRouteTests
                 Set("DataGateway__Limits__" + name, null);
         }
 
+        /// <summary>Sets a variable, remembering its first original value.</summary>
         private void Set(string key, string? value)
         {
             original.TryAdd(key, Environment.GetEnvironmentVariable(key));
             Environment.SetEnvironmentVariable(key, value);
         }
 
+        /// <summary>Restores every variable and removes the scratch folder.</summary>
         public void Dispose()
         {
             foreach (var pair in original) Environment.SetEnvironmentVariable(pair.Key, pair.Value);
@@ -675,23 +779,39 @@ public sealed class QueryRouteTests
         }
     }
 
+    /// <summary>A log provider that keeps every entry, and the structured fields of every warning or error.</summary>
     private sealed class RecordedLogs : ILoggerProvider
     {
+        /// <summary>Every entry: category, level and formatted text.</summary>
         private readonly ConcurrentQueue<(string Category, LogLevel Level, string Text)> entries = new();
+        /// <summary>The structured fields of each warning or error.</summary>
         private readonly ConcurrentQueue<Dictionary<string, object?>> errorFields = new();
+        /// <summary>Every entry.</summary>
         public IEnumerable<(string Category, LogLevel Level, string Text)> Entries => entries;
+        /// <summary>The structured fields of each warning or error.</summary>
         public IEnumerable<Dictionary<string, object?>> ErrorFields => errorFields;
+        /// <summary>The text of each warning or error.</summary>
         public IEnumerable<string> Errors => entries.Where(entry => entry.Level >= LogLevel.Warning).Select(entry => entry.Text);
+        /// <summary>The level of each warning or error.</summary>
         public IEnumerable<LogLevel> Levels => entries.Where(entry => entry.Level >= LogLevel.Warning).Select(entry => entry.Level);
+        /// <summary>Every entry's text, one per line.</summary>
         public string Text => string.Join("\n", entries.Select(entry => entry.Text));
+        /// <summary>A logger for <paramref name="categoryName"/> that records into this provider.</summary>
         public ILogger CreateLogger(string categoryName) => new Recorder(categoryName, entries, errorFields);
+        /// <summary>Nothing to release.</summary>
         public void Dispose() { }
 
+        /// <summary>A logger that records each entry and fails the test if an exception is logged.</summary>
+        /// <remarks>The gateway logs an exception's type name, never the exception, which can carry driver
+        /// details.</remarks>
         private sealed class Recorder(string category, ConcurrentQueue<(string Category, LogLevel Level, string Text)> entries,
             ConcurrentQueue<Dictionary<string, object?>> errorFields) : ILogger
         {
+            /// <summary>No scopes.</summary>
             public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            /// <summary>Every level is enabled.</summary>
             public bool IsEnabled(LogLevel logLevel) => true;
+            /// <summary>Records the entry, and the structured fields of a warning or error.</summary>
             public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
                 Func<TState, Exception?, string> formatter)
             {

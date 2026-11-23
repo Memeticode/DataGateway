@@ -1,8 +1,25 @@
 namespace DataGateway.Web.Tests;
 
+/// <summary>The recorded bytes of every error answer on the wire, keyed by case and channel: the JSON route, the MCP
+/// tool, and the refusals at the query and <c>/mcp</c> endpoints before routing.</summary>
+/// <remarks>
+/// <para>Error text is part of the contract: models and scripts read the code, path and message. Comparing whole
+/// bodies byte for byte makes any change of wording, field order or status a deliberate one. Incident ids are written
+/// as <c>INCIDENT</c>.</para>
+/// <para>The table is the recorded baseline. Where behaviour changed on purpose since, <see cref="WireGoldenTests"/>
+/// states the change next to the comparison instead of rewriting the entry.</para>
+/// </remarks>
 internal static class WireGolden
 {
+    /// <summary>One recorded answer.</summary>
+    /// <param name="Status">The HTTP status.</param>
+    /// <param name="Body">The route's raw body; empty for a tool case.</param>
+    /// <param name="IsError">The tool result's <c>isError</c>; null for a route case.</param>
+    /// <param name="Text">The tool result's text blocks in order; empty for a route case.</param>
     internal sealed record Entry(int Status, string Body, bool? IsError, string[] Text);
+    /// <summary>Every case, keyed <c>Kind/route</c>, <c>Kind/tool</c>, <c>Kind/query</c> or <c>Kind/mcp</c>.</summary>
+    /// <remarks>Unexpected errors on the tool add a second text block that tells the calling model what to do; the
+    /// error body itself says no more than on HTTP.</remarks>
     internal static readonly Dictionary<string, Entry> Cases = new()
     {
         ["InvalidStructure/route"] = new(400, "{\"code\":\"InvalidStructure\",\"path\":\"$\",\"message\":\"Send a JSON object with exactly two properties, source and query: {\\\"source\\\": \\\"<name>\\\", \\\"query\\\": {...}}. Take the name from list sources and the query vocabulary from describe source.\",\"incidentId\":\"INCIDENT\"}", null, []),

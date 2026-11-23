@@ -2,8 +2,11 @@ using DataGateway.Core.Catalog;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>The MCP metadata the test catalogs return unless a test sets its own: a server title, an about text and
+/// the presentation text of the three tools.</summary>
 internal static class McpMetadataFixture
 {
+    /// <summary>A fresh copy of the seed metadata, so a test can change it with <c>with</c> without touching others.</summary>
     internal static McpMetadata Seed => new("DataGateway", "Read-only access to cataloged data sources.",
     [
         new("list_sources", "List sources", """No source named? See all data sources and what each holds. Takes no arguments and returns {"sources":[...]}: each active source's name, title, description, grain (what one row represents) and rowCap (maximum rows per query). Pick the source whose description and grain fit the question, then call describe_source with its name."""),

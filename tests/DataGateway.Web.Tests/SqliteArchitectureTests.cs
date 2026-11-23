@@ -11,11 +11,20 @@ using Xunit.Abstractions;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Where the tests-only SQLite engine may appear: its project depends only on the data layer and one pinned
+/// SQLite package, no product project references it, and no product restore graph contains SQLite.</summary>
+/// <remarks>The engine exists to prove that a new database fits through the public engine contract alone. If it used
+/// internals, reflection or another engine, or if a product picked it up, it would prove nothing and could ship by
+/// accident.</remarks>
 public sealed class SqliteArchitectureTests(ITestOutputHelper output)
 {
+    /// <summary>True when a project, package or file name mentions SQLite in any case.</summary>
     private static bool SqliteName(string name) =>
         name.Contains("sqlite", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>The engine implements exactly the five public engine members; its project has one project reference,
+    /// one exactly pinned package and nothing publishable or packable; only tests and samples reference it; and its
+    /// source uses no internals, reflection, SQL Server types, Dapper or stub exceptions.</summary>
     [Fact]
     public void T1_project_seam_solution_and_incoming_reference_boundary()
     {
@@ -56,6 +65,9 @@ public sealed class SqliteArchitectureTests(ITestOutputHelper output)
         }
     }
 
+    /// <summary>No product project's restore graph contains a SQLite package, and the lower layers carry no SQL Server
+    /// driver and only the pinned Dapper packages the data layer uses.</summary>
+    /// <remarks>Reads the restore output, so it needs a restore first and fails with that message otherwise.</remarks>
     [Fact]
     public void T1_every_product_restored_target_and_library_excludes_sqlite()
     {
@@ -85,6 +97,10 @@ public sealed class SqliteArchitectureTests(ITestOutputHelper output)
         Assert.False(SqliteName("System.Memory"));
     }
 
+    /// <summary>The engine's lock file pins the SQLite package exactly, its graph holds no other engine or ORM, and the
+    /// native SQLite library loads for this runtime and answers a query.</summary>
+    /// <remarks>The smoke query catches a missing or suppressed native asset, which compiles fine and fails only at
+    /// run time.</remarks>
     [Fact]
     public async Task T11_locked_graph_and_unsuppressed_native_provider_smoke()
     {

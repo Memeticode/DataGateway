@@ -23,12 +23,27 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the failure log: every failed request writes exactly one structured record with a fixed field set,
+/// the incident id the caller was given, the request text (bounded), the compiled SQL and its parameters, and never a
+/// connection string or driver message.</summary>
+/// <remarks>
+/// <para>TERM failure record: one log event in the <c>DataGateway.Failure</c> category, written as a JSON line to the
+/// error log file. A caller who reports an incident id lets an operator find its record.</para>
+/// <para>The static helpers here (<see cref="Catalog"/>, <see cref="Engine"/>, <see cref="Contract"/> and friends)
+/// build the synthetic one-source catalog that many other test classes reuse.</para>
+/// </remarks>
 public sealed class ErrorLogTests
 {
+    /// <summary>The fake source connection stored in the synthetic catalog; its user and password markers must never
+    /// appear in a log.</summary>
     internal const string SourceConnection = "Server=tcp:127.0.0.1,1;Database=Synthetic;User ID=fake-log-source-user;Password=fake-log-source-password;Encrypt=false;Pooling=false;Connect Timeout=1;ConnectRetryCount=0";
+    /// <summary>The failure record's fields, in their fixed order.</summary>
     internal static readonly string[] Fields = ["IncidentId", "Caller", "Operation", "Request", "RequestBytes", "RequestCut", "Sql", "SqlParameters", "Code", "Path", "Message", "ExceptionType", "SqlNumber", "Step", "ReturnedCode", "SourceId", "SourceName", "DriverMessage", "ExceptionText"];
+    /// <summary>Every incident id seen by <see cref="Check"/> in this test run, to prove no id repeats.</summary>
     private static readonly ConcurrentDictionary<string, byte> Incidents = new(StringComparer.Ordinal);
 
+    /// <summary>Each kind of failure, on each route, writes one complete error record whose code, path, message, step and
+    /// exception type equal the failure the product computed, and whose SQL is present exactly when a query ran.</summary>
     [Theory]
     [InlineData("list", "array", "[]", "InvalidStructure", 400)]
     [InlineData("list", "json", "not json", "InvalidJson", 400)]
@@ -122,6 +137,8 @@ public sealed class ErrorLogTests
         Safe(string.Join("\n", Directory.GetFiles(host.DirectoryPath, "*.jsonl").Select(LoggedHost.ReadText)));
     }
 
+    /// <summary>A caller who disconnects mid-operation produces one Warning record, not an Error, with the cancelled code.</summary>
+    /// <remarks>The level follows whether the caller is still connected: a caller who left is not a gateway fault.</remarks>
     [Theory]
     [InlineData("list")]
     [InlineData("describe")]
@@ -152,6 +169,9 @@ public sealed class ErrorLogTests
         Assert.Equal(operation == "query" ? JsonValueKind.String : JsonValueKind.Null, line.GetProperty("Sql").ValueKind);
     }
 
+    /// <summary>The record keeps the request text exactly, including text that tries to forge a log line; a request
+    /// beyond the JSON size limit is cut to that limit plus 1024 characters, with the full byte count and a cut flag; a
+    /// request with a byte order mark is accepted.</summary>
     [Fact]
     public async Task T7_T8_request_text_bounds_bom_and_injection()
     {
@@ -206,6 +226,8 @@ public sealed class ErrorLogTests
         }
     }
 
+    /// <summary>A refused sign-in writes a record with an incident id at the sign-in step, but never the request body or
+    /// the offered token; an anonymous first leg writes no record at all.</summary>
     [Theory]
     [InlineData("%%%", "/sources/list", "list")]
     [InlineData("bm90LWEtdG9rZW4=", "/sources/list", "list")]
@@ -234,6 +256,8 @@ public sealed class ErrorLogTests
             foreach (var hidden in new[] { token, "not-a-token", "secret-body" }) Assert.DoesNotContain(hidden, text);
     }
 
+    /// <summary>A sign-in handshake that answers with a continuation token is part of normal sign-in, so it writes no
+    /// failure record.</summary>
     [Fact]
     public async Task T9_handshake_continuation_leaves_no_file_failure()
     {
@@ -247,6 +271,8 @@ public sealed class ErrorLogTests
         Assert.Empty(host.Lines());
     }
 
+    /// <summary>Eight requests that fail at the same moment each get a record with their own caller, request text and
+    /// incident id.</summary>
     [Fact]
     public async Task T10_eight_concurrent_requests_keep_their_own_context()
     {
@@ -279,6 +305,7 @@ public sealed class ErrorLogTests
         Assert.Equal(8, lines.Select(l => l.GetProperty("IncidentId").GetString()).Distinct().Count());
     }
 
+    /// <summary>A successful request on each route writes no failure record.</summary>
     [Fact]
     public async Task T12_successes_leave_no_failure_record()
     {
@@ -293,6 +320,10 @@ public sealed class ErrorLogTests
         }
     }
 
+    /// <summary>The shipped logging settings are pinned field by field; the file rolls when it reaches its size limit;
+    /// and a host with no file sink configured refuses to start.</summary>
+    /// <remarks>A host without the file sink would answer with incident ids that nobody can look up, so a missing sink is
+    /// a startup failure, not a silent default.</remarks>
     [Fact]
     public async Task T13_settings_create_directories_roll_and_require_a_sink()
     {
@@ -331,6 +362,7 @@ public sealed class ErrorLogTests
         Assert.Equal(DataGatewayLog.MissingSink, Assert.Throws<OptionsValidationException>(() => DataGatewayLog.Create(directConfig)).Message);
     }
 
+    /// <summary>An absolute log path whose folders do not exist yet is created on first write.</summary>
     [Fact]
     public async Task T13_absolute_path_creates_nested_missing_directories()
     {
@@ -352,6 +384,7 @@ public sealed class ErrorLogTests
         finally { if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true); }
     }
 
+    /// <summary>A host that replaces the logging providers still receives every failure field as structured state.</summary>
     [Fact]
     public async Task T17_clearing_providers_drops_serilog_and_preserves_all_fields()
     {
@@ -368,6 +401,8 @@ public sealed class ErrorLogTests
         Assert.False(Directory.Exists(host.DirectoryPath));
     }
 
+    /// <summary>The pure rules behind the record: how request text is cut on character boundaries, how many characters
+    /// are kept, the level, the caller name, the field order and a culture-independent summary line.</summary>
     [Fact]
     public void T18_pure_rules_and_structured_state()
     {
@@ -397,6 +432,8 @@ public sealed class ErrorLogTests
         finally { CultureInfo.CurrentCulture = original; }
     }
 
+    /// <summary>For a LIKE filter, the record keeps the caller's original pattern in the request and the escaped pattern
+    /// in the SQL parameters, and neither the route nor the MCP tool answer shows either one.</summary>
     [Fact]
     public async Task T12_like_logs_original_request_and_executed_parameter()
     {
@@ -430,6 +467,15 @@ public sealed class ErrorLogTests
                 parsed.RootElement.GetProperty("query").GetRawText(), QueryLimits.ForRowCap(500)).Value));
         }
     }
+    /// <summary>Asserts that a record and the caller's error answer agree, and that the record has exactly the expected
+    /// fields and context.</summary>
+    /// <remarks>The incident id must be a version 4 GUID in 32 hex digits, unique across the run.</remarks>
+    /// <param name="line">The failure record.</param>
+    /// <param name="answer">The caller's error answer.</param>
+    /// <param name="operation">The operation name, or <see langword="null"/> when the route is unknown.</param>
+    /// <param name="body">The request bytes, or <see langword="null"/> when the record must not hold the request.</param>
+    /// <param name="code">The expected error code.</param>
+    /// <param name="caller">The expected caller name.</param>
     internal static void Check(JsonElement line, JsonElement answer, string? operation, byte[]? body, string code, string caller = "synthetic-user")
     {
         Assert.Equal(new[] { "code", "path", "message", "incidentId" }, answer.EnumerateObject().Select(p => p.Name));
@@ -458,6 +504,7 @@ public sealed class ErrorLogTests
         }
     }
 
+    /// <summary>Asserts that a record holds <paramref name="query"/>'s SQL and every parameter, dates in round-trip format.</summary>
     internal static void AssertSql(JsonElement line, CompiledQuery query)
     {
         Assert.Equal(query.Sql, line.GetProperty("Sql").GetString());
@@ -472,8 +519,15 @@ public sealed class ErrorLogTests
         }
     }
 
+    /// <summary>The route path for an operation name.</summary>
     internal static string Route(string operation) => operation == "query" ? "/query" : "/sources/" + operation;
+    /// <summary>A valid request body for an operation name, against the synthetic source.</summary>
     internal static string Body(string operation) => operation switch { "list" => "{}", "describe" => "{\"source\":\"synthetic\"}", _ => "{\"source\":\"synthetic\",\"query\":{}}" };
+    /// <summary>The synthetic one-source catalog, with a named fault.</summary>
+    /// <param name="kind">The fault: <c>io</c>, <c>timeout</c>, <c>cancel</c> or <c>shape</c> on the list read (when
+    /// <paramref name="list"/> is set); <c>unknown</c> or <c>io</c> on the detail read; others change the detail rows
+    /// (<see cref="Rows"/>).</param>
+    /// <param name="list">Whether the fault applies to the list read.</param>
     internal static HostCatalogState Catalog(string kind = "ok", bool list = false) => HostCatalogState.Raw(
         _ => kind switch
         {
@@ -489,6 +543,7 @@ public sealed class ErrorLogTests
             "io" => throw new IOException("fake-driver-secret"),
             _ => Task.FromResult<(IReadOnlyList<dynamic>, IReadOnlyList<dynamic>)>((Rows(kind), []))
         });
+    /// <summary>A SQL Server engine whose reads return no rows, or throw for <c>io</c> and <c>timeout</c>.</summary>
     internal static DataGateway.Data.IDatabaseEngine Engine(string kind = "ok") => FakeRows.Engine(new SqlServerEngine(), FakeRows.From((_, _, connected, _) =>
     {
         connected();
@@ -499,6 +554,7 @@ public sealed class ErrorLogTests
         };
     }));
 
+    /// <summary>A query runner over the same fake reads as <see cref="Engine"/>.</summary>
     internal static QueryRunner Runner(string kind = "ok") =>FakeRows.Runner(new SqlServerEngine(), FakeRows.From((_, _, connected, _) =>
     {
         connected();
@@ -508,6 +564,9 @@ public sealed class ErrorLogTests
             _ => Task.FromResult<IReadOnlyList<dynamic>>([])
         };
     }));
+    /// <summary>The raw catalog detail rows for the synthetic source, one per column.</summary>
+    /// <param name="kind"><c>seed</c> stores a malformed object name, <c>stored</c> a malformed connection, <c>off</c>
+    /// turns every column capability off.</param>
     internal static Dictionary<string, object?>[] Rows(string kind = "ok") => Columns().Select(c => new Dictionary<string, object?>
     {
         ["id"] = 7319, ["object_name"] = kind == "seed" ? "dbo.not a view" : "hidden_schema.synthetic_view", ["connection_string"] = kind == "stored" ? "malformed-secret-connection" : SourceConnection,
@@ -516,10 +575,16 @@ public sealed class ErrorLogTests
         ["data_type"] = c.DataType, ["unit"] = null, ["magnitude"] = null, ["display_format"] = null,
         ["can_select"] = kind != "off", ["can_filter"] = kind != "off", ["can_sort"] = kind != "off", ["can_group"] = kind != "off", ["can_aggregate"] = kind != "off"
     }).ToArray();
+    /// <summary>The synthetic source's three columns: text, number and date.</summary>
     private static DataSourceColumnRow[] Columns() => [new("text", 1, "Text", "Synthetic text", "text", null, null, null, true, true, true, true, true),
         new("number", 2, "Number", "Synthetic number", "number", null, null, null, true, true, true, true, true), new("day", 3, "Day", "Synthetic day", "date", null, null, null, true, true, true, true, true)];
+    /// <summary>The synthetic source mapped to the contract the query path uses.</summary>
+    /// <param name="kind">As for <see cref="Rows"/>.</param>
+    /// <param name="queryTimeoutSeconds">The source's query timeout.</param>
     internal static SourceContract Contract(string kind = "ok", int queryTimeoutSeconds = 1) => CatalogMapping.Map(new(new DataSourceRow(kind == "seed" ? "dbo.not a view" : "hidden_schema.synthetic_view", kind == "stored" ? "malformed-secret-connection" : SourceConnection)
         { QueryTimeoutSeconds = queryTimeoutSeconds, Id = 7319, Name = "synthetic", Title = "Synthetic", Description = "Synthetic", Grain = "One row", RowCap = 500, IsActive = true }, Columns())).Value;
+    /// <summary>A catalog read failure records the step and exception type but not the driver's message, which can carry
+    /// server and account details.</summary>
     [Fact]
     public async Task Catalog_driver_message_is_suppressed()
     {
@@ -537,6 +602,7 @@ public sealed class ErrorLogTests
         Safe(string.Join("\n", host.AllLines().Select(l => l.GetRawText())));
     }
 
+    /// <summary>Scans every JSON line in <paramref name="text"/> for leaked secrets.</summary>
     internal static void Safe(string text)
     {
         foreach (var raw in text.Split('\n', StringSplitOptions.RemoveEmptyEntries))
@@ -545,15 +611,23 @@ public sealed class ErrorLogTests
             LoggedHost.Scan.LogLine("driver diagnostics", json.RootElement);
         }
     }
+    /// <summary>A logger provider that keeps each event's level and structured fields.</summary>
     private sealed class MemoryLogs : ILoggerProvider
     {
+        /// <summary>The recorded events.</summary>
         internal ConcurrentQueue<(LogLevel Level, Dictionary<string, object?> Fields)> Entries { get; } = new();
+        /// <summary>Returns a logger that records into this provider.</summary>
         public ILogger CreateLogger(string categoryName) => new Recorder(this);
+        /// <summary>Nothing to release.</summary>
         public void Dispose() { }
+        /// <summary>A logger that records the structured state of every event.</summary>
         private sealed class Recorder(MemoryLogs owner) : ILogger
         {
+            /// <summary>Scopes are not recorded.</summary>
             public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            /// <summary>Every level is recorded.</summary>
             public bool IsEnabled(LogLevel logLevel) => true;
+            /// <summary>Records the level and the key-value state, when the state has one.</summary>
             public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
             { if (state is IEnumerable<KeyValuePair<string, object?>> pairs) owner.Entries.Enqueue((logLevel, pairs.ToDictionary(p => p.Key, p => p.Value))); }
         }

@@ -18,10 +18,18 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the <c>/sources/list</c> route: its answer shape, a fresh catalog read on every request, the checks on
+/// its body, and how catalog failures and cancellation reach the caller and the log.</summary>
+/// <remarks>Every failure test also scans the body and the logs for the synthetic connection string and driver text,
+/// because a catalog failure is exactly where a connection string or a driver message could leak.</remarks>
 public sealed class SourcesListTests
 {
+    /// <summary>A synthetic catalog connection to a local port nothing listens on, so a real read fails fast; its parts are
+    /// leak markers.</summary>
     private const string Connection = "Server=tcp:127.0.0.1,1;Database=Catalog;User ID=fake-list-reader;Password=fake-list-password;Encrypt=false;Pooling=false;Connect Timeout=1;ConnectRetryCount=0";
 
+    /// <summary>An unreachable catalog, read through the real SQL Server catalog reader, gives 503 CatalogUnavailable and
+    /// one log line that names the exception type only, never the driver's message or text.</summary>
     [Fact]
     public async Task T3_real_host_unreachable_catalog_is_503_and_logged_once_without_connection_fragments()
     {
@@ -47,6 +55,8 @@ public sealed class SourcesListTests
         await app.StopAsync(timeout.Token);
     }
 
+    /// <summary>A list answer holds only <c>sources</c>, each with exactly name, title, description, grain and rowCap, sorted
+    /// by name, and each request reads the catalog again instead of reusing an earlier answer.</summary>
     [Fact]
     public async Task Real_host_success_has_exact_shape_and_reads_again_on_the_next_request()
     {
@@ -84,6 +94,8 @@ public sealed class SourcesListTests
         await app.StopAsync(timeout.Token);
     }
 
+    /// <summary>Catalog read failures of several kinds all reach the caller as 503 CatalogUnavailable with the shared
+    /// message, and the log line records the same code.</summary>
     [Theory]
     [InlineData("timeout", 503, "CatalogUnavailable")]
     [InlineData("argument", 503, "CatalogUnavailable")]
@@ -116,6 +128,8 @@ public sealed class SourcesListTests
         await app.StopAsync(timeout.Token);
     }
 
+    /// <summary>When the caller has gone away, any driver failure is logged once as a CatalogCancelled warning and nothing
+    /// is written to the response.</summary>
     [Theory]
     [InlineData("pool")]
     [InlineData("io")]
@@ -146,6 +160,7 @@ public sealed class SourcesListTests
         AssertSafe(logs.Text);
     }
 
+    /// <summary>A caller that disconnects cancels the catalog read in progress through the token the reader receives.</summary>
     [Fact]
     public async Task Real_host_request_abort_reaches_catalog_reader()
     {
@@ -176,6 +191,7 @@ public sealed class SourcesListTests
         Assert.Equal(LogLevel.Warning, Assert.Single(logs.Levels));
     }
 
+    /// <summary>A request already cancelled on arrival never reads the catalog, writes nothing and logs nothing.</summary>
     [Fact]
     public async Task Pre_cancelled_call_does_not_enter_database_and_returns_no_body()
     {
@@ -190,6 +206,8 @@ public sealed class SourcesListTests
         Assert.Empty(logs.Errors);
     }
 
+    /// <summary>The list query selects only the five listed columns, never the connection string, filters to active sources
+    /// and leaves ordering to the gateway.</summary>
     [Fact]
     public void List_sql_reads_only_the_five_list_fields_and_filters_active_sources()
     {
@@ -203,6 +221,8 @@ public sealed class SourcesListTests
         Assert.DoesNotContain("ORDER BY", SqlServerCatalog.ListSql, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>A list body that is not JSON, or is JSON but not an empty object, is refused with 400 and the matching
+    /// message before the catalog is read; an empty object, with any whitespace, is accepted.</summary>
     [Fact]
     public async Task T12_list_body_is_checked_before_catalog_access()
     {
@@ -240,6 +260,8 @@ public sealed class SourcesListTests
         Assert.Equal(count, logs.Errors.Count());
     }
 
+    /// <summary>A driver that throws a cancellation while the caller is still connected gives 500 InternalError; the
+    /// internal CatalogCancelled code appears in the log only.</summary>
     [Fact]
     public async Task T13_driver_cancellation_with_live_caller_is_an_internal_error()
     {
@@ -259,6 +281,8 @@ public sealed class SourcesListTests
         AssertSafe(text + logs.Text);
     }
 
+    /// <summary>A caller that disconnects while its body is read gets nothing written and nothing logged, and the catalog
+    /// is not read.</summary>
     [Theory]
     [InlineData("pre")]
     [InlineData("io")]
@@ -287,6 +311,7 @@ public sealed class SourcesListTests
         Assert.Empty(logs.Text);
     }
 
+    /// <summary>A response write that fails because the caller has gone away neither throws out of the route nor logs.</summary>
     [Fact]
     public async Task T14_aborted_write_does_not_escape_or_log()
     {
@@ -302,25 +327,38 @@ public sealed class SourcesListTests
         Assert.Empty(logs.Errors);
     }
 
+    /// <summary>A request body whose read cancels the request and then fails as <paramref name="kind"/> says.</summary>
+    /// <param name="abort">The request's abort source, cancelled on the first read.</param>
+    /// <param name="kind">The failure: <c>json</c>, <c>cancelled</c> or an I/O error.</param>
     private sealed class CancellingStream(CancellationTokenSource abort,string kind) : MemoryStream
     {
+        /// <summary>Cancels the request, then throws.</summary>
         public override ValueTask<int> ReadAsync(Memory<byte> buffer,CancellationToken cancellationToken=default)
         { abort.Cancel(); throw kind switch { "json" => new JsonException("fake-input-secret"), "cancelled" => new OperationCanceledException("fake-input-secret"), _ => new IOException("fake-input-secret") }; }
     }
+    /// <summary>A response body whose write cancels the request and then fails with an I/O error.</summary>
     private sealed class AbortedWriteStream(CancellationTokenSource abort) : MemoryStream
     {
+        /// <summary>Cancels the request, then throws.</summary>
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer,CancellationToken cancellationToken=default)
         { abort.Cancel(); throw new IOException("fake-driver-secret"); }
     }
 
+    /// <summary>A test catalog whose list read is <paramref name="read"/> and whose detail read returns the shared test
+    /// rows.</summary>
     private static HostCatalogState Catalog(RecordedLogs logs, Func<CancellationToken, Task<IReadOnlyList<dynamic>>> read) =>
         HostCatalogState.Raw(read, (name, _) => Task.FromResult<(IReadOnlyList<dynamic>, IReadOnlyList<dynamic>)>((ErrorLogTests.Rows(), [])));
 
+    /// <summary>A catalog list row for a source named <paramref name="name"/>, with fixed synthetic fields.</summary>
     private static Dictionary<string, object?> Row(string name) => new()
     {
         ["name"] = name, ["title"] = "Synthetic title", ["description"] = "Synthetic description", ["grain"] = "One synthetic row", ["row_cap"] = 500
     };
 
+    /// <summary>An exception a database driver could throw, chosen by <paramref name="kind"/>, whose message is a leak
+    /// marker.</summary>
+    /// <remarks>The <c>sql</c> kind is an uninitialized <c>SqlException</c>, because the driver offers no public way to
+    /// create one; only the cancellation test uses it.</remarks>
     private static Exception DriverFailure(string kind) => kind switch
     {
         "pool" => new InvalidOperationException("fake-driver-secret"),
@@ -335,12 +373,16 @@ public sealed class SourcesListTests
         _ => throw new ArgumentOutOfRangeException(nameof(kind))
     };
 
+    /// <summary>Starts the host, then arms the test catalog so requests use the test's reads.</summary>
     private static async Task Start(WebApplication app)
     {
         await app.StartAsync();
         app.Services.GetRequiredService<HostCatalogState>().Arm();
     }
 
+    /// <summary>Builds the production host with synthetic sign-in and recorded logs.</summary>
+    /// <param name="logs">Receives every log entry.</param>
+    /// <param name="catalog">The test catalog; by default, a real SQL Server catalog reader against <see cref="Connection"/>.</param>
     private static WebApplication Host(RecordedLogs logs, HostCatalogState? catalog = null)
     {
         catalog ??= new HostCatalogState
@@ -363,6 +405,7 @@ public sealed class SourcesListTests
         });
     }
 
+    /// <summary>Asserts the body is a gateway error at the root path with exactly code, incidentId, message and path.</summary>
     private static void AssertError(HttpResponseMessage response, string text, string code)
     {
         Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
@@ -374,6 +417,7 @@ public sealed class SourcesListTests
         Assert.False(string.IsNullOrWhiteSpace(json.RootElement.GetProperty("message").GetString()));
     }
 
+    /// <summary>Asserts <paramref name="text"/> holds no part of the synthetic connection string and no driver leak marker.</summary>
     private static void AssertSafe(string text)
     {
         LeakScan.Synthetic(("route catalog", Connection)).Text("route body and logs", text, Rule.Foreign);
@@ -381,11 +425,17 @@ public sealed class SourcesListTests
             Assert.True(!text.Contains(marker, StringComparison.OrdinalIgnoreCase), "Diagnostic marker found in route output.");
     }
 
+    /// <summary>Sets the environment the host reads for one test, and restores it afterwards.</summary>
+    /// <remarks>The user-profile folders point at an empty scratch folder, so no user secrets on the machine reach the
+    /// host, and every limit setting is cleared, so the host runs on its defaults.</remarks>
     private sealed class SettingsScope : IDisposable
     {
+        /// <summary>Each changed variable's value before the scope.</summary>
         private readonly Dictionary<string, string?> original = new();
+        /// <summary>An empty folder under <c>obj</c> that stands in for the user profile.</summary>
         private readonly string scratch = TestFiles.InRepo("tests/DataGateway.Web.Tests/obj/list-settings/" + Guid.NewGuid());
 
+        /// <summary>Creates the scratch folder and sets the variables.</summary>
         public SettingsScope()
         {
             Directory.CreateDirectory(scratch);
@@ -395,12 +445,14 @@ public sealed class SourcesListTests
                 Set("DataGateway__Limits__" + name, null);
         }
 
+        /// <summary>Sets a variable, remembering its first original value.</summary>
         private void Set(string key, string? value)
         {
             original.TryAdd(key, Environment.GetEnvironmentVariable(key));
             Environment.SetEnvironmentVariable(key, value);
         }
 
+        /// <summary>Restores every variable and removes the scratch folder.</summary>
         public void Dispose()
         {
             foreach (var pair in original) Environment.SetEnvironmentVariable(pair.Key, pair.Value);
@@ -408,22 +460,37 @@ public sealed class SourcesListTests
         }
     }
 
+    /// <summary>A logger provider that records every entry, and the structured fields of each warning or error.</summary>
+    /// <remarks>It fails the test if any log call passes an exception: the gateway logs failures as fields, never as an
+    /// exception object, whose message could hold driver or connection text.</remarks>
     private sealed class RecordedLogs : ILoggerProvider
     {
+        /// <summary>Every entry's level and text, in order.</summary>
         private readonly ConcurrentQueue<(LogLevel Level, string Text)> entries = new();
+        /// <summary>The structured fields of each warning or error.</summary>
         private readonly ConcurrentQueue<Dictionary<string, object?>> errorFields = new();
+        /// <summary>The structured fields of each warning or error.</summary>
         public IEnumerable<Dictionary<string, object?>> ErrorFields => errorFields;
+        /// <summary>The text of each warning or error.</summary>
         public IEnumerable<string> Errors => entries.Where(entry => entry.Level >= LogLevel.Warning).Select(entry => entry.Text);
+        /// <summary>The level of each warning or error.</summary>
         public IEnumerable<LogLevel> Levels => entries.Where(entry => entry.Level >= LogLevel.Warning).Select(entry => entry.Level);
+        /// <summary>All recorded text, for leak scans.</summary>
         public string Text => string.Join("\n", entries.Select(entry => entry.Text));
+        /// <summary>Creates a logger that records into this provider.</summary>
         public ILogger CreateLogger(string categoryName) => new Recorder(entries, errorFields);
+        /// <summary>Nothing to release.</summary>
         public void Dispose() { }
 
+        /// <summary>A logger that records every entry at every level.</summary>
         private sealed class Recorder(ConcurrentQueue<(LogLevel Level, string Text)> entries,
             ConcurrentQueue<Dictionary<string, object?>> errorFields) : ILogger
         {
+            /// <summary>Scopes are not recorded.</summary>
             public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            /// <summary>Every level is recorded.</summary>
             public bool IsEnabled(LogLevel logLevel) => true;
+            /// <summary>Records the entry, failing the test if it carries an exception.</summary>
             public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
                 Func<TState, Exception?, string> formatter)
             {

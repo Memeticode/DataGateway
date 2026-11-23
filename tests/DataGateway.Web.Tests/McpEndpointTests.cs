@@ -14,8 +14,13 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the host's MCP endpoint as a client sees it: server identity and instructions, the three tool
+/// definitions word for word, stateless POST-only transport, sign-in answers and body refusals.</summary>
+/// <remarks>Tool descriptions and schemas are what a model reads to use the gateway; they are pinned verbatim so a
+/// wording change is a deliberate edit to this test, never an accident.</remarks>
 public sealed class McpEndpointTests
 {
+    /// <summary>The expected description and input schema of each tool.</summary>
     private static readonly Dictionary<string, (string Description, string Schema)> Definitions = new()
     {
             ["list_sources"] = ("""No source named? See all data sources and what each holds. Takes no arguments and returns {"sources":[...]}: each active source's name, title, description, grain (what one row represents) and rowCap (maximum rows per query). Pick the source whose description and grain fit the question, then call describe_source with its name.""", """{"type":"object","properties":{},"additionalProperties":false}"""),
@@ -23,6 +28,9 @@ public sealed class McpEndpointTests
             ["query_source"] = ("""Source already described? Run a read-only query, get rows. Build query from that source's querySchema (describe_source). Returns {source, columns, rows, rowCount, more, hint}. Prefer filters and aggregates over pulling raw rows. With or without limit, more is true exactly when rows were left out: never report that answer as complete. Narrow or aggregate; there is no way to ask for the rest. Empty rows, or an aggregate's 0 or null, can mean no row matched or a misspelled value.""", """{"type":"object","properties":{"source":{"type":"string","description":"Name of one source from list_sources, matched without regard to case."},"query":{"type":"object","description":"Built from this source's querySchema (describe_source), e.g. {\"select\":[\"a\"],\"filters\":[{\"col\":\"b\",\"op\":\"eq\",\"value\":\"x\"}],\"limit\":5}. {} returns every selectable column, if any, up to the row cap."}},"required":["source","query"],"additionalProperties":false}"""),
     };
 
+    /// <summary>With either protocol version the server reports its identity, instructions and exact tool definitions,
+    /// answers without a session id, refuses GET and DELETE with an empty 405, and keeps the MCP endpoint out of the API
+    /// document.</summary>
     [Fact]
     public async Task T5_T6_definitions_stateless_handshakes_and_post_only()
     {
@@ -73,6 +81,8 @@ public sealed class McpEndpointTests
         Assert.Empty(host.Lines());
     }
 
+    /// <summary>The host settings that once set the MCP title and about text are ignored, even with invalid values: the
+    /// catalog's metadata wins.</summary>
     [Fact]
     public async Task T25_retired_host_keys_have_no_effect()
     {
@@ -85,6 +95,8 @@ public sealed class McpEndpointTests
         Assert.Equal(McpMetadataFixture.Seed.About + " " + DataGatewayTools.Instructions, client.ServerInstructions);
     }
 
+    /// <summary>The server instructions are pinned, and the example in the query argument's description is valid JSON
+    /// that passes query validation, so a model that copies it gets a working query.</summary>
     [Fact]
     public void T17_query_argument_example_is_json_and_valid_on_synthetic_columns()
     {
@@ -107,6 +119,8 @@ public sealed class McpEndpointTests
     }
 
 
+    /// <summary>With real Windows sign-in, the MCP endpoint answers an unsigned call and a refused handshake exactly as
+    /// the JSON routes do: a Negotiate challenge with no log line, and a NotAuthenticated error with one sign-in line.</summary>
     [Fact]
     public async Task T7_challenge_and_refused_handshake_match_routes()
     {
@@ -150,6 +164,8 @@ public sealed class McpEndpointTests
         Assert.Equal(lines[0].GetProperty("ExceptionType").GetString(), lines[1].GetProperty("ExceptionType").GetString());
     }
 
+    /// <summary>An MCP request body that is too large, unreadable, or faults while read gets the route's error codes and
+    /// messages and one log line with no request text.</summary>
     [Theory]
     [InlineData(0, "StructuralLimitExceeded", 400)]
     [InlineData(1, "InvalidJson", 400)]

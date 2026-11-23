@@ -6,10 +6,19 @@ using DataGateway.Mcp;
 
 namespace DataGateway.Routes;
 
+/// <summary>Endpoint metadata naming a gateway operation: list, describe, query, mcp, document or page.</summary>
+/// <remarks>It marks the endpoint as the gateway's, for the error boundary and the API document, and names the
+/// operation in each log line.</remarks>
+/// <param name="Name">The operation name.</param>
 internal sealed record GatewayOperation(string Name);
 
+/// <summary>Maps a gateway's three JSON POST routes and its MCP endpoint.</summary>
 internal static class GatewayRoutes
 {
+    /// <summary>Maps <c>/sources/list</c>, <c>/sources/describe</c>, <c>/query</c> and <c>/mcp</c> under the group.</summary>
+    /// <param name="group">The gateway's group, already carrying its registration as metadata.</param>
+    /// <param name="registration">The gateway.</param>
+    /// <param name="loggers">The host's logger factory, for the gateway's failure log.</param>
     internal static void Map(RouteGroupBuilder group, GatewayRegistration registration, ILoggerFactory loggers)
     {
         var failures = new FailureLog(loggers, registration.Limits);
@@ -24,6 +33,18 @@ internal static class GatewayRoutes
         McpEndpoint.Map(group, registration, failures);
     }
 
+    /// <summary>Maps one POST route that reads the body, runs the operation with a fresh catalog adapter and answers
+    /// once.</summary>
+    /// <remarks>The handler takes the raw body, not a bound parameter, so a body that is not JSON reaches the
+    /// operation and is refused with the gateway's own code and message.</remarks>
+    /// <typeparam name="T">The operation's answer type, declared for the API document.</typeparam>
+    /// <param name="group">The gateway's group.</param>
+    /// <param name="path">The route.</param>
+    /// <param name="operation">The operation name.</param>
+    /// <param name="registration">The gateway.</param>
+    /// <param name="failures">The gateway's failure log.</param>
+    /// <param name="run">Runs the operation on the body.</param>
+    /// <returns>The route's builder.</returns>
     private static RouteHandlerBuilder MapPost<T>(RouteGroupBuilder group, string path, string operation,
         GatewayRegistration registration, FailureLog failures,
         Func<byte[], GatewayCatalog, HttpContext, Task<CatalogResult<T>>> run) where T : class

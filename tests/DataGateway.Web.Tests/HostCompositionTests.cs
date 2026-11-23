@@ -16,8 +16,14 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins how the web host composes the library: its registration, routes, API page and MCP server info, the
+/// startup check of the whole catalog before it listens, and the safe answers when the catalog fails after start.</summary>
+/// <remarks>The host reads and validates the whole catalog once at startup; after start, each request reads the
+/// catalog fresh, so a catalog change shows on the next request.</remarks>
 public sealed class HostCompositionTests
 {
+    /// <summary>With no MCP title or description configured, the API page's document and HTML equal the frozen copies
+    /// byte for byte, on two separately started hosts, and a host's own extra route is unaffected.</summary>
     [Fact]
     public async Task T8_default_document_and_html_match_frozen_transforms_on_two_ports()
     {
@@ -34,6 +40,8 @@ public sealed class HostCompositionTests
         }
     }
 
+    /// <summary>A realistic three-source catalog with optional fields passes the production list and detail mapping and
+    /// validation, and the host starts on it after one list read and one detail read per source.</summary>
     [Fact]
     public async Task T2_synthetic_multi_source_catalog_uses_actual_mapping_and_startup_validation()
     {
@@ -164,6 +172,7 @@ public sealed class HostCompositionTests
         Assert.Equal((1, 1, 3), state.Counts);
     }
 
+    /// <summary>The scalar members of a sample JSON row as catalog cells.</summary>
     private static Dictionary<string, object?> Cells(JsonElement row) => row.EnumerateObject()
         .Where(property => property.Value.ValueKind != JsonValueKind.Array)
         .ToDictionary(property => property.Name, property => property.Value.ValueKind switch
@@ -174,6 +183,11 @@ public sealed class HostCompositionTests
         });
 
 
+    /// <summary>A logged web host on <paramref name="state"/>'s catalog.</summary>
+    /// <param name="state">The catalog the host reads.</param>
+    /// <param name="environment">The host environment name.</param>
+    /// <param name="settings">Extra configuration.</param>
+    /// <param name="engine">An engine to register, or <see langword="null"/> for the default.</param>
     private static LoggedHost Host(HostCatalogState state, string environment = "Production",
         IDictionary<string, string?>? settings = null, IDatabaseEngine? engine = null) =>
         new(environment: environment, settings: settings, configure: builder =>
@@ -182,6 +196,9 @@ public sealed class HostCompositionTests
             if (engine is not null) builder.Services.AddSingleton(engine);
         });
 
+    /// <summary>The host registers one gateway with its configured limits and sign-in policy, maps its four named
+    /// endpoints, reads nothing before start, and reads the list fresh on every request after start; the API page and
+    /// MCP server carry the gateway's name and the library version.</summary>
     [Fact]
     public async Task T1_public_composition_root_metadata_limits_and_lazy_fresh_reads()
     {
@@ -235,6 +252,7 @@ public sealed class HostCompositionTests
         Assert.NotNull(await HostCatalogState.NamedRunner(host.App.Services));
     }
 
+    /// <summary>The host does not listen until the list and every listed source's detail have been read.</summary>
     [Fact]
     public async Task T2_startup_awaits_list_and_every_active_detail_before_listening()
     {
@@ -265,6 +283,8 @@ public sealed class HostCompositionTests
         Assert.Single(host.App.Urls);
     }
 
+    /// <summary>Each kind of bad catalog metadata stops startup with a message that names the gateway, has no inner
+    /// exception and leaks nothing.</summary>
     [Theory]
     [InlineData("missing")]
     [InlineData("provider")]
@@ -298,6 +318,8 @@ public sealed class HostCompositionTests
         LoggedHost.Scan.Text("safe metadata refusal", failure.Message, Rule.DataGateway);
     }
 
+    /// <summary>An empty catalog, or a source whose connection or object would only fail when queried, does not stop
+    /// startup: startup checks catalog metadata and never connects to a source.</summary>
     [Theory]
     [InlineData("empty")]
     [InlineData("malformed-source-connection")]
@@ -317,6 +339,8 @@ public sealed class HostCompositionTests
         Assert.Equal(kind == "empty" ? 0 : 1, state.Details);
     }
 
+    /// <summary>A catalog fault after start answers with the exact CatalogUnavailable error (or InternalError for a
+    /// cancellation) on both the route and the MCP tool, each with its own incident id and record, and no fault message.</summary>
     [Theory]
     [InlineData("list", "io")]
     [InlineData("detail", "io")]
@@ -381,6 +405,8 @@ public sealed class HostCompositionTests
         Assert.NotEqual(lines[0].GetProperty("IncidentId").GetString(), lines[1].GetProperty("IncidentId").GetString());
     }
 
+    /// <summary>When a source is not found and the list read used to name the available sources then fails, the
+    /// answer is the catalog failure at the root path, not an unknown source.</summary>
     [Fact]
     public async Task T5_failed_full_list_after_missing_detail_wins_with_root_path_and_null_source()
     {
@@ -440,6 +466,8 @@ public sealed class HostCompositionTests
         AssertDiagnostics(toolLine, toolIncident, "describe_source");
     }
 
+    /// <summary>The web host's source uses only the library's public composition methods, never its internal
+    /// namespaces or types.</summary>
     [Fact]
     public void T1_every_production_host_source_uses_the_public_library_surface()
     {
@@ -457,6 +485,8 @@ public sealed class HostCompositionTests
             Assert.Contains(member, program, StringComparison.Ordinal);
     }
 
+    /// <summary>A catalog read that fails or is cancelled at startup stops the host with a fixed message and no inner
+    /// exception, so the fault's message and inner details never reach the startup error.</summary>
     [Theory]
     [InlineData("list")]
     [InlineData("detail")]
@@ -479,6 +509,8 @@ public sealed class HostCompositionTests
         LoggedHost.Scan.Text("startup exception refusal", failure.ToString(), Rule.DataGateway);
     }
 
+    /// <summary>The host's forwarding engine refuses calls before it is bound and a second bind, and then passes every
+    /// argument, result and exception through to the selected engine unchanged.</summary>
     [Fact]
     public async Task T3_forwarding_engine_preserves_every_argument_result_and_exception()
     {
@@ -509,22 +541,37 @@ public sealed class HostCompositionTests
         Assert.Same(original, await Record.ExceptionAsync(async () => await engine.ReadSourceAsync("s", selected.Compiled, 1, opened, consume, caller.Token)));
     }
 
+    /// <summary>An engine that records the arguments of its last call, returns fixed results, and throws
+    /// <see cref="Error"/> when it is set.</summary>
     private sealed class ForwardingRecorder : IDatabaseEngine
     {
+        /// <summary>The provider name, distinct from the forwarding engine's alias.</summary>
         public string ProviderName => "selected-provider";
+        /// <summary>The arguments of the last call.</summary>
         internal object?[] Arguments = [];
+        /// <summary>When set, every call throws it.</summary>
         internal Exception? Error;
+        /// <summary>The query <see cref="Compile"/> returns.</summary>
         internal readonly DataGateway.Core.Queries.CompiledQuery Compiled = new SqlServerEngine().Compile(DataGateway.Core.Queries.QueryBuilding.Validate(ErrorLogTests.Contract(), "{}", QueryLimits.ForRowCap(500)).Value);
+        /// <summary>The failure <see cref="RecognizeFailure"/> returns.</summary>
         internal readonly ProviderFailure ProviderFailure = new(false, 7);
+        /// <summary>The task <see cref="ReadSourceAsync"/> returns.</summary>
         internal readonly Task<DataGateway.Core.Queries.QueryRows> Rows = Task.FromResult(new DataGateway.Core.Queries.QueryRows([], false));
+        /// <summary>Records the call's arguments and throws <see cref="Error"/> when set.</summary>
         private void Record(params object?[] args) { Arguments = args; if (Error is { } error) throw error; }
+        /// <summary>Records the call and returns <see cref="Compiled"/>.</summary>
         public DataGateway.Core.Queries.CompiledQuery Compile(DataGateway.Core.Queries.ValidatedQuery query) { Record(query); return Compiled; }
+        /// <summary>Records the call.</summary>
         public void ValidateSourceConnection(string? connection) => Record(connection);
+        /// <summary>Records the call and returns <see cref="ProviderFailure"/>.</summary>
         public ProviderFailure? RecognizeFailure(Exception error) { Record(error); return ProviderFailure; }
+        /// <summary>Records the call and returns <see cref="Rows"/>.</summary>
         public Task<DataGateway.Core.Queries.QueryRows> ReadSourceAsync(string connection, DataGateway.Core.Queries.CompiledQuery query, int timeout, Action opened, Func<IAsyncEnumerable<IDictionary<string, object?>>, Task<DataGateway.Core.Queries.QueryRows>> consume, CancellationToken token)
         { Record(connection, query, timeout, opened, consume, token); return Rows; }
     }
 
+    /// <summary>A blank object name or connection found after start is an internal catalog fault: the caller gets the
+    /// generic InternalError answer, while the record keeps the InvalidCatalog code, path and fix.</summary>
     [Theory]
     [InlineData("object", "objectName", "Set objectName to a non-blank value.")]
     [InlineData("connection", "connectionString", "Set connectionString to a non-blank value.")]
@@ -567,6 +614,7 @@ public sealed class HostCompositionTests
         }
     }
 
+    /// <summary>An exception of the named kind carrying a private marker that must never reach an answer or a record.</summary>
     private static Exception Fault(string kind) => kind switch
     {
         "io" => new IOException("planted-private-marker"), "timeout" => new TimeoutException("planted-private-marker"),
@@ -575,6 +623,7 @@ public sealed class HostCompositionTests
         _ => new NotSupportedException("planted-private-marker")
     };
 
+    /// <summary>A copy of <paramref name="row"/> with the given fields replaced.</summary>
     private static DataSourceRow Copy(DataSourceRow row, string? name = null, int? cap = null, string? objectName = null, string? connection = null) =>
         new(objectName ?? row.ObjectName, connection ?? row.ConnectionString)
         {
@@ -582,6 +631,7 @@ public sealed class HostCompositionTests
             Grain = row.Grain, IsActive = row.IsActive, QueryTimeoutSeconds = row.QueryTimeoutSeconds, RowCap = cap ?? row.RowCap
         };
 
+    /// <summary>A detail broken in the named way, or <see langword="null"/> for a missing detail.</summary>
     private static CatalogDetail? Change(CatalogDetail detail, string kind) => kind switch
     {
         "missing" => null,

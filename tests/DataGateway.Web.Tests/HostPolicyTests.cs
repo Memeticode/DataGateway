@@ -14,11 +14,20 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins host policy on named gateways: how a host's sign-in refusal, an unrecorded challenge and a host
+/// fault become the gateway's error reply, failure log line and API-page text, per gateway and per endpoint kind.</summary>
+/// <remarks>Every test runs against <see cref="HostPolicyHost"/>, two gateways with distinct policy texts, so a
+/// reply or log line that names the wrong gateway, or leaks one gateway's policy into the other, fails. Refusals
+/// must never reach the catalog or the database (<see cref="HostPolicyHost.NoWork"/>).</remarks>
 public sealed class HostPolicyTests
 {
+    /// <summary>A one-shot signal whose continuations run off the setting thread.</summary>
     private static TaskCompletionSource Gate() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+    /// <summary>Waits for a signal with a timeout, so a broken test fails instead of hanging.</summary>
     private static Task Wait(Task task) => task.WaitAsync(TimeSpan.FromSeconds(15));
 
+    /// <summary>A refusal the host records on a JSON API call becomes that gateway's error envelope and one complete
+    /// failure line, and the call does no catalog or database work.</summary>
     [Fact]
     public async Task T01_route_refusals()
     {
@@ -38,6 +47,8 @@ public sealed class HostPolicyTests
         await host.Witnesses();
     }
 
+    /// <summary>A refusal recorded on an MCP call becomes the gateway's error envelope and failure line, with
+    /// operation <c>mcp</c>.</summary>
     [Fact]
     public async Task T02_mcp_refusals()
     {
@@ -55,6 +66,8 @@ public sealed class HostPolicyTests
         host.NoWork();
     }
 
+    /// <summary>A refusal on the API document, page, redirect or assets becomes the gateway's error reply, nested
+    /// under a path base and a group too, while a signed caller gets the real page.</summary>
     [Fact]
     public async Task T03_page_refusals()
     {
@@ -85,6 +98,10 @@ public sealed class HostPolicyTests
         }
     }
 
+    /// <summary>An empty 401 the host did not record (a challenge leg) gets the policy's fallback failure with no
+    /// incident id and no log line, and keeps the host's challenge header.</summary>
+    /// <remarks>The first leg of a sign-in handshake is a normal step, not a failure, so it gets no incident id and
+    /// no log line; only a refusal the host records does.</remarks>
     [Fact]
     public async Task T04_unrecorded_challenges()
     {
@@ -112,6 +129,8 @@ public sealed class HostPolicyTests
         host.NoWork();
     }
 
+    /// <summary>Installing the boundary twice still answers once, a second record is refused, and without the boundary
+    /// a record is refused and the host's bare 401 stands.</summary>
     [Fact]
     public async Task T05_duplicate_install_and_record()
     {
@@ -137,6 +156,10 @@ public sealed class HostPolicyTests
         Assert.Empty(bare.Host.Logs.Failures);
     }
 
+    /// <summary>The gateway completes a recorded refusal only when the host left an empty 401; any other status, a
+    /// content type, a started response or written body is left exactly as the host made it.</summary>
+    /// <remarks>The host owns the response; the gateway may fill in only the one shape that means "refused, say
+    /// why".</remarks>
     [Fact]
     public async Task T06_only_empty_401_is_completed()
     {
@@ -194,6 +217,8 @@ public sealed class HostPolicyTests
         Assert.Empty(startedProbe.Output.ToArray());
     }
 
+    /// <summary>The boundary covers only gateway endpoints: host endpoints, even inside a gateway's groups or with a
+    /// similar prefix, unmatched routes and method rejections keep the host's own reply and write no failure line.</summary>
     [Fact]
     public async Task T07_selected_endpoint_boundary()
     {
@@ -221,6 +246,8 @@ public sealed class HostPolicyTests
         await host.Witnesses();
     }
 
+    /// <summary>A host exception thrown before the gateway handler runs becomes the generic unexpected-error reply,
+    /// with the exception text in the log only and no ASP.NET Core error log.</summary>
     [Fact]
     public async Task T08_host_fault_before_handler()
     {
@@ -246,6 +273,8 @@ public sealed class HostPolicyTests
         Assert.DoesNotContain(host.Host.Logs.Events, line => line.Category.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal) && line.Exception is not null);
     }
 
+    /// <summary>A host exception after the gateway has started its reply aborts the connection and logs once with the
+    /// request, SQL and parameters, instead of writing a second reply.</summary>
     [Fact]
     public async Task T09_host_fault_after_handler_aborts()
     {
@@ -315,6 +344,8 @@ public sealed class HostPolicyTests
         Assert.Equal("query", sentinelLine.Fields["Operation"]);
     }
 
+    /// <summary>A bad-request exception from the host (body too large, body unreadable) maps to the gateway's own
+    /// codes and messages without the exception's text; after the reply has started it aborts instead.</summary>
     [Fact]
     public async Task T10_bad_http_request_mapping()
     {
@@ -342,6 +373,8 @@ public sealed class HostPolicyTests
         Assert.Equal("BadHttpRequestException", line.Fields["ExceptionType"]);
     }
 
+    /// <summary>An MCP call the caller cancels logs a warning, not an error; a cancellation or IO fault after the caller
+    /// left an MCP request is silent, while any other fault is still logged.</summary>
     [Fact]
     public async Task T11_caller_ended_mcp_is_silent()
     {
@@ -405,6 +438,8 @@ public sealed class HostPolicyTests
                 }
     }
 
+    /// <summary>A caller that leaves before the MCP server runs is logged as a warning with no reply written, and a
+    /// refusal recorded by a caller that then leaves writes nothing.</summary>
     [Fact]
     public async Task T12_caller_gone_before_server()
     {
@@ -463,6 +498,8 @@ public sealed class HostPolicyTests
         Assert.Empty(refused.Output.ToArray());
     }
 
+    /// <summary>A failure the gateway handler already answered and logged, known or unexpected, on the route or the
+    /// MCP tool, produces exactly one log line under the boundary.</summary>
     [Fact]
     public async Task T13_handler_errors_are_not_logged_twice()
     {
@@ -502,6 +539,8 @@ public sealed class HostPolicyTests
         }
     }
 
+    /// <summary>Each gateway's API document carries its own policy description and 401 answer, and is otherwise
+    /// identical to a document without policy; a gateway without policy keeps the plain document.</summary>
     [Fact]
     public async Task T14_policy_documents_are_isolated()
     {
@@ -568,6 +607,9 @@ public sealed class HostPolicyTests
         Assert.Equal(exampleMessage, HostPolicyAssert.Json(compatibleChallenge.Bytes).GetProperty("message").GetString());
     }
 
+    /// <summary>Pins the policy registration contract: null arguments, a code that is not a client-visible 401 code and
+    /// blank texts are refused; the last valid call wins; texts are kept exactly; the builder freezes even on
+    /// failure.</summary>
     [Fact]
     public void T15_policy_configuration_contract()
     {
@@ -630,6 +672,8 @@ public sealed class HostPolicyTests
         Assert.Equal(2, configured.Count(item => item.ServiceType == typeof(GatewayRegistration)));
     }
 
+    /// <summary>Without policy, or without the boundary, every reply is byte for byte what a host with neither gives,
+    /// and the host's bare 401 stays bare.</summary>
     [Fact]
     public async Task T16_no_opt_in_preserves_behavior()
     {
@@ -690,6 +734,8 @@ public sealed class HostPolicyTests
         Assert.Empty(open.Host.Logs.Failures);
     }
 
+    /// <summary>Failure lines use the public log category, carry the recorded diagnostic fields, and never contain the
+    /// driver exception or request headers attached to a refusal.</summary>
     [Fact]
     public async Task T17_public_category_and_diagnostic_fields()
     {
@@ -754,6 +800,8 @@ public sealed class HostPolicyTests
         Assert.All(host.Host.Logs.Events, item => Assert.Equal(DataGatewayExtensions.FailureLogCategory, item.Category));
     }
 
+    /// <summary>Concurrent refusals on both gateways each get their own incident, caller and gateway scope, and the
+    /// gateway scope does not reach host endpoints' logs.</summary>
     [Fact]
     public async Task T18_concurrent_gateways_do_not_share_state()
     {
@@ -812,6 +860,8 @@ public sealed class HostPolicyTests
         await host.Witnesses();
     }
 
+    /// <summary>When the refusal reply cannot be written, the request is aborted, the refusal is logged once and the
+    /// write failure goes to standard error instead of a second log line.</summary>
     [Fact]
     public async Task T19_failed_refusal_write_does_not_log_again()
     {
@@ -850,6 +900,8 @@ public sealed class HostPolicyTests
         Assert.Equal(2, host.Writes.Attempts);
     }
 
+    /// <summary>The recorded failure's code decides the reply status; an unknown code is returned as InternalError
+    /// with the generic message, and its own message stays in the log.</summary>
     [Fact]
     public async Task T20_recorded_code_controls_status()
     {

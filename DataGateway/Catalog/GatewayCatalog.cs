@@ -6,16 +6,43 @@ using DataGateway.Mcp;
 
 namespace DataGateway;
 
-// One adapter per invocation; the registration supplies lazily bound application delegates.
+/// <summary>The gateway's view of the application's catalog for one invocation: reads the MCP metadata, the source
+/// list and one source's detail, checks each against the catalog rules, and turns every fault into a
+/// <see cref="CatalogFailure"/>.</summary>
+/// <remarks>
+/// <para>One adapter per invocation; the registration supplies lazily bound application delegates. Nothing is
+/// cached between invocations, so a catalog edit applies to the next request.</para>
+/// <para>The application's code runs only inside <see cref="ReadAsync{T}"/>, so no exception it throws reaches a route
+/// or a tool: each becomes a coded failure with its type name.</para>
+/// </remarks>
+/// <param name="list">Reads the source list.</param>
+/// <param name="detail">Reads one source's detail by the name the caller sent.</param>
+/// <param name="runners">The query runner for each registered engine name.</param>
+/// <param name="metadata">Reads the MCP server and tool text.</param>
 internal sealed class GatewayCatalog(
     Func<CancellationToken, Task<IReadOnlyList<SourceListRow>>> list,
     Func<string, CancellationToken, Task<CatalogDetail?>> detail,
     IReadOnlyDictionary<string, QueryRunner> runners,
     Func<CancellationToken, Task<McpMetadata>> metadata)
 {
+    /// <summary>The caller-facing message for a catalog that cannot be read or holds invalid MCP metadata.</summary>
+    /// <remarks>Diagnostic detail stays in the log. The caller is told to stop rather than retry: the same read
+    /// fails the same way until an operator fixes the catalog.</remarks>
     internal const string UnavailableMessage = "Cannot read the catalog. Check catalog availability and the configured catalog connection. Tell the user, give the incidentId and stop; do not retry.";
+    /// <summary>Set when this invocation's MCP metadata read failed; later list and source reads then refuse
+    /// with it.</summary>
+    /// <remarks>Only the MCP endpoint reads metadata, and it shares one adapter across a stateless POST. A
+    /// <c>tools/call</c> made while the metadata is unreadable therefore answers with that failure as a tool error, not
+    /// with data. HTTP routes never read metadata, so it stays null for them.</remarks>
     private CatalogFailure? metadataFailure;
 
+    /// <summary>Reads and checks the MCP server and tool text.</summary>
+    /// <remarks>The returned failure carries the validation detail, for the log and the startup message; the stored
+    /// one carries <see cref="UnavailableMessage"/>, for callers.</remarks>
+    /// <param name="gateway">The gateway name, for the refusal messages.</param>
+    /// <param name="settings">The tool prefixes, applied before the final descriptions are measured.</param>
+    /// <param name="token">Cancels the read.</param>
+    /// <returns>The checked metadata, or the failure.</returns>
     internal async Task<CatalogResult<McpMetadata>> MetadataAsync(string gateway, McpToolSettings settings, CancellationToken token)
     {
         var read = await ReadAsync(() => metadata(token), "$", null, token);
@@ -39,6 +66,9 @@ internal sealed class GatewayCatalog(
         return CatalogResult<McpMetadata>.Success(read.Value);
     }
 
+    /// <summary>Reads and checks the source list for the list operation.</summary>
+    /// <param name="token">Cancels the read.</param>
+    /// <returns>Every source row, active or not, or the failure.</returns>
     internal async Task<CatalogResult<IReadOnlyList<SourceListRow>>> ListAsync(CancellationToken token)
     {
         var sources = await ReadSourcesAsync(token);
@@ -47,6 +77,9 @@ internal sealed class GatewayCatalog(
         return sources;
     }
 
+    /// <summary>Reads the source list and refuses it on the first rule it breaks.</summary>
+    /// <param name="token">Cancels the read.</param>
+    /// <returns>The checked rows, or the failure.</returns>
     private async Task<CatalogResult<IReadOnlyList<SourceListRow>>> ReadSourcesAsync(CancellationToken token)
     {
         var read = await ReadAsync(() => list(token), "$", null, token);
@@ -59,6 +92,10 @@ internal sealed class GatewayCatalog(
         return CatalogResult<IReadOnlyList<SourceListRow>>.Success(rows);
     }
 
+    /// <summary>Loads one source's contract for the describe operation.</summary>
+    /// <param name="sourceName">The source name the caller sent.</param>
+    /// <param name="token">Cancels the read.</param>
+    /// <returns>The source contract, or the failure.</returns>
     internal async Task<CatalogResult<SourceContract>> SourceAsync(string sourceName, CancellationToken token)
     {
         var result = await TargetAsync(sourceName, token);
@@ -67,9 +104,19 @@ internal sealed class GatewayCatalog(
             : CatalogResult<SourceContract>.Success(result.Value.Source);
     }
 
+    /// <summary>Loads one source's contract and the runner of its engine, for the query operation.</summary>
+    /// <param name="sourceName">The source name the caller sent.</param>
+    /// <param name="token">Cancels the read.</param>
+    /// <returns>The source and its runner, or the failure.</returns>
     internal Task<CatalogResult<QuerySourceContext>> TargetAsync(string sourceName, CancellationToken token) =>
         LoadAsync(sourceName, requiredActive: false, token);
 
+    /// <summary>Reads one source's detail, checks and maps it, and finds its engine.</summary>
+    /// <param name="sourceName">The source name as sent, or as listed during startup.</param>
+    /// <param name="requiredActive">True at startup, where an active listed source without an active detail is a
+    /// catalog error; false for callers, who get <c>UnknownSource</c>.</param>
+    /// <param name="token">Cancels the reads.</param>
+    /// <returns>The source and its runner, or the failure.</returns>
     private async Task<CatalogResult<QuerySourceContext>> LoadAsync(string sourceName, bool requiredActive, CancellationToken token)
     {
         var read = await ReadAsync(() => detail(sourceName, token), "$.source", sourceName, token);
@@ -104,6 +151,14 @@ internal sealed class GatewayCatalog(
         return CatalogResult<QuerySourceContext>.Success(new(mapped.Value, runner));
     }
 
+    /// <summary>The failure for a source with no active detail.</summary>
+    /// <remarks>A caller gets <c>UnknownSource</c> naming the active sources, so the next call can use a real
+    /// name; that is why the list is read again here.</remarks>
+    /// <param name="sourceName">The source name.</param>
+    /// <param name="requiredActive">True at startup; see <see cref="LoadAsync"/>.</param>
+    /// <param name="token">Cancels the list read.</param>
+    /// <param name="sourceId">The catalog id, when a detail row existed, for the log.</param>
+    /// <returns>A rejected result.</returns>
     private async Task<CatalogResult<QuerySourceContext>> MissingAsync(string sourceName, bool requiredActive, CancellationToken token, int? sourceId = null)
     {
         if (requiredActive)
@@ -116,6 +171,11 @@ internal sealed class GatewayCatalog(
             { SourceName = sourceName, SourceId = sourceId, Step = "catalog" });
     }
 
+    /// <summary>The startup check: MCP metadata, the source list and every active source's detail.</summary>
+    /// <param name="gatewayName">The gateway name, for the message.</param>
+    /// <param name="settings">The tool prefixes.</param>
+    /// <param name="token">Cancels startup.</param>
+    /// <returns>A task that fails with the first problem found.</returns>
     internal async Task ValidateAsync(string gatewayName, McpToolSettings settings, CancellationToken token)
     {
         var presentation = await MetadataAsync(gatewayName, settings, token);
@@ -129,6 +189,12 @@ internal sealed class GatewayCatalog(
         }
     }
 
+    /// <summary>The exception that stops startup, naming the gateway, the source, the path and the fix.</summary>
+    /// <remarks>Carries no inner exception, in keeping with <see cref="ReadAsync{T}"/>: a failure keeps only the
+    /// exception's type name.</remarks>
+    /// <param name="name">The gateway name.</param>
+    /// <param name="failure">The first failure found.</param>
+    /// <returns>The exception to throw.</returns>
     private static InvalidOperationException StartupFailure(string name, CatalogFailure failure)
     {
         var source = failure.SourceName is null ? "" : $"Source '{failure.SourceName}'. ";
@@ -136,7 +202,16 @@ internal sealed class GatewayCatalog(
         return new InvalidOperationException($"Gateway '{name}'. {source}{failure.Path} {failure.Message}{exceptionType}", innerException: null);
     }
 
-    // Only application invocation and await are inside this boundary. No exception object survives it.
+    /// <summary>Invokes one application catalog read and turns any exception into a coded failure.</summary>
+    /// <remarks>Only application invocation and await are inside this boundary. No exception object survives it.
+    /// Cancellation, seen as an exception or on the token, becomes <c>CatalogCancelled</c>; invalid MCP metadata
+    /// and a source's invalid query timeout keep their own messages; everything else is <c>CatalogUnavailable</c>.</remarks>
+    /// <typeparam name="T">The read's result type.</typeparam>
+    /// <param name="invoke">Starts the application's read.</param>
+    /// <param name="path">The failure path for an unavailable or cancelled read.</param>
+    /// <param name="sourceName">The source being read, or null for list and metadata reads.</param>
+    /// <param name="token">The token the read observes.</param>
+    /// <returns>The value, or the failure.</returns>
     private static async Task<(T? Value, CatalogFailure? Failure)> ReadAsync<T>(
         Func<Task<T>> invoke, string path, string? sourceName, CancellationToken token) where T : class?
     {

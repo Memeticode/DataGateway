@@ -13,8 +13,16 @@ using Xunit.Abstractions;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins cancellation on the MCP endpoint: a tool call the caller abandons, or a driver cancellation while the
+/// caller is still there, gives the same single failure line the equivalent JSON route gives.</summary>
+/// <remarks>When the caller aborts a request, the MCP SDK cancels the call, waits for it, then rethrows the abort
+/// out of the endpoint. The call has already logged its one line, so the endpoint's catch-all must drop that abort
+/// rather than log a second, unexpected-error line. Tests run on the real host (<see cref="LoggedHost"/>) and read
+/// its file log.</remarks>
 public sealed class McpCancelTests(ITestOutputHelper output)
 {
+    /// <summary>The host README's MCP section and the configuration guide state the cancellation contract the tests
+    /// below pin.</summary>
     [Fact]
     public void T7_published_docs_state_cancellation_contract()
     {
@@ -28,6 +36,8 @@ public sealed class McpCancelTests(ITestOutputHelper output)
         Assert.Contains("rethrowing the abort", File.ReadAllText(TestFiles.InRepo("DataGateway.Web/CONFIGURATION.md")));
     }
 
+    /// <summary>The endpoint treats an exception as the caller's own abort only when the request was aborted, the MCP
+    /// server had started, and the exception is a cancellation or IO error.</summary>
     [Fact]
     public async Task T6a_caller_ended_guard_truth_table()
     {
@@ -43,6 +53,8 @@ public sealed class McpCancelTests(ITestOutputHelper output)
                 }
     }
 
+    /// <summary>An abort before the MCP server exists (here, during a stalled sign-in) is not covered by a tool's line,
+    /// so the catch-all keeps its one warning line.</summary>
     [Fact]
     public async Task T6b_abort_during_sign_in_keeps_catch_all_line()
     {
@@ -68,6 +80,8 @@ public sealed class McpCancelTests(ITestOutputHelper output)
         UnexpectedErrorTests.NoFrameworkError(host);
     }
 
+    /// <summary>A <c>notifications/cancelled</c> message is accepted but cannot cancel a call made in another stateless
+    /// request; only the caller's own abort ends it.</summary>
     [Fact]
     public async Task T3_notification_cannot_reach_another_stateless_call()
     {
@@ -101,6 +115,8 @@ public sealed class McpCancelTests(ITestOutputHelper output)
         Assert.Equal("query_source", line.GetProperty("Operation").GetString());
     }
 
+    /// <summary>A cancellation thrown by the catalog or driver while the caller is still connected is a fault, not a
+    /// cancellation: the tool answers and logs exactly as the route does.</summary>
     [Theory]
     [InlineData("list_sources")]
     [InlineData("describe_source")]
@@ -140,6 +156,8 @@ public sealed class McpCancelTests(ITestOutputHelper output)
         McpToolTests.NoSdkFailure(host);
     }
 
+    /// <summary>Each tool, aborted in the catalog or (for query) in the database, with the default and an explicit
+    /// protocol version.</summary>
     public static IEnumerable<object?[]> Aborts()
     {
         foreach (var protocol in new string?[] { null, "2025-11-25" })
@@ -147,6 +165,8 @@ public sealed class McpCancelTests(ITestOutputHelper output)
                 yield return [name, catalog, protocol];
     }
 
+    /// <summary>A tool call and a route call aborted at the same point each write one warning line, and the two lines
+    /// agree in every field but the incident id and operation.</summary>
     [Theory]
     [MemberData(nameof(Aborts))]
     public async Task T5_aborted_tool_matches_route_with_one_line_each(string name, bool catalog, string? protocol)
@@ -201,6 +221,8 @@ public sealed class McpCancelTests(ITestOutputHelper output)
         foreach (var line in host.AllLines()) LoggedHost.Scan.LogLine("aborted call", line);
     }
 
+    /// <summary>Pins the test helper <see cref="PairLines"/>: it pairs the tool and route lines whatever order the log
+    /// wrote them in.</summary>
     [Theory]
     [InlineData("list_sources", false)]
     [InlineData("list_sources", true)]
@@ -217,10 +239,12 @@ public sealed class McpCancelTests(ITestOutputHelper output)
         Assert.Equal(route.GetRawText(), pair.Route.GetRawText());
     }
 
+    /// <summary>Finds the tool's line and the route's line by operation name.</summary>
     private static (JsonElement Tool, JsonElement Route) PairLines(JsonElement[] lines, string name) =>
         (Assert.Single(lines, line => line.GetProperty("Operation").GetString() == name),
          Assert.Single(lines, line => line.GetProperty("Operation").GetString() == Operation(name)));
 
+    /// <summary>Writes the failure lines and any MCP SDK warnings to the test output, to diagnose a failing run.</summary>
     private void Report(LoggedHost host)
     {
         foreach (var line in host.Lines())
@@ -232,8 +256,11 @@ public sealed class McpCancelTests(ITestOutputHelper output)
         foreach (var line in sdk) output.WriteLine("SDK Warning: category={0}; template={1}", line.GetProperty("SourceContext"), line.GetProperty("@mt"));
     }
 
+    /// <summary>The route operation that matches a tool name.</summary>
     private static string Operation(string name) => name switch { "list_sources" => "list", "describe_source" => "describe", _ => "query" };
 
+    /// <summary>Asserts two failure lines agree in every field but the incident id and operation; exception text is
+    /// compared without stack frames, which differ between the two paths.</summary>
     private static void EqualFields(JsonElement tool, JsonElement route)
     {
         foreach (var field in ErrorLogTests.Fields.Except(["IncidentId", "Operation"]))
@@ -249,12 +276,19 @@ public sealed class McpCancelTests(ITestOutputHelper output)
         }
     }
 
+    /// <summary>A seam that holds a catalog or database read until it is cancelled, signalling when the read starts
+    /// and when it sees the cancellation.</summary>
     internal sealed class Waiting
     {
+        /// <summary>Completes when a read starts waiting.</summary>
         internal TaskCompletionSource Entered { get; private set; } = Signal();
+        /// <summary>Completes when the waiting read sees cancellation.</summary>
         internal TaskCompletionSource Observed { get; private set; } = Signal();
+        /// <summary>Replaces both signals for a second call.</summary>
         internal void Reset() { Entered = Signal(); Observed = Signal(); }
+        /// <summary>A signal whose continuations run off the setting thread.</summary>
         private static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+        /// <summary>Signals entry, then waits until the token is cancelled, signalling that too.</summary>
         private async Task Wait(CancellationToken token)
         {
             var observed = Observed;
@@ -262,8 +296,11 @@ public sealed class McpCancelTests(ITestOutputHelper output)
             Entered.TrySetResult();
             await Task.Delay(Timeout.Infinite, token);
         }
+        /// <summary>A SQL Server engine whose query read connects, then waits for cancellation.</summary>
         internal DataGateway.Data.IDatabaseEngine Engine() =>FakeRows.Engine(new SqlServerEngine(), FakeRows.From(async (_, _, connected, token) =>
         { connected(); await Wait(token); return []; }));
+        /// <summary>A catalog whose list read (for <c>list_sources</c>) or detail read (for the other tools) waits for
+        /// cancellation.</summary>
         internal HostCatalogState Catalog(string name)
         {
             var catalog = new HostCatalogState();

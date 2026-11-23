@@ -10,8 +10,17 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the demo client: the command-line program that calls a running gateway's routes in a fixed
+/// sequence of steps and checks every answer against the documented wire shapes.</summary>
+/// <remarks>The checks must fail on any change to an answer, not only on a broken route, so each check is run
+/// against the README's example answers both as written (it must pass) and with one change made to each (it must
+/// fail).</remarks>
 public sealed class DemoTests
 {
+    /// <summary>The demo runs all twelve steps against the real routes and passes; it skips the steps a catalog cannot
+    /// support, and stops with a failure when there is no source to use or an answer changes shape.</summary>
+    /// <remarks>The fake source returns at most three rows, except when the request asks for six, so the cap step sees a
+    /// capped answer.</remarks>
     [Theory]
     [InlineData("full")]
     [InlineData("dates")]
@@ -87,6 +96,7 @@ public sealed class DemoTests
         }
     }
 
+    /// <summary>An answer that says there are more rows must carry exactly the requested limit of rows.</summary>
     [Fact]
     public void T22_limited_more_requires_exactly_the_limit_rows()
     {
@@ -97,6 +107,8 @@ public sealed class DemoTests
         Assert.Contains("more disagrees with limit or cap", DemoChecks.Rows(answer, "synthetic", columns, 7, 3));
     }
 
+    /// <summary>The row answer's hint is required and must be the capped, complete or nothing-matched sentence that fits
+    /// its row count and <c>more</c> flag, with singular and plural spelled right.</summary>
     [Theory]
     [InlineData(1, true, "The result set was capped at 1 row.", true)]
     [InlineData(1, false, "Complete result set.", true)]
@@ -126,6 +138,8 @@ public sealed class DemoTests
     }
 
 
+    /// <summary>With an <c>in</c> filter, the answer must use the hint that says some listed values may have matched
+    /// nothing, not the plain complete-set hint.</summary>
     [Fact]
     public void T6_in_filter_rows_accept_unmatched_hint_and_reject_complete_set()
     {
@@ -139,8 +153,11 @@ public sealed class DemoTests
         Assert.StartsWith("hint must be '", Assert.Single(problems));
     }
 
+    /// <summary>A message handler that renames the <c>sources</c> member in the list answer, to model a gateway whose
+    /// answer changed shape.</summary>
     private sealed class RenameMember : DelegatingHandler
     {
+        /// <summary>Sends the request and rewrites the list answer's body.</summary>
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             var response = await base.SendAsync(request, token);
@@ -154,9 +171,14 @@ public sealed class DemoTests
         }
     }
 
+    /// <summary>The README example's answer as the demo would receive it.</summary>
     private static DemoAnswer Answer(ReadmeExample example) => new(example.Status!.Value, "application/json; charset=utf-8",
         example.Anonymous ? "Negotiate" : null, ReadmeTests.Compact(example.Answer!.Value));
 
+    /// <summary>Runs the demo check that matches a README example, with the arguments that example's request implies.</summary>
+    /// <param name="example">The README example.</param>
+    /// <param name="answer">The answer to check.</param>
+    /// <returns>The problems found; empty when the answer passes.</returns>
     internal static IReadOnlyList<string> Check(ReadmeExample example, DemoAnswer answer) => example.Name switch
     {
         "list" => DemoChecks.List(answer), "describe" => DemoChecks.Describe(answer, "sales_by_line"),
@@ -167,8 +189,11 @@ public sealed class DemoTests
         "challenge" => DemoChecks.Anonymous(answer), _ => throw new InvalidOperationException()
     };
 
+    /// <summary>The names of the README examples that show an answer.</summary>
     public static IEnumerable<object[]> Answers() => ReadmeTests.Examples.Where(e => e.Answer.HasValue).Select(e => new object[] { e.Name });
 
+    /// <summary>Each README answer passes its check, and fails it after any single change: status, content type, a
+    /// renamed, reordered or extra member, or a missing or wrong incident id or path.</summary>
     [Theory]
     [MemberData(nameof(Answers))]
     public void T7_readme_answers_pass_and_single_wire_mutations_fail(string name)
@@ -208,6 +233,8 @@ public sealed class DemoTests
         }
     }
 
+    /// <summary>A source's row cap must be present, an integer and in range, and the described cap must match the query
+    /// schema's limit maximum.</summary>
     [Theory]
     [InlineData("list")]
     [InlineData("describe")]
@@ -229,6 +256,8 @@ public sealed class DemoTests
         }
     }
 
+    /// <summary>The row check refuses a wrong count, a wrong <c>more</c>, a mistyped or extra cell, rows that do not match
+    /// the filter (text compared ignoring case and trailing spaces), and group counts out of descending order.</summary>
     [Fact]
     public void T7_row_checks_refuse_bad_counts_types_filters_order_and_more()
     {
@@ -255,6 +284,8 @@ public sealed class DemoTests
         Assert.NotEmpty(DemoChecks.Rows(group, "sales_by_line", [count], 500, 5, descendingCounts: true));
     }
 
+    /// <summary>The demo picks its columns in catalog order from their capability flags, and sorts by an aggregate's
+    /// alias only when the column can be sorted.</summary>
     [Fact]
     public void T8_picks_use_catalog_order_flags_and_canonical_alias()
     {
@@ -275,6 +306,8 @@ public sealed class DemoTests
         Assert.Empty(DemoPlan.Pick([columns[0]], 5).Select);
     }
 
+    /// <summary>Command lines the demo must refuse: no URL, a URL that is not a plain http or https root, and bad
+    /// <c>--source</c> options.</summary>
     public static IEnumerable<object[]> BadArguments()
     {
         yield return [Array.Empty<string>()];
@@ -282,6 +315,7 @@ public sealed class DemoTests
         foreach (var tail in new[] { new[] { "--source" }, new[] { "--source", " " }, new[] { "--wrong", "x" }, new[] { "--source", "x", "--source", "y" }, new[] { "http://localhost" } })
             yield return [new[] { "http://localhost:5000" }.Concat(tail).ToArray()];
     }
+    /// <summary>A bad command line is refused with the usage text before any request is sent.</summary>
     [Theory]
     [MemberData(nameof(BadArguments))]
     public void T8_bad_arguments_fail_before_any_request(string[] args)
@@ -290,6 +324,7 @@ public sealed class DemoTests
         Assert.Null(result.Arguments);
         Assert.Contains("Usage:", result.Error);
     }
+    /// <summary>A root URL alone, or with one <c>--source</c>, is accepted.</summary>
     [Theory]
     [InlineData("http://localhost:5000")]
     [InlineData("https://localhost/")]

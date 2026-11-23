@@ -9,8 +9,14 @@ using Xunit;
 namespace DataGateway.Web.Tests;
 
 /// <summary>What the proxy tells a client when a tool call fails on the way to the gateway.</summary>
+/// <remarks>The proxy is the local stdio bridge a desktop client starts; it forwards tool calls to the gateway over
+/// HTTP with the computer's Windows sign-in.</remarks>
 public sealed class ProxyFailureTests
 {
+    /// <summary>Only no answer, or a reverse proxy's 502, 503 or 504, is reported as unreachable; any other HTTP
+    /// status means the gateway answered and refused.</summary>
+    /// <remarks>Calling a refusal "unreachable" would send the user to restart a service that is running, so the
+    /// message never says restart. A 401 or 403 names the sign-in as the cause.</remarks>
     [Theory]
     [InlineData(null, "ServiceUnreachable", "could not be reached")]
     [InlineData(HttpStatusCode.Unauthorized, "ServiceRefused", "refused this computer's Windows sign-in (HTTP 401)")]
@@ -31,6 +37,9 @@ public sealed class ProxyFailureTests
         Assert.Equal("0123456789abcdef0123456789abcdef", body.RootElement.GetProperty("incidentId").GetString());
     }
 
+    /// <summary>The proxy's HTTP client has no timeout of its own.</summary>
+    /// <remarks>HttpClient's default 100 seconds would cut off a query the gateway still allows; the gateway enforces
+    /// each source's timeout, and the client cancels through the call's token.</remarks>
     [Fact]
     public void T2_the_proxy_sets_no_client_side_timeout_of_its_own()
     {

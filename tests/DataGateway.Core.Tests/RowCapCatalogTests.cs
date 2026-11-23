@@ -2,8 +2,15 @@ using Xunit;
 
 namespace DataGateway.Core.Tests;
 
+/// <summary>Pins the catalog's per-source row cap in the SQL scripts: the table DDL, the upgrade migration and the
+/// catalog view.</summary>
+/// <remarks>The scripts are read as text, not run, so the contract holds without a database: the column, its default
+/// and range check, the audit trigger's copy of it, and the migration's transaction and rerun guards.</remarks>
 public sealed class RowCapCatalogTests
 {
+    /// <summary>The DDL and the migration agree on the <c>row_cap</c> column (not null, default 500, checked to
+    /// 1..<see cref="DataGateway.Core.Catalog.QueryLimits.MaxRowCap"/>), the audit table and trigger carry it, the view
+    /// exposes it, and the migration is safe to rerun and rolls back on failure.</summary>
     [Fact]
     public void T1_ddl_view_and_migration_declare_the_cap_contract()
     {

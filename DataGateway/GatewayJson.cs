@@ -11,8 +11,12 @@ namespace DataGateway;
 /// AddDataGateway registers the default instance; tests register their own to observe or fault serialization.</remarks>
 internal sealed class GatewayJson
 {
+    /// <summary>The options every gateway uses unless a test registers its own.</summary>
     internal static GatewayJson Default { get; } = new();
 
+    /// <summary>Builds the frozen wire options, with extra converters added last.</summary>
+    /// <remarks>The converters exist for tests, which add one to observe or fault the serialization of a reply.</remarks>
+    /// <param name="converters">Converters added after the defaults; none in production.</param>
     internal GatewayJson(params JsonConverter[] converters)
     {
         // ASP.NET Core's own defaults for HTTP JSON, which the wire was built and frozen on: web naming, and the relaxed
@@ -27,7 +31,11 @@ internal sealed class GatewayJson
         Options = options;
     }
 
+    /// <summary>The read-only serializer options for replies.</summary>
     internal JsonSerializerOptions Options { get; }
 
+    /// <summary>The options registered in <paramref name="services"/>, or <see cref="Default"/> when none are.</summary>
+    /// <param name="services">The request's or the call's services.</param>
+    /// <returns>The options to serialize the reply with.</returns>
     internal static JsonSerializerOptions Of(IServiceProvider services) => (services.GetService<GatewayJson>() ?? Default).Options;
 }

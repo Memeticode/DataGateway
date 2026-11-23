@@ -9,17 +9,30 @@ using Xunit;
 
 namespace DataGateway.Web.Tests;
 
+/// <summary>Pins the PostgreSQL engine's source read: it reuses the shared base's scoped lifetime, keeps cells as the
+/// provider returns them, and cleans up at every cancellation point.</summary>
 public sealed class PostgreSqlSourceTests
 {
+    /// <summary>A PostgreSQL engine whose source read fails with a chosen error, optionally after reporting the
+    /// connection open.</summary>
     internal sealed class Engine : IDatabaseEngine
     {
+        /// <summary>The real engine's provider name.</summary>
         string IDatabaseEngine.ProviderName => ((IDatabaseEngine)engine).ProviderName;
+        /// <summary>The real engine that compiles, validates and recognizes failures.</summary>
         private readonly PostgreSqlEngine engine = new();
+        /// <summary>The error the read fails with; <see cref="NotSupportedException"/> when null.</summary>
         internal Exception? SourceError;
+        /// <summary>Whether the read reports the connection open before failing.</summary>
         internal bool SourceOpened;
+        /// <summary>Compiles with the real engine.</summary>
         public CompiledQuery Compile(ValidatedQuery q) => engine.Compile(q);
+        /// <summary>Validates with the real engine.</summary>
         public void ValidateSourceConnection(string? c) => engine.ValidateSourceConnection(c);
+        /// <summary>Recognizes failures with the real engine.</summary>
         public ProviderFailure? RecognizeFailure(Exception e) => engine.RecognizeFailure(e);
+        /// <summary>Fails with <see cref="SourceError"/>, after calling <c>opened</c> when
+        /// <see cref="SourceOpened"/> is set.</summary>
         public Task<QueryRows> ReadSourceAsync(string c, CompiledQuery q, int t, Action opened,
             Func<IAsyncEnumerable<IDictionary<string, object?>>, Task<QueryRows>> consume, CancellationToken token)
         {
@@ -29,24 +42,41 @@ public sealed class PostgreSqlSourceTests
         }
     }
 
-    // These tests exercise the shared base lifetime, not an NpgsqlConnection substitute.
+    /// <summary>An engine on the shared base over the fake connection, for testing the base's read lifetime.</summary>
+    /// <remarks>These tests exercise the shared base lifetime, not an NpgsqlConnection substitute; compiling hooks
+    /// throw because no test compiles through it.</remarks>
     internal sealed class LifecycleEngine() : DatabaseEngine<PostgreSqlProbeConnection>(
         text => new PostgreSqlProbeConnection { ConnectionString = text })
     {
+        /// <summary>Not used.</summary>
         protected override Compiler CreateCompiler() => throw new NotSupportedException();
+        /// <summary>Not used.</summary>
         protected override string MatchedRowCountExpression => throw new NotSupportedException();
+        /// <summary>Not used.</summary>
         protected override (string Pattern, string EscapeCharacter) PrepareLikePattern(string pattern) =>
             throw new NotSupportedException();
+        /// <summary>Not used: the raw test query has no parameters.</summary>
         protected override void PrepareParameter(DbParameter parameter, object? value) =>
             throw new NotSupportedException();
+        /// <summary>Keeps each cell as read.</summary>
         protected override object ConvertCell(object value, OutputColumn? column) => value;
+        /// <summary>Validates with the PostgreSQL engine's rules.</summary>
         public override void ValidateSourceConnection(string? connection) => new PostgreSqlEngine().ValidateSourceConnection(connection);
+        /// <summary>Recognizes failures with the PostgreSQL engine's rules.</summary>
         public override ProviderFailure? RecognizeFailure(Exception error) => new PostgreSqlEngine().RecognizeFailure(error);
     }
 
+    /// <summary>Reads <c>SELECT id</c> through <see cref="LifecycleEngine"/> with a seven-second command timeout.</summary>
+    /// <param name="consume">The row consumer; collects every row when null.</param>
+    /// <param name="opened">Called once the connection opens.</param>
+    /// <param name="token">The caller's token.</param>
     internal static Task<QueryRows> Read(Func<IAsyncEnumerable<IDictionary<string,object?>>,Task<QueryRows>>? consume=null,Action? opened=null,CancellationToken token=default) =>
         new LifecycleEngine().ReadSourceAsync(PostgreSqlCompilationTests.Connection,SqliteEngineTests.Raw("SELECT id"),7,opened??(()=>{}),consume??SqliteEngineTests.Collect,token);
 
+    /// <summary>The engine inherits compile and read from the shared base unchanged, and only its compiler hooks are
+    /// PostgreSQL's own.</summary>
+    /// <remarks>Keeping compile and read in the base means the engine reuses its bounded read and cleanup order
+    /// instead of keeping a copy of its own.</remarks>
     [Fact]
     public void Source_methods_are_inherited_and_compiler_hooks_are_postgresql()
     {
@@ -81,6 +111,8 @@ public sealed class PostgreSqlSourceTests
         Assert.Equal((@"%\_[x]\\", "\\"), Hook("PrepareLikePattern", @"%_[x]\"));
     }
 
+    /// <summary>The engine returns every cell as the same object the provider read, whatever the column's declared
+    /// type, keeping a decimal's scale and a long beyond double precision.</summary>
     [Fact]
     public void Cells_are_identical_even_when_metadata_is_boolean()
     {
@@ -94,6 +126,8 @@ public sealed class PostgreSqlSourceTests
         Assert.Equal(4, (decimal.GetBits((decimal)values[0])[3] >> 16) & 0xff);
     }
 
+    /// <summary>A consumer that never enumerates causes no reads, one that stops early reads no further, a
+    /// cancellation on the consumer's own token is honored, and reading past the end reads no more.</summary>
     [Fact]
     public async Task No_enumeration_early_stop_and_distinct_cancellation()
     {
@@ -116,6 +150,8 @@ public sealed class PostgreSqlSourceTests
             return new QueryRows([],false);
         });
     }
+    /// <summary>Cancelling during open, execute or a read ends the call only after every resource acquired so far is
+    /// disposed, once.</summary>
     [Theory]
     [InlineData("open")][InlineData("execute")][InlineData("read")]
     public async Task Cancellation_at_each_async_boundary_awaits_cleanup(string stage)
