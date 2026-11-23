@@ -4,6 +4,8 @@ Claude Desktop does not sign in with Windows. `DataGateway.Proxy` runs on the us
 
 The server side is [DataGateway.Web on IIS](../../DataGateway.Web/IIS.md), or any DataGateway host that requires Windows sign-in.
 
+A prebuilt package, [datagateway-proxy.mcpb](datagateway-proxy.mcpb), is in this folder on this branch, built from this branch's source for Windows x64. Build your own as below to change the manifest or pick up later changes.
+
 ## Build the package
 
 On Windows, with the .NET 10 SDK and PowerShell 7, from the public source root:
