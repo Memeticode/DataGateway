@@ -20,7 +20,7 @@ internal static class GatewayRoutes
                 RequestTrail.Of(context), context.RequestAborted));
         MapPost<QueryResponse>(group, "/query", QueryRoute.Operation, registration, failures,
             (body, catalog, context) => QuerySource.RunAsync(body, catalog.TargetAsync, registration.Limits,
-                RequestTrail.Of(context), context.RequestAborted));
+                RequestTrail.Of(context), failures.StoreTypes.Report, context.RequestAborted));
         McpEndpoint.Map(group, registration, failures);
     }
 

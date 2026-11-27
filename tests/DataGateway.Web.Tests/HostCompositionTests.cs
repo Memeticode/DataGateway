@@ -128,7 +128,8 @@ public sealed class HostCompositionTests
                 var cells = Cells(source);
                 cells["id"] = 1;
                 cells["query_timeout_seconds"] = 30;
-                foreach (var field in new[] { "unit", "magnitude", "display_format" }) cells[field] = null;
+                foreach (var field in new[] { "unit", "magnitude", "display_format", "expression", "store_type" }) cells[field] = null;
+                cells["store_type_override"] = false;
                 cells["connection_string"] = "Server=synthetic-sample;Database=synthetic-sample;Integrated Security=true";
                 foreach (var (key, value) in Cells(column))
                     cells[key switch { "title" => "column_title", "description" => "column_description", _ => key }] = value;

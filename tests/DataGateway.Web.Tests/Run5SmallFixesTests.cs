@@ -452,7 +452,7 @@ public sealed class Run5SmallFixesTests
             ["ordinal"] = c.Ordinal, ["column_title"] = c.Title, ["column_description"] = c.Description, ["data_type"] = c.DataType,
             ["unit"] = c.Unit, ["magnitude"] = c.Magnitude, ["display_format"] = c.DisplayFormat,
             ["can_select"] = c.CanSelect, ["can_filter"] = c.CanFilter, ["can_sort"] = c.CanSort,
-            ["can_group"] = c.CanGroup, ["can_aggregate"] = c.CanAggregate
+            ["can_group"] = c.CanGroup, ["can_aggregate"] = c.CanAggregate, ["expression"] = c.Expression, ["store_type"] = c.StoreType, ["store_type_override"] = c.StoreTypeOverride
         }).ToArray(), [])));
 
     private static DataGateway.Data.IDatabaseEngine Engine(Func<IReadOnlyList<IDictionary<string, object?>>> rows, Action<CompiledQuery>? inspect = null) =>

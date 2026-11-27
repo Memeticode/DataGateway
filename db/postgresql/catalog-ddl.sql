@@ -30,7 +30,10 @@ CREATE TABLE IF NOT EXISTS datagateway.datasourcecolumn (
     can_filter boolean NOT NULL DEFAULT false,
     can_sort boolean NOT NULL DEFAULT false,
     can_group boolean NOT NULL DEFAULT false,
-    can_aggregate boolean NOT NULL DEFAULT false
+    can_aggregate boolean NOT NULL DEFAULT false,
+    expression text,
+    store_type varchar(128),
+    store_type_override boolean NOT NULL DEFAULT false
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_datasource_name ON datagateway.datasource (lower(name COLLATE "C"));
 CREATE UNIQUE INDEX IF NOT EXISTS uq_datasourcecolumn_name ON datagateway.datasourcecolumn (datasource_fk, lower(column_name COLLATE "C"));
@@ -87,8 +90,19 @@ CREATE TABLE IF NOT EXISTS datagateway.datasourcecolumnaudit (
     can_filter boolean NOT NULL,
     can_sort boolean NOT NULL,
     can_group boolean NOT NULL,
-    can_aggregate boolean NOT NULL
+    can_aggregate boolean NOT NULL,
+    expression text,
+    store_type varchar(128),
+    store_type_override boolean NOT NULL DEFAULT false
 );
+-- A rerun on an older catalog: CREATE TABLE IF NOT EXISTS adds no column, and the audit function below names
+-- expression, store_type and store_type_override, so add those cells first; otherwise every later column edit fails until the migration runs.
+ALTER TABLE datagateway.datasourcecolumnaudit ADD COLUMN IF NOT EXISTS expression text;
+ALTER TABLE datagateway.datasourcecolumn ADD COLUMN IF NOT EXISTS expression text;
+ALTER TABLE datagateway.datasourcecolumnaudit ADD COLUMN IF NOT EXISTS store_type varchar(128);
+ALTER TABLE datagateway.datasourcecolumn ADD COLUMN IF NOT EXISTS store_type varchar(128);
+ALTER TABLE datagateway.datasourcecolumnaudit ADD COLUMN IF NOT EXISTS store_type_override boolean NOT NULL DEFAULT false;
+ALTER TABLE datagateway.datasourcecolumn ADD COLUMN IF NOT EXISTS store_type_override boolean NOT NULL DEFAULT false;
 CREATE OR REPLACE FUNCTION datagateway.audit_datasourcecolumn() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, datagateway, pg_temp
@@ -97,9 +111,9 @@ DECLARE image datagateway.datasourcecolumn%ROWTYPE;
 BEGIN
     IF TG_OP = 'DELETE' THEN image := OLD; ELSE image := NEW; END IF;
     INSERT INTO datagateway.datasourcecolumnaudit
-        (audit_action, audit_date, audit_login, datasourcecolumn_fk, datasource_fk, column_name, ordinal, title, description, data_type, unit, magnitude, display_format, can_select, can_filter, can_sort, can_group, can_aggregate)
+        (audit_action, audit_date, audit_login, datasourcecolumn_fk, datasource_fk, column_name, ordinal, title, description, data_type, unit, magnitude, display_format, can_select, can_filter, can_sort, can_group, can_aggregate, expression, store_type, store_type_override)
     VALUES (substr(TG_OP,1,1), clock_timestamp(), session_user,
-        image.id, image.datasource_fk, image.column_name, image.ordinal, image.title, image.description, image.data_type, image.unit, image.magnitude, image.display_format, image.can_select, image.can_filter, image.can_sort, image.can_group, image.can_aggregate);
+        image.id, image.datasource_fk, image.column_name, image.ordinal, image.title, image.description, image.data_type, image.unit, image.magnitude, image.display_format, image.can_select, image.can_filter, image.can_sort, image.can_group, image.can_aggregate, image.expression, image.store_type, image.store_type_override);
     RETURN NULL;
 END
 $audit$;

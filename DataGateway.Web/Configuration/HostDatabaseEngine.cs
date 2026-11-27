@@ -1,10 +1,11 @@
+using DataGateway.Core.Catalog;
 using DataGateway.Core.Queries;
 using DataGateway.Data;
 
 namespace DataGateway.Web.Configuration;
 
 // The gateway is configured before Build; the DI-owned singleton is selected and bound after Build.
-internal sealed class HostDatabaseEngine(string providerName) : IDatabaseEngine
+internal sealed class HostDatabaseEngine(string providerName) : IDatabaseEngine, IStoreTypeEngine
 {
     private IDatabaseEngine? selected;
     public string ProviderName { get; } = providerName;
@@ -25,4 +26,12 @@ internal sealed class HostDatabaseEngine(string providerName) : IDatabaseEngine
         Func<IAsyncEnumerable<IDictionary<string, object?>>, Task<QueryRows>> consume,
         CancellationToken cancellationToken) =>
         Engine.ReadSourceAsync(connection, query, commandTimeoutSeconds, opened, consume, cancellationToken);
+
+    // Forwards the store-type check to the selected engine when it has one (the SQL Server engine), so wrapping an
+    // engine never hides it; any other engine's sources bind as before.
+    public Task<IReadOnlyDictionary<string, StoreType>> ResolveStoreTypesAsync(SourceContract source,
+        Action<StoreTypeFinding> report, CancellationToken cancellationToken) =>
+        Engine is IStoreTypeEngine typed
+            ? typed.ResolveStoreTypesAsync(source, report, cancellationToken)
+            : Task.FromResult<IReadOnlyDictionary<string, StoreType>>(new Dictionary<string, StoreType>());
 }

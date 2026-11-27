@@ -43,7 +43,7 @@ public sealed class PostgreSqlCatalog : CatalogService<NpgsqlConnection>
         "       c.column_name, c.ordinal, c.title AS column_title,\n" +
         "       c.description AS column_description, c.data_type, c.unit,\n" +
         "       c.magnitude, c.display_format, c.can_select, c.can_filter,\n" +
-        "       c.can_sort, c.can_group, c.can_aggregate\n" +
+        "       c.can_sort, c.can_group, c.can_aggregate, c.expression, c.store_type, c.store_type_override\n" +
         "FROM datagateway.vdatasource AS s\n" +
         "LEFT JOIN datagateway.vdatasourcecolumn AS c ON c.datasource_fk = s.id\n" +
         "WHERE lower(s.name COLLATE \"C\") = lower(@source COLLATE \"C\") AND s.is_active = TRUE\n" +

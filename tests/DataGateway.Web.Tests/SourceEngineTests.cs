@@ -37,8 +37,10 @@ public sealed class SourceEngineTests
         new LifecycleEngine().ReadSourceAsync(Connection, query ?? Query(), timeout, opened ?? (() => { }), consume ?? Collect, token);
     private static object? Hook(string name, params object?[] arguments)
     {
-        var method = typeof(SqlServerEngine).GetMethod(name,
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        // By name and argument count: PrepareParameter has an untyped and a store-typed overload.
+        var method = typeof(SqlServerEngine).GetMethods(
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            .Single(candidate => candidate.Name == name && candidate.GetParameters().Length == arguments.Length);
         try { return method.Invoke(new SqlServerEngine(), arguments); }
         catch (System.Reflection.TargetInvocationException error)
         {
@@ -93,7 +95,8 @@ public sealed class SourceEngineTests
         foreach (var name in new[] { "Compile", "ReadSourceAsync", "Bind", "ParameterType" })
             Assert.DoesNotContain(type.GetMethods(flags), method => method.Name == name);
         Assert.Null(type.Assembly.GetType("DataGateway.Data.SqlServer.ScopedSourceRows"));
-        var compiler = Assert.IsType<SqlKata.Compilers.SqlServerCompiler>(Hook("CreateCompiler"));
+        var compiler = Assert.IsType<SqlServerColumnCompiler>(Hook("CreateCompiler"));
+        Assert.Equal(typeof(SqlKata.Compilers.SqlServerCompiler), compiler.GetType().BaseType);
         Assert.True(compiler.UseLegacyPagination);
         Assert.NotSame(compiler, Hook("CreateCompiler"));
         Assert.Equal("COUNT_BIG(*) AS [__dg_matched_rows]", Hook("get_MatchedRowCountExpression"));
@@ -111,6 +114,7 @@ public sealed class SourceEngineTests
             var parameter = new ProbeParameter { ParameterName = "@p", DbType = DbType.Guid };
             Hook("PrepareParameter", parameter, value);
             Assert.Same(value ?? DBNull.Value, parameter.Value);
+            // Without a store type every value binds as preview.6 did; only a date is retyped.
             Assert.Equal(value is DateTime ? DbType.DateTime2 : DbType.Guid, parameter.DbType);
             Assert.Equal("@p", parameter.ParameterName);
             if (value is null or DBNull) continue;
@@ -118,6 +122,24 @@ public sealed class SourceEngineTests
                 Assert.Same(value, Hook("ConvertCell", value, column));
         }
         Assert.Equal(4, (decimal.GetBits((decimal)values[6]!)[3] >> 16) & 0xff);
+    }
+
+    /// <summary>Without a store type, text of any length or script binds exactly as preview.6 did: the hook leaves the
+    /// type and size to the driver (its default nvarchar).</summary>
+    /// <remarks>The rule this replaces sent all ASCII text as <c>varchar(8000)</c>, which cut a 4001-8000 character
+    /// value compared with an <c>nvarchar(4000)</c> column; text is now typed only by its column's store type.</remarks>
+    [Fact]
+    public void T13b_text_without_a_store_type_binds_as_preview6()
+    {
+        foreach (var text in new[] { "", "ABCD", "a[_]%", "'; DROP TABLE x;--", new string('x', 5000), new string('x', 8001),
+                     "Z\u00fcrich", "\u03bb", "\U0001F600" })
+        {
+            var parameter = new ProbeParameter { ParameterName = "@p", DbType = DbType.Guid, Size = 7 };
+            Hook("PrepareParameter", parameter, text);
+            Assert.Same(text, parameter.Value);
+            Assert.Equal(DbType.Guid, parameter.DbType);
+            Assert.Equal(7, parameter.Size);
+        }
     }
 
     [Fact]
@@ -635,7 +657,7 @@ public sealed class SourceEngineTests
         using var caller = new CancellationTokenSource();
         var result = await QuerySource.RunAsync(Encoding.UTF8.GetBytes(ErrorLogTests.Body("query")), (_, _) => Task.FromResult(
                 CatalogResult<QuerySourceContext>.Success(new(ErrorLogTests.Contract(), runner))),
-            QueryLimits.ForRowCap(500), trail, caller.Token);
+            QueryLimits.ForRowCap(500), trail, _ => { }, caller.Token);
         Assert.Equal("SourceUnavailable", result.Failure?.Code);
         Assert.Same(trail.Query, engine.ReadQuery); Assert.Same(engine.Output, engine.ReadQuery);
         Assert.Equal(trail.Source!.ConnectionString, engine.Connection); Assert.Equal(1, engine.Timeout);

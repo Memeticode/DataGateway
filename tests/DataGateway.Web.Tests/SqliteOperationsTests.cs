@@ -95,7 +95,7 @@ public sealed class SqliteOperationsTests(ITestOutputHelper output)
         {
             (SqliteTestCatalog.ListSql, 102, "0c5fea588ae543a3832a744308e3b5b46d47c338ebc90a00f214fd5392505892"),
             (SqliteTestCatalog.AvailableSql, 58, "8c09d606be7d35b876961707ed9a3ea1131234a257992d77f3be48078fbbfd6d"),
-            (SqliteTestCatalog.ReadSql, 600, "5ede61532567d22c090a82f6e1c083ffb4373ec8833adb00efdf6bd920a00dd5")
+            (SqliteTestCatalog.ReadSql, 657, "55471c44615772f11cb3a6e80767f2df5c0eb57ae313683d11a95aa1a6a2efda")
         })
         {
             var bytes = Encoding.UTF8.GetBytes(sql);

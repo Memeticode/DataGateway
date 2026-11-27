@@ -21,7 +21,7 @@ public sealed class CatalogEngineTests
     private const string Connection = "  Data Source = synthetic-host ; Initial Catalog = Other ; Connect Timeout = 7 ; ConnectRetryCount = 4 ; ";
     private const string Help = "CatalogConfiguration: supply a valid connection naming database Catalog through the DATAGATEWAY_CATALOG_CONNECTION environment variable or project user secrets. From src/, use: dotnet user-secrets set DATAGATEWAY_CATALOG_CONNECTION \"<catalog connection>\" --project DataGateway.Web";
     internal static readonly string[] SourceFields = ["id", "name", "title", "description", "grain", "row_cap", "object_name", "connection_string"];
-    internal static readonly string[] ColumnFields = ["column_name", "ordinal", "column_title", "column_description", "data_type", "unit", "magnitude", "display_format", "can_select", "can_filter", "can_sort", "can_group", "can_aggregate"];
+    internal static readonly string[] ColumnFields = ["column_name", "ordinal", "column_title", "column_description", "data_type", "unit", "magnitude", "display_format", "can_select", "can_filter", "can_sort", "can_group", "can_aggregate", "expression", "store_type", "store_type_override"];
     private static readonly string[] ListFields = ["name", "title", "description", "grain", "row_cap"];
 
     public static IEnumerable<object?[]> ValidationCases()
@@ -335,7 +335,7 @@ public sealed class CatalogEngineTests
         ["row_cap"] = 500, ["query_timeout_seconds"] = 30, ["object_name"] = "dbo.synthetic", ["connection_string"] = ErrorLogTests.SourceConnection,
         ["column_name"] = "measure", ["ordinal"] = 1, ["column_title"] = "Measure", ["column_description"] = "Meaning", ["data_type"] = "number",
         ["unit"] = null, ["magnitude"] = null, ["display_format"] = null,
-        ["can_select"] = true, ["can_filter"] = true, ["can_sort"] = true, ["can_group"] = true, ["can_aggregate"] = true
+        ["can_select"] = true, ["can_filter"] = true, ["can_sort"] = true, ["can_group"] = true, ["can_aggregate"] = true, ["expression"] = null, ["store_type"] = null, ["store_type_override"] = false
     };
     internal static Dictionary<string, object?> ListRow() => ListFields.ToDictionary(field => field, field => SourceRow()[field]);
     private static SourceProbe Probe() => new() { AllowNextResult = true };

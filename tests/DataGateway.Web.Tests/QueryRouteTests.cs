@@ -528,7 +528,7 @@ public sealed class QueryRouteTests
         ["id"] = 7319, ["object_name"] = objectName, ["connection_string"] = connection, ["name"] = "synthetic_sales", ["title"] = "Synthetic sales", ["description"] = "Invented lines", ["grain"] = "One line", ["row_cap"] = 7, ["query_timeout_seconds"] = 1,
         ["column_name"] = c.ColumnName, ["ordinal"] = c.Ordinal, ["column_title"] = c.Title, ["column_description"] = c.Description, ["data_type"] = c.DataType,
         ["unit"] = null, ["magnitude"] = null, ["display_format"] = null,
-        ["can_select"] = c.CanSelect, ["can_filter"] = c.CanFilter, ["can_sort"] = c.CanSort, ["can_group"] = c.CanGroup, ["can_aggregate"] = c.CanAggregate
+        ["can_select"] = c.CanSelect, ["can_filter"] = c.CanFilter, ["can_sort"] = c.CanSort, ["can_group"] = c.CanGroup, ["can_aggregate"] = c.CanAggregate, ["expression"] = c.Expression, ["store_type"] = c.StoreType, ["store_type_override"] = c.StoreTypeOverride
     }).ToArray();
     private static DataSourceColumnRow[] Columns() => [
         new("region",1,"Region","Invented region","text",null,null,null,true,true,true,true,true),

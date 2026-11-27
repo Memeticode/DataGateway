@@ -46,7 +46,7 @@ internal sealed class SqliteFixture : IDisposable
                 object_name TEXT, connection_string TEXT, is_active INTEGER);
             CREATE TABLE gateway_column(datasource_fk INTEGER, column_name TEXT, ordinal INTEGER, title TEXT,
                 description TEXT, data_type TEXT, unit TEXT, magnitude TEXT, display_format TEXT,
-                can_select INTEGER, can_filter INTEGER, can_sort INTEGER, can_group INTEGER, can_aggregate INTEGER);
+                can_select INTEGER, can_filter INTEGER, can_sort INTEGER, can_group INTEGER, can_aggregate INTEGER, expression TEXT, store_type TEXT, store_type_override INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE proof_items(id INTEGER, label TEXT, flag INTEGER, amount INTEGER);
             """);
         foreach (var (id, name, active) in new[] { (102, "synthetic_other", 1), (103, "synthetic_hidden", 0), (101, "synthetic_items", 1) })
@@ -54,7 +54,7 @@ internal sealed class SqliteFixture : IDisposable
             Execute("INSERT INTO gateway_source(id,name,title,description,grain,row_cap,object_name,connection_string,is_active) VALUES(@v0,@v1,@v2,@v3,@v4,@v5,@v6,@v7,@v8)",
                 id, name, "Synthetic", "Invented SQLite proof data.", "One item", 3, "proof_items", Connection, active);
             foreach (var (column, ordinal, type) in new[] { ("amount", 4, "number"), ("flag", 3, "bool"), ("id", 1, "number"), ("label", 2, "text") })
-                Execute("INSERT INTO gateway_column VALUES(@v0,@v1,@v2,@v3,@v4,@v5,NULL,NULL,NULL,1,1,1,1,1)",
+                Execute("INSERT INTO gateway_column VALUES(@v0,@v1,@v2,@v3,@v4,@v5,NULL,NULL,NULL,1,1,1,1,1,NULL,NULL,0)",
                     id, column, ordinal, column, "Invented value.", type);
         }
         var labels = new[] { "plain", @"50%_[x]\end", "other", @"50AAZxZ\end", "tail" };

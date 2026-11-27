@@ -15,6 +15,14 @@ BEGIN
     END IF;
 END
 $migration$;
+-- Install the reserved expression cells (catalog-expression.sql) and the store_type cells (catalog-store-type.sql)
+-- before the current trigger and views name them.
+ALTER TABLE datagateway.datasourcecolumnaudit ADD COLUMN IF NOT EXISTS expression text;
+ALTER TABLE datagateway.datasourcecolumn ADD COLUMN IF NOT EXISTS expression text;
+ALTER TABLE datagateway.datasourcecolumnaudit ADD COLUMN IF NOT EXISTS store_type varchar(128);
+ALTER TABLE datagateway.datasourcecolumn ADD COLUMN IF NOT EXISTS store_type varchar(128);
+ALTER TABLE datagateway.datasourcecolumnaudit ADD COLUMN IF NOT EXISTS store_type_override boolean NOT NULL DEFAULT false;
+ALTER TABLE datagateway.datasourcecolumn ADD COLUMN IF NOT EXISTS store_type_override boolean NOT NULL DEFAULT false;
 -- Refresh the common trigger definitions and explicit read projections.
 \ir catalog-ddl.sql
 \ir catalog-views.sql

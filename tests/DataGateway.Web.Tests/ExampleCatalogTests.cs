@@ -20,7 +20,7 @@ namespace DataGateway.Web.Tests;
 public sealed class ExampleCatalogTests
 {
     private static readonly string[] Flags = ["can_select", "can_filter", "can_sort", "can_group", "can_aggregate"];
-    private static readonly string[] Optional = ["unit", "magnitude", "display_format"];
+    private static readonly string[] Optional = ["unit", "magnitude", "display_format", "expression", "store_type"];
     private static readonly string[] ListFields = ["name", "title", "description", "grain", "row_cap"];
     private const string SecretObject = "synthetic_object_private_5b25f7e0_long_witness";
     private const string SecretConnection = "synthetic_connection_private_6f28a1d3_long_witness";
@@ -91,7 +91,7 @@ public sealed class ExampleCatalogTests
             "       c.[column_name], c.[ordinal], c.[title] AS [column_title],\r\n" +
             "       c.[description] AS [column_description], c.[data_type], c.[unit],\r\n" +
             "       c.[magnitude], c.[display_format], c.[can_select], c.[can_filter],\r\n" +
-            "       c.[can_sort], c.[can_group], c.[can_aggregate]\r\n" +
+            "       c.[can_sort], c.[can_group], c.[can_aggregate], c.[expression], c.[store_type], c.[store_type_override]\r\n" +
             "FROM [dbo].[vDataSource] AS s\r\n" +
             "LEFT JOIN [dbo].[vDataSourceColumn] AS c ON c.[datasource_fk] = s.[id]\r\n" +
             "WHERE s.[name] COLLATE Latin1_General_100_CI_AS = @source AND s.[is_active] = 1\r\n" +
@@ -104,7 +104,7 @@ public sealed class ExampleCatalogTests
             "       c.column_name, c.ordinal, c.title AS column_title,\n" +
             "       c.description AS column_description, c.data_type, c.unit,\n" +
             "       c.magnitude, c.display_format, c.can_select, c.can_filter,\n" +
-            "       c.can_sort, c.can_group, c.can_aggregate\n" +
+            "       c.can_sort, c.can_group, c.can_aggregate, c.expression, c.store_type, c.store_type_override\n" +
             "FROM datagateway.vdatasource AS s\n" +
             "LEFT JOIN datagateway.vdatasourcecolumn AS c ON c.datasource_fk = s.id\n" +
             "WHERE lower(s.name COLLATE \"C\") = lower(@source COLLATE \"C\") AND s.is_active = TRUE\n" +
@@ -112,10 +112,10 @@ public sealed class ExampleCatalogTests
         const string postgreSqlAvailable = "SELECT name FROM datagateway.vdatasource WHERE is_active = TRUE;";
 
         Check(SqlServerCatalog.ListSql, sqlServerList, 107, "737473e34e126a126a944b4a05e0315b6c22500376e81f655c4d53981208d6e2");
-        Check(SqlServerCatalog.ReadSql, sqlServerRead, 638, "ca59273874a34e52a016b680ded14a2fb02d1478cff1550cc65a940e203ed1a8");
+        Check(SqlServerCatalog.ReadSql, sqlServerRead, 695, "f13a269de22a56df3c909046f9fa8a11b9edce3414fb22a5df04941b608cac8b");
         Check(SqlServerCatalog.AvailableSql, sqlServerAvailable, 61, "c6e1899d47c7e3029b812bb39945f2e473dcaf8de92820af3546d9051c42483b");
         Check(PostgreSqlCatalog.ListSql, postgreSqlList, 100, "885362ba68d78d4675b0fa37e568d369ff696735a319eb2d10d153429f1cfaf8");
-        Check(PostgreSqlCatalog.ReadSql, postgreSqlRead, 598, "8c9a096e6dca416a39766a667b370effcc594a54eea64ba30506fcf64054c1a1");
+        Check(PostgreSqlCatalog.ReadSql, postgreSqlRead, 649, "a8984be74463452ef3877845f6802dadc0169ca95729a2f50ed63b67e7f9fc49");
         Check(PostgreSqlCatalog.AvailableSql, postgreSqlAvailable, 64, "28a6dbc9483d677e527001f2d9f85fc5e92939aca5f086876ea5136d1ed1d6a4");
 
         static void Check(string actual, string expected, int size, string hash)

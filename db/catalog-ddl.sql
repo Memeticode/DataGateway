@@ -55,6 +55,9 @@ CREATE TABLE [dbo].[DataSourceColumn](
 	[can_sort] [bit] NOT NULL,
 	[can_group] [bit] NOT NULL,
 	[can_aggregate] [bit] NOT NULL,
+	[expression] [nvarchar](max) NULL,
+	[store_type] [nvarchar](128) NULL,  -- nvarchar like expression, the other catalog-owner text cell; the parser accepts ASCII only
+	[store_type_override] [bit] NOT NULL,
  CONSTRAINT [PK_DataSourceColumn] PRIMARY KEY CLUSTERED ([id] ASC),
  CONSTRAINT [UQ_DataSourceColumn_datasource_column] UNIQUE NONCLUSTERED ([datasource_fk] ASC, [column_name] ASC)
 )
@@ -68,6 +71,8 @@ GO
 ALTER TABLE [dbo].[DataSourceColumn] ADD CONSTRAINT [DF_DataSourceColumn_can_group] DEFAULT ((0)) FOR [can_group]
 GO
 ALTER TABLE [dbo].[DataSourceColumn] ADD CONSTRAINT [DF_DataSourceColumn_can_aggregate] DEFAULT ((0)) FOR [can_aggregate]
+GO
+ALTER TABLE [dbo].[DataSourceColumn] ADD CONSTRAINT [DF_DataSourceColumn_store_type_override] DEFAULT ((0)) FOR [store_type_override]
 GO
 ALTER TABLE [dbo].[DataSourceColumn] WITH CHECK ADD CONSTRAINT [FK_DataSourceColumn_DataSource] FOREIGN KEY([datasource_fk])
 REFERENCES [dbo].[DataSource] ([id])
@@ -124,12 +129,17 @@ CREATE TABLE [dbo].[DataSourceColumnAudit](
 	[can_sort] [bit] NOT NULL,
 	[can_group] [bit] NOT NULL,
 	[can_aggregate] [bit] NOT NULL,
+	[expression] [nvarchar](max) NULL,
+	[store_type] [nvarchar](128) NULL,
+	[store_type_override] [bit] NOT NULL,
  CONSTRAINT [PK_DataSourceColumnAudit] PRIMARY KEY CLUSTERED ([id] ASC)
 )
 GO
 ALTER TABLE [dbo].[DataSourceColumnAudit] ADD CONSTRAINT [DF_DataSourceColumnAudit_audit_date] DEFAULT (getdate()) FOR [audit_date]
 GO
 ALTER TABLE [dbo].[DataSourceColumnAudit] ADD CONSTRAINT [DF_DataSourceColumnAudit_audit_login] DEFAULT (original_login()) FOR [audit_login]
+GO
+ALTER TABLE [dbo].[DataSourceColumnAudit] ADD CONSTRAINT [DF_DataSourceColumnAudit_store_type_override] DEFAULT ((0)) FOR [store_type_override]
 GO
 ALTER TABLE [dbo].[DataSourceColumnAudit] WITH CHECK ADD CONSTRAINT [CK_DataSourceColumnAudit_audit_action] CHECK (([audit_action] IN ('I', 'U', 'D')))
 GO
@@ -231,6 +241,9 @@ BEGIN
 		, [can_sort]
 		, [can_group]
 		, [can_aggregate]
+		, [expression]
+		, [store_type]
+		, [store_type_override]
 	)
 	SELECT
 		CASE WHEN d.[id] IS NULL THEN 'I' ELSE 'U' END
@@ -249,6 +262,9 @@ BEGIN
 		, i.[can_sort]
 		, i.[can_group]
 		, i.[can_aggregate]
+		, i.[expression]
+		, i.[store_type]
+		, i.[store_type_override]
 	FROM inserted AS i
 	LEFT JOIN deleted AS d ON d.[id] = i.[id];
 	-- delete: the row as it was
@@ -269,6 +285,9 @@ BEGIN
 		, [can_sort]
 		, [can_group]
 		, [can_aggregate]
+		, [expression]
+		, [store_type]
+		, [store_type_override]
 	)
 	SELECT
 		'D'
@@ -287,6 +306,9 @@ BEGIN
 		, d.[can_sort]
 		, d.[can_group]
 		, d.[can_aggregate]
+		, d.[expression]
+		, d.[store_type]
+		, d.[store_type_override]
 	FROM deleted AS d
 	WHERE NOT EXISTS (SELECT 1 FROM inserted AS i WHERE i.[id] = d.[id]);
 END

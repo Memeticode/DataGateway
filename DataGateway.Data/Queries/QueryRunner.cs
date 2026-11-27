@@ -24,6 +24,22 @@ public sealed class QueryRunner
         return engine is ICappedQueryEngine capped ? capped.Compile(query) : engine.Compile(query);
     }
 
+    /// <summary>Attaches each parameter's checked column store type, for an engine that binds by store type
+    /// (<see cref="IStoreTypeEngine"/>); for any other engine, or a source without store types, returns the query unchanged.</summary>
+    /// <remarks>The engine reads the source database at most once per source per process to check the catalog's types,
+    /// so the first query of a source can wait for that one metadata read; a failed read is reported and the query binds
+    /// as before. Problems go to <paramref name="report"/>, never to the caller's answer.</remarks>
+    public async Task<CompiledQuery> BindStoreTypesAsync(SourceContract source, CompiledQuery query,
+        Action<StoreTypeFinding> report, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(report);
+        if (engine is not IStoreTypeEngine typed || source.StoreTypes.Count == 0) return query;
+        var storeTypes = await typed.ResolveStoreTypesAsync(source, report, cancellationToken).ConfigureAwait(false);
+        return query.WithStoreTypes(storeTypes);
+    }
+
     /// <summary>Runs the query within one deadline of the source's QueryTimeoutSeconds, from the open connection to the last row
     /// kept; the driver's per-command timeout alone would restart for every row read. Connecting is governed by the
     /// source's connection string.</summary>

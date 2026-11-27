@@ -65,7 +65,7 @@ public sealed class EngineCompositionTests
         var trail = new RequestTrail();
         var result = await QuerySource.RunAsync(Encoding.UTF8.GetBytes(ErrorLogTests.Body("query")),
             (_, _) => Task.FromResult(
-                CatalogResult<QuerySourceContext>.Success(new(ErrorLogTests.Contract(), runner))), QueryLimits.ForRowCap(500), trail, CancellationToken.None);
+                CatalogResult<QuerySourceContext>.Success(new(ErrorLogTests.Contract(), runner))), QueryLimits.ForRowCap(500), trail, _ => { }, CancellationToken.None);
         Assert.Equal("SourceUnavailable", result.Failure?.Code);
         Assert.Equal("command", result.Failure?.Step);
         Assert.Equal(1, engine.Calls);

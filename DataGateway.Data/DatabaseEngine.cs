@@ -1,6 +1,7 @@
 using System.Data.Common;
 using System.Runtime.ExceptionServices;
 using Dapper.Data;
+using DataGateway.Core.Catalog;
 using DataGateway.Core.Queries;
 using DataGateway.Data.Queries;
 using SqlKata;
@@ -30,6 +31,14 @@ public abstract class DatabaseEngine<TConnection> : ICappedQueryEngine where TCo
     protected abstract string MatchedRowCountExpression { get; }
     protected abstract (string Pattern, string EscapeCharacter) PrepareLikePattern(string pattern);
     protected abstract void PrepareParameter(DbParameter parameter, object? value);
+
+    /// <summary>Prepares a parameter whose value is compared with a column that has a catalog store type.</summary>
+    /// <remarks>Optional: the default ignores the store type and calls <see cref="PrepareParameter(DbParameter, object?)"/>,
+    /// so an engine that does not bind by store type behaves exactly as before. An engine that overrides it falls back to
+    /// that same method for any value its store-type rule does not cover.</remarks>
+    protected virtual void PrepareParameter(DbParameter parameter, object? value, StoreType storeType) =>
+        PrepareParameter(parameter, value);
+
     protected abstract object ConvertCell(object value, OutputColumn? column);
     public abstract void ValidateSourceConnection(string? connection);
     public abstract ProviderFailure? RecognizeFailure(Exception error);
@@ -49,9 +58,17 @@ public abstract class DatabaseEngine<TConnection> : ICappedQueryEngine where TCo
             runnable.GetComponents<AbstractColumn>("select").Any(column => column is AggregatedColumn);
         if (matched) runnable.SelectRaw(MatchedRowCountExpression);
         PrepareLike(runnable);
-        var result = CreateCompiler().Compile(runnable);
+        var compiler = CreateCompiler();
+        var result = compiler.Compile(runnable);
         return new CompiledQuery(result.Sql, result.NamedBindings,
-            query.RowLimit.Keep, matched, query.Columns);
+            query.RowLimit.Keep, matched, query.Columns)
+        {
+            // Only a compiler that records which column each binding compares (IColumnBindingCompiler) can say; with any
+            // other compiler no value ever gets a store type, and every value binds through the untyped hook.
+            ParameterColumns = compiler is IColumnBindingCompiler recorder
+                ? recorder.BindingColumns(result)
+                : new Dictionary<string, string>()
+        };
     }
 
     private void PrepareLike(global::SqlKata.Query query)
@@ -115,6 +132,7 @@ public abstract class DatabaseEngine<TConnection> : ICappedQueryEngine where TCo
             var parameter = command.CreateParameter();
             parameter.ParameterName = name;
             if (value is int) parameter.Value = value;
+            else if (query.StoreTypes.TryGetValue(name, out var storeType)) PrepareParameter(parameter, value, storeType);
             else PrepareParameter(parameter, value);
             command.Parameters.Add(parameter);
         }
