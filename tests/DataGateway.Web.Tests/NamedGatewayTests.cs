@@ -1389,10 +1389,11 @@ public sealed class NamedGatewayTests
         var constructor = Assert.Single(builder.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance));
         Assert.True(constructor.IsAssembly);
         var methods = extension.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly);
-        Assert.Equal(new[] { "AddDataGateway", "MapDataGateway", "MapDataGatewayApiPage", "TryRecordDataGatewayRefusal", "UseDataGatewayErrors", "UseDataGatewayErrors" }, methods.Select(method => method.Name).Order());
+        Assert.Equal(new[] { "AddDataGateway", "MapDataGateway", "MapDataGatewayApiPage", "MapDataGatewayBrowsePage", "TryRecordDataGatewayRefusal", "UseDataGatewayErrors", "UseDataGatewayErrors" }, methods.Select(method => method.Name).Order());
         Signature(methods.Single(method => method.Name == "AddDataGateway"), typeof(IServiceCollection), [typeof(IServiceCollection), typeof(string), typeof(Action<DataGatewayBuilder>)]);
         Signature(methods.Single(method => method.Name == "MapDataGateway"), typeof(RouteGroupBuilder), [typeof(IEndpointRouteBuilder), typeof(string), typeof(string)]);
         Signature(methods.Single(method => method.Name == "MapDataGatewayApiPage"), typeof(RouteGroupBuilder), [typeof(IEndpointRouteBuilder), typeof(string), typeof(string)]);
+        Signature(methods.Single(method => method.Name == "MapDataGatewayBrowsePage"), typeof(RouteGroupBuilder), [typeof(IEndpointRouteBuilder), typeof(string), typeof(string)]);
         Assert.All(methods, method => Assert.True(method.IsDefined(typeof(System.Runtime.CompilerServices.ExtensionAttribute))));
         var fluent = builder.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
         Assert.Equal(6, fluent.Length);

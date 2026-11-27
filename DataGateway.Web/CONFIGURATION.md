@@ -107,6 +107,34 @@ The document describes each operation's request body, answer and error answers,
 with codes and statuses. It holds no catalog content: take source names from list
 sources and each source's exact query schema from describe source.
 
+## Browse page
+
+The Development environment also serves a browse page at `/browse-data-gateway/`, started
+the same way. Choose a source and read what each column means and allows, then build a
+query in the form: list rows or summarize them, filter with conditions in nested all/any
+groups, sort, and limit. In every other environment it is not served, and no setting
+turns it on.
+
+The form offers only what the source's query schema allows: its columns, the operators
+and functions for each column's type, and its group depth and condition count. The JSON
+tab shows the exact body the form sends to `POST /query`. DataGateway still checks every
+query, and a refusal is marked on the form field its path names, with its code, message
+and incident ID.
+
+Values, beside an exact-match filter on a column that can be grouped, lists that column's
+values with one more query, up to 50 of them: the most common first where the column can
+be counted and sorted. Choose one to put it in the filter.
+
+The page calls only list sources, describe source and query source, at the address it
+was opened from, with the browser's Windows sign-in. It can do exactly what the signed-in
+user can do through those routes, and nothing more.
+
+The page is the library's: this host maps it with `MapDataGatewayBrowsePage` at the root.
+Its files are built into the DataGateway library and served from memory, under a content
+security policy that allows only this server's own scripts, styles and calls. The page
+loads nothing from outside this machine, and its files need Windows sign-in like every
+request.
+
 ## Errors
 
 The error body, every code with its status, and where `path` points are in the [README](README.md#errors), Errors. This section covers what the server does around them.

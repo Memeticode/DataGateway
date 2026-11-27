@@ -8,7 +8,8 @@ using Microsoft.Extensions.Hosting;
 
 namespace DataGateway;
 
-/// <summary>Registers application catalogs and engines and exposes named JSON POST, MCP and API-page endpoint groups.</summary>
+/// <summary>Registers application catalogs and engines and exposes named JSON POST, MCP, API-page and browse-page
+/// endpoint groups.</summary>
 public static class DataGatewayExtensions
 {
     /// <summary>The category used by the gateway's existing structured failure logger.</summary>
@@ -98,20 +99,8 @@ public static class DataGatewayExtensions
     /// Empty and slash prefixes map at the root. Invalid prefixes do not claim a mapping.</remarks>
     public static RouteGroupBuilder MapDataGateway(this IEndpointRouteBuilder endpoints, string name, string prefix)
     {
-        ArgumentNullException.ThrowIfNull(endpoints);
-        CheckName(name);
-        var registry = endpoints.ServiceProvider.GetService<GatewayRegistry>();
-        var registration = registry?.Find(name) ?? throw Refuse(name, "Register this gateway with AddDataGateway before mapping it.");
-        try
-        {
-            ArgumentNullException.ThrowIfNull(prefix);
-            _ = RoutePatternFactory.Parse(prefix);
-        }
-        catch (Exception error) when (error is ArgumentException or RoutePatternException)
-        {
-            throw Refuse(name, "Prefix must be a valid route pattern.");
-        }
-        lock (registry!.MapLock)
+        var (registry, registration) = Resolve(endpoints, name, prefix);
+        lock (registry.MapLock)
         {
             if (registry.IsMapped(name)) throw Refuse(name, "This gateway has already been mapped.");
             var group = endpoints.MapGroup(prefix).WithMetadata(registration);
@@ -126,6 +115,42 @@ public static class DataGatewayExtensions
     /// Each gateway page can be mapped once per service provider. Invalid prefixes do not claim a mapping.</remarks>
     public static RouteGroupBuilder MapDataGatewayApiPage(this IEndpointRouteBuilder endpoints, string name, string prefix)
     {
+        var (registry, registration) = Resolve(endpoints, name, prefix);
+        lock (registry.MapLock)
+        {
+            if (registry.IsPageMapped(name))
+                throw Refuse(name, "This gateway's API page has already been mapped.");
+            var group = endpoints.MapGroup(prefix).WithMetadata(registration);
+            ApiPage.Map(group, registration, registry);
+            registry.RecordPageMapping(name);
+            return group;
+        }
+    }
+
+    /// <summary>Maps one gateway's browse page, a query form over its list, describe and query routes, and returns
+    /// its parent group.</summary>
+    /// <remarks>The page is served at browse-data-gateway/ under the prefix, from files built into this library, and
+    /// calls the gateway's routes wherever MapDataGateway put them. The host owns policy on the returned group, as for
+    /// the API page; the page's calls carry the browser's own credentials. Page and API mappings are independent. Each
+    /// gateway's browse page can be mapped once per service provider. Invalid prefixes do not claim a mapping.</remarks>
+    public static RouteGroupBuilder MapDataGatewayBrowsePage(this IEndpointRouteBuilder endpoints, string name, string prefix)
+    {
+        var (registry, registration) = Resolve(endpoints, name, prefix);
+        lock (registry.MapLock)
+        {
+            if (registry.IsBrowsePageMapped(name))
+                throw Refuse(name, "This gateway's browse page has already been mapped.");
+            var group = endpoints.MapGroup(prefix).WithMetadata(registration);
+            BrowsePage.Map(group, registration, registry);
+            registry.RecordBrowsePageMapping(name);
+            return group;
+        }
+    }
+
+    // The registry and the named registration, once the name, the registration and the prefix have been checked.
+    private static (GatewayRegistry Registry, GatewayRegistration Registration) Resolve(IEndpointRouteBuilder endpoints,
+        string name, string prefix)
+    {
         ArgumentNullException.ThrowIfNull(endpoints);
         CheckName(name);
         var registry = endpoints.ServiceProvider.GetService<GatewayRegistry>();
@@ -139,15 +164,7 @@ public static class DataGatewayExtensions
         {
             throw Refuse(name, "Prefix must be a valid route pattern.");
         }
-        lock (registry!.MapLock)
-        {
-            if (registry.IsPageMapped(name))
-                throw Refuse(name, "This gateway's API page has already been mapped.");
-            var group = endpoints.MapGroup(prefix).WithMetadata(registration);
-            ApiPage.Map(group, registration, registry);
-            registry.RecordPageMapping(name);
-            return group;
-        }
+        return (registry, registration);
     }
 
     private static void CheckName(string name)

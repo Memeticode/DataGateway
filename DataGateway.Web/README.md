@@ -150,7 +150,7 @@ Or run `dotnet run --project DataGateway.Web` from the repository root. Either w
 
 It listens on `http://localhost:5000`; Ctrl+C stops it. Failure lines go to `logs/` under that folder; the [configuration guide](CONFIGURATION.md#error-log) explains the error log.
 
-For the API page, run `dotnet run -- --environment Development` in that folder, then open `http://localhost:5000/scalar/`. See [configuration](CONFIGURATION.md#api-page) for deployment details.
+For the API page, run `dotnet run -- --environment Development` in that folder, then open `http://localhost:5000/scalar/`. See [configuration](CONFIGURATION.md#api-page) for deployment details. The same environment serves the [browse page](CONFIGURATION.md#browse-page) at `http://localhost:5000/browse-data-gateway/`, for reading sources and building queries.
 
 ### 7. Call it
 

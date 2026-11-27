@@ -10,6 +10,9 @@ internal sealed record GatewayOperation(string Name);
 
 internal static class GatewayRoutes
 {
+    /// <summary>The endpoint and route name of one gateway operation, by which the app's link generator finds its path.</summary>
+    internal static string EndpointName(string gateway, string operation) => $"DataGateway:{gateway}:{operation}";
+
     internal static void Map(RouteGroupBuilder group, GatewayRegistration registration, ILoggerFactory loggers)
     {
         var failures = new FailureLog(loggers, registration.Limits);
@@ -43,7 +46,7 @@ internal static class GatewayRoutes
             }
         };
         return group.MapPost(path, handler)
-            .WithName($"DataGateway:{registration.Name}:{operation}")
+            .WithName(EndpointName(registration.Name, operation))
             .WithMetadata(new GatewayOperation(operation))
             .Produces<T>(StatusCodes.Status200OK, "application/json");
     }

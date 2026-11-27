@@ -453,7 +453,7 @@ public sealed class HostCompositionTests
         }
         var program = File.ReadAllText(TestFiles.InRepo("DataGateway.Web/Program.cs"));
         Assert.DoesNotContain("Catalog" + "ReaderFactory", program, StringComparison.Ordinal);
-        foreach (var member in new[] { "AddDataGateway(", "HostCatalogs.Use(", "AddEngine(", "UseLimits(", "UseHostPolicy(", "UseDataGatewayErrors(", "MapDataGateway(", "MapDataGatewayApiPage(" })
+        foreach (var member in new[] { "AddDataGateway(", "HostCatalogs.Use(", "AddEngine(", "UseLimits(", "UseHostPolicy(", "UseDataGatewayErrors(", "MapDataGateway(", "MapDataGatewayApiPage(", "MapDataGatewayBrowsePage(" })
             Assert.Contains(member, program, StringComparison.Ordinal);
     }
 

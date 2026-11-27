@@ -39,9 +39,11 @@ JSON length counts query text in characters. MCP rebuilds compact JSON from its 
 
 `MapDataGatewayApiPage(this IEndpointRouteBuilder endpoints, string name, string prefix)` returns an independent `RouteGroupBuilder` for `/scalar/`, its redirect and assets, and `/openapi/v1.json`.
 
-Both require a registered name. Each permits one successful mapping per gateway/service provider. Prefixes are route patterns. Empty and slash prefixes map at the root. Parent-group prefixes compose with them. Invalid prefixes do not consume a mapping. Duplicate effective document routes are refused ignoring case and trailing slashes when endpoints are constructed.
+`MapDataGatewayBrowsePage(this IEndpointRouteBuilder endpoints, string name, string prefix)` returns an independent `RouteGroupBuilder` for `/browse-data-gateway/`, its redirect and files: a query form over the gateway's list, describe and query routes. The form offers only what each source's `querySchema` allows, and the server still checks every query. Each request for the page writes the paths of those routes into it, wherever `MapDataGateway` put them, filling their route parameters from the page's own route values. A page whose routes are not mapped, or need a value its request does not have, says so. The page loads nothing from another origin and sends a content security policy that allows only its own origin.
 
-The host decides environments. Apply `RequireAuthorization` to both returned groups where wanted. Page policy covers the redirect, document and assets. Registration alone leaves access open.
+All three require a registered name. Each permits one successful mapping per gateway/service provider. Prefixes are route patterns. Empty and slash prefixes map at the root. Parent-group prefixes compose with them. Invalid prefixes do not consume a mapping. Duplicate effective document routes, and duplicate effective browse page routes, are refused ignoring case and trailing slashes when endpoints are constructed.
+
+The host decides environments. Apply `RequireAuthorization` to each returned group where wanted. Page policy covers each page's redirect, document, assets and files. Registration alone leaves access open.
 
 For multiple gateways, register names `sales` and `inventory`, map APIs under `/sales` and `/inventory`, and map each page with its matching prefix. Catalogs, engines, limits, MCP identity and policy are per registration. Distinct API prefixes avoid route ambiguity.
 

@@ -16,6 +16,11 @@
     <PackageReference Include="Scalar.AspNetCore" Version="2.18.0" />
   </ItemGroup>
   <ItemGroup>
+    <!-- The browse page's files, served from memory by Page/BrowsePage.cs. -->
+    <None Remove="Page/Browse/*" />
+    <EmbeddedResource Include="Page/Browse/*" LogicalName="Browse/%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup>
     <Using Include="Microsoft.AspNetCore.Builder" />
     <Using Include="Microsoft.AspNetCore.Http" />
     <Using Include="Microsoft.AspNetCore.Routing" />

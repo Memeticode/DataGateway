@@ -584,7 +584,7 @@ Catalog invocation exceptions are sanitized to `CatalogUnavailable`, with except
 
 ![How the parts fit: clients, a host app with its own sign-in and catalog reader, the DataGateway packages, and the databases](docs/architecture.svg)
 
-- `DataGateway`: the reusable ASP.NET Core library, named registrations, JSON/MCP endpoints and optional API page.
+- `DataGateway`: the reusable ASP.NET Core library, named registrations, JSON/MCP endpoints and optional API and browse pages.
 - `DataGateway.Core`: pure catalog, validation and query rules with no I/O.
 - `DataGateway.Data`: public app-owned catalog abstraction and query-only engine contract/base.
 - `DataGateway.Data.SqlServer` and `DataGateway.Data.PostgreSql`: supported query engines.

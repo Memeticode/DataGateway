@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en" data-gateway="">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DataGateway browse</title>
+  <link rel="stylesheet" href="browse.css">
+  <script type="module" src="browse.js"></script>
+</head>
+<body>
+  <header>
+    <h1 id="gateway-name">DataGateway</h1>
+    <p>Browse the sources and build queries. Every action here is a real call to this server.</p>
+  </header>
+  <div id="notice" role="alert" hidden></div>
+  <main>
+    <nav aria-labelledby="sources-title">
+      <h2 id="sources-title">Sources</h2>
+      <ul id="sources"></ul>
+    </nav>
+    <div id="workspace" hidden>
+      <section aria-labelledby="source-title">
+        <h2 id="source-title"></h2>
+        <p id="source-description"></p>
+        <p id="source-facts" class="muted"></p>
+        <details open>
+          <summary>Columns</summary>
+          <div class="scroll"><table id="columns"></table></div>
+        </details>
+      </section>
+      <section id="query" aria-labelledby="query-title">
+        <div class="query-head">
+          <h2 id="query-title">Query</h2>
+          <div role="tablist" aria-label="Query views">
+            <button id="tab-form" type="button" role="tab" aria-selected="true" aria-controls="panel-form">Form</button>
+            <button id="tab-json" type="button" role="tab" aria-selected="false" aria-controls="panel-json" tabindex="-1">JSON</button>
+          </div>
+        </div>
+        <div id="panel-form" role="tabpanel" aria-labelledby="tab-form"></div>
+        <div id="panel-json" role="tabpanel" aria-labelledby="tab-json" hidden>
+          <p class="muted">The body the form sends to <code>POST /query</code>, exactly as written.</p>
+          <pre id="request"></pre>
+        </div>
+        <p class="actions">
+          <button id="run" type="button" class="primary">Run</button>
+          <button id="reset" type="button">Reset</button>
+          <span id="run-status" class="muted" role="status">Ctrl+Enter runs the query.</span>
+        </p>
+      </section>
+      <section id="answer" aria-labelledby="answer-title" hidden>
+        <h2 id="answer-title">Answer</h2>
+        <div id="answer-body"></div>
+        <details>
+          <summary>Raw answer</summary>
+          <pre id="raw"></pre>
+        </details>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

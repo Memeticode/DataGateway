@@ -25,6 +25,8 @@ internal sealed class GatewayRegistry
     private readonly HashSet<string> mapped = new(StringComparer.Ordinal);
     private readonly HashSet<string> pages = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> pageRoutes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> browsePages = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> browsePageRoutes = new(StringComparer.OrdinalIgnoreCase);
     internal object MapLock { get; } = new();
 
     public GatewayRegistry(IEnumerable<GatewayRegistration> registrations) =>
@@ -37,14 +39,21 @@ internal sealed class GatewayRegistry
     internal bool IsPageMapped(string name) => pages.Contains(name);
     internal void RecordPageMapping(string name) => pages.Add(name);
 
-    internal void RecordPageRoute(string name, string path)
+    internal bool IsBrowsePageMapped(string name) => browsePages.Contains(name);
+    internal void RecordBrowsePageMapping(string name) => browsePages.Add(name);
+
+    internal void RecordPageRoute(string name, string path) => RecordRoute(pageRoutes, "API page", name, path);
+    internal void RecordBrowsePageRoute(string name, string path) => RecordRoute(browsePageRoutes, "Browse page", name, path);
+
+    // Two gateways' pages on one effective route would make every request for it ambiguous.
+    private void RecordRoute(Dictionary<string, string> routes, string page, string name, string path)
     {
         lock (MapLock)
         {
             var key = path.TrimEnd('/');
-            if (pageRoutes.TryGetValue(key, out var owner) && !StringComparer.Ordinal.Equals(owner, name))
-                throw new InvalidOperationException($"Gateway '{name}'. API page route '{path}' is already mapped by gateway '{owner}'.");
-            pageRoutes[key] = name;
+            if (routes.TryGetValue(key, out var owner) && !StringComparer.Ordinal.Equals(owner, name))
+                throw new InvalidOperationException($"Gateway '{name}'. {page} route '{path}' is already mapped by gateway '{owner}'.");
+            routes[key] = name;
         }
     }
 }

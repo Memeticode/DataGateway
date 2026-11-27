@@ -87,7 +87,10 @@ public partial class Program
         WindowsSignIn.Require(app);
         app.MapDataGateway("DataGateway.Web", "");
         if (app.Environment.IsDevelopment())
+        {
             app.MapDataGatewayApiPage("DataGateway.Web", "");
+            app.MapDataGatewayBrowsePage("DataGateway.Web", "");
+        }
         return app;
     }
 }

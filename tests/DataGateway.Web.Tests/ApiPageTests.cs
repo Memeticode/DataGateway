@@ -131,7 +131,8 @@ public sealed class ApiPageTests(ITestOutputHelper output)
             foreach (var endpoint in endpoints.Where(e => !e.Metadata.GetMetadata<IHttpMethodMetadata>()!.HttpMethods.Contains("POST")))
             {
                 Assert.Equal(new[] { "GET" }, endpoint.Metadata.GetMetadata<IHttpMethodMetadata>()!.HttpMethods);
-                Assert.True(endpoint.RoutePattern.RawText!.StartsWith("/openapi/", StringComparison.Ordinal) || endpoint.RoutePattern.RawText.StartsWith("/scalar", StringComparison.Ordinal));
+                Assert.True(endpoint.RoutePattern.RawText!.StartsWith("/openapi/", StringComparison.Ordinal) || endpoint.RoutePattern.RawText.StartsWith("/scalar", StringComparison.Ordinal)
+                    || endpoint.RoutePattern.RawText.StartsWith(BrowsePage.Path, StringComparison.Ordinal));
             }
             await JsonAnswer(host.Client, "/openapi/v1.json");
             await Page(host);
@@ -164,6 +165,7 @@ public sealed class ApiPageTests(ITestOutputHelper output)
             Assert.All(Endpoints(host.App), endpoint => Assert.Null(endpoint.Metadata.GetMetadata<IAllowAnonymous>()));
             paths = GetPaths(host.App);
             Assert.Contains("/scalar/scalar.js", paths);
+            Assert.Contains(BrowsePage.Path + "/browse.js", paths);
             foreach (var path in paths) await PlainChallenge(host.Client, path);
             foreach (var path in new[] { "/sources/list", "/sources/describe", "/query" }) await PlainChallenge(host.Client, path, true);
             Assert.Empty(host.Lines());

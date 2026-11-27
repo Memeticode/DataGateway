@@ -120,7 +120,7 @@ internal static class McpEndpoint
     {
         RefuseSharedTransport(((IEndpointRouteBuilder)group).ServiceProvider, registration.Name);
         var mapped = group.MapMcp("/mcp")
-            .WithName($"DataGateway:{registration.Name}:mcp")
+            .WithName(GatewayRoutes.EndpointName(registration.Name, "mcp"))
             .WithMetadata(new GatewayOperation("mcp"), new GatewayBinding(registration, failures))
             .ExcludeFromDescription();
 
