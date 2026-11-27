@@ -42,7 +42,7 @@ public sealed class SqlServerCatalog : CatalogService<SqlConnection>
         "       c.[column_name], c.[ordinal], c.[title] AS [column_title],\r\n" +
         "       c.[description] AS [column_description], c.[data_type], c.[unit],\r\n" +
         "       c.[magnitude], c.[display_format], c.[can_select], c.[can_filter],\r\n" +
-        "       c.[can_sort], c.[can_group], c.[can_aggregate]\r\n" +
+        "       c.[can_sort], c.[can_group], c.[can_aggregate], c.[expression], c.[store_type], c.[store_type_override]\r\n" +
         "FROM [dbo].[vDataSource] AS s\r\n" +
         "LEFT JOIN [dbo].[vDataSourceColumn] AS c ON c.[datasource_fk] = s.[id]\r\n" +
         "WHERE s.[name] COLLATE Latin1_General_100_CI_AS = @source AND s.[is_active] = 1\r\n" +

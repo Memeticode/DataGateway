@@ -82,7 +82,7 @@ internal sealed class SqliteTestCatalog : CatalogService<SqliteConnection>
         "       c.\"column_name\", c.\"ordinal\", c.\"title\" AS \"column_title\",\n" +
         "       c.\"description\" AS \"column_description\", c.\"data_type\", c.\"unit\",\n" +
         "       c.\"magnitude\", c.\"display_format\", c.\"can_select\", c.\"can_filter\",\n" +
-        "       c.\"can_sort\", c.\"can_group\", c.\"can_aggregate\"\n" +
+        "       c.\"can_sort\", c.\"can_group\", c.\"can_aggregate\", c.\"expression\", c.\"store_type\", c.\"store_type_override\"\n" +
         "FROM \"gateway_source\" AS s\n" +
         "LEFT JOIN \"gateway_column\" AS c ON c.\"datasource_fk\" = s.\"id\"\n" +
         "WHERE s.\"name\" COLLATE NOCASE = @source AND s.\"is_active\" = 1\n" +

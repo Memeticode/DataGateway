@@ -11,7 +11,8 @@ FROM [dbo].[DataSource];
 GO
 CREATE OR ALTER VIEW [dbo].[vDataSourceColumn] AS
 SELECT [datasource_fk], [column_name], [ordinal], [title], [description], [data_type], [unit], [magnitude],
-       [display_format], [can_select], [can_filter], [can_sort], [can_group], [can_aggregate]
+       [display_format], [can_select], [can_filter], [can_sort], [can_group], [can_aggregate], [expression], [store_type],
+       [store_type_override]
 FROM [dbo].[DataSourceColumn];
 GO
 CREATE OR ALTER VIEW [dbo].[vMcpServer] AS

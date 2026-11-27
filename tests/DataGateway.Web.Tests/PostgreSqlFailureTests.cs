@@ -23,7 +23,7 @@ public sealed class PostgreSqlFailureTests
         ["object_name"]="synthetic.items",["connection_string"]=PostgreSqlCompilationTests.Connection,
         ["column_name"]="id",["ordinal"]=1L,["column_title"]="Id",["column_description"]="Column id.",["data_type"]="number",
         ["unit"]=DBNull.Value,["magnitude"]=null,["display_format"]=null,
-        ["can_select"]=true,["can_filter"]=false,["can_sort"]=true,["can_group"]=false,["can_aggregate"]=true
+        ["can_select"]=true,["can_filter"]=false,["can_sort"]=true,["can_group"]=false,["can_aggregate"]=true,["expression"]=null,["store_type"]=null,["store_type_override"]=false
     };
     [Theory]
     [InlineData(null,"The catalog connection is missing. ","A source host is required.")]

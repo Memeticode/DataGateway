@@ -12,7 +12,7 @@ No sample data ships: you register one of your own views. SQL Server and Postgre
 
 - The catalog database holds `DataSource` and `DataSourceColumn`, plus two audit tables filled by triggers.
 - Each source is one view. Its catalog row holds the full connection string the source needs, credentials included when it uses a SQL login. That string never appears in an answer or a log line. The audit tables keep copies of whole rows, connection strings included.
-- Each request reads the catalog afresh. Nothing is cached, and a change applies on the next request.
+- Each request reads the catalog afresh, and a catalog change applies on the next request. The one thing kept is each SQL Server source's view column types, read once per process for the `store_type` check; a changed view column takes effect after a restart (see [configuration](CONFIGURATION.md)).
 - Only active, cataloged sources and cataloged columns are reachable.
 - DataGateway reaches SQL through its configured read-only identity. The SQL Server setup uses `gateway_reader`, which holds `db_datareader` and `db_denydatawriter`. PostgreSQL uses an existing reader role with schema USAGE and SELECT on catalog and source views. Callers' own SQL rights are never used.
 
@@ -53,7 +53,7 @@ sqlcmd -S $instance -E -b -i db/catalog-ddl.sql -v CatalogDatabase=Catalog
 sqlcmd -S $instance -E -b -i db/catalog-views.sql -v CatalogDatabase=Catalog
 ```
 
-`db/catalog-views.sql` can be rerun. For an existing catalog, run `sqlcmd -S $instance -E -b -i db/catalog-row-cap.sql -v CatalogDatabase=Catalog` before starting this version. The migration adds the source cap and refreshes its audit trigger and view.
+`db/catalog-views.sql` can be rerun. For an existing catalog, run `sqlcmd -S $instance -E -b -i db/catalog-row-cap.sql -v CatalogDatabase=Catalog` before starting this version. The migration adds the source cap and refreshes its audit trigger and view. Then run `sqlcmd -S $instance -E -b -i db/catalog-expression.sql -v CatalogDatabase=Catalog`: it adds the reserved column `expression` and refreshes the column audit trigger and view, preserving audit history and grants. Then run `sqlcmd -S $instance -E -b -i db/catalog-store-type.sql -v CatalogDatabase=Catalog` the same way for each column's `store_type` and `store_type_override`.
 
 ### 3. Create the read-only login
 
@@ -82,7 +82,7 @@ Create your view first. Copy [db/catalog-seed-example.sql](../db/catalog-seed-ex
 - `description`: what it is for, when to use it, and how it differs from similar sources; `grain`: what one row is.
 - `query_timeout_seconds` sets the source query deadline and command timeout. This required integer defaults to 30 and accepts 1 through 86400. It is detail-only and absent from wire answers. Existing catalogs use the idempotent `db/catalog-query-timeout.sql` or `db/postgresql/catalog-query-timeout.sql` migration; audit history is preserved.
 - `row_cap` sets the maximum rows per query for this source. It is required, defaults to 500 in the database, and accepts integers from 1 to 2147483646.
-- One entry per column: `column_name` as in the view, `ordinal`, `title`, `description`, `data_type` (text, number, date or bool), `unit`, `magnitude` (none, thousands, millions, billions or NULL), `display_format`, and the five flags (`can_select`, `can_filter`, `can_sort`, `can_group`, `can_aggregate`).
+- One entry per column: `column_name` as in the view, `ordinal`, `title`, `description`, `data_type` (text, number, date or bool), `unit`, `magnitude` (none, thousands, millions, billions or NULL), `display_format`, and the five flags (`can_select`, `can_filter`, `can_sort`, `can_group`, `can_aggregate`). Leave `expression` NULL: it is reserved for a later version, and DataGateway refuses a column whose expression is set, even to empty text. Compute such a column in the source's view instead. Optionally set `store_type` to the view column's own SQL Server type, such as `varchar(20)` or `int`, so filter values bind as that type; NULL binds them as before. DataGateway checks it against the view on first use and logs any disagreement; set `store_type_override` to 1 only to keep a type the view contradicts.
 
 The synthetic example registers `sales_by_line`, backed by `dbo.vSalesByLine`, with `country` and `line_total`. It creates no view and ships no data. Replace its names and metadata with your own.
 

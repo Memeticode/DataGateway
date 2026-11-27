@@ -48,7 +48,8 @@ internal static class CatalogTableReader
     private static readonly string[] ColumnFields =
     [
         "column_name", "ordinal", "column_title", "column_description", "data_type", "unit",
-        "magnitude", "display_format", "can_select", "can_filter", "can_sort", "can_group", "can_aggregate"
+        "magnitude", "display_format", "can_select", "can_filter", "can_sort", "can_group", "can_aggregate", "expression",
+        "store_type", "store_type_override"
     ];
 
     internal static async Task<IReadOnlyList<SourceListRow>> ListAsync<TConnection>(
@@ -135,7 +136,12 @@ internal static class CatalogTableReader
                     NullableText(row, "unit"), NullableText(row, "magnitude"), NullableText(row, "display_format"),
                     Flag(row, "can_select", allowIntegralFlags), Flag(row, "can_filter", allowIntegralFlags),
                     Flag(row, "can_sort", allowIntegralFlags), Flag(row, "can_group", allowIntegralFlags),
-                    Flag(row, "can_aggregate", allowIntegralFlags)));
+                    Flag(row, "can_aggregate", allowIntegralFlags))
+                {
+                    Expression = NullableText(row, "expression"),
+                    StoreType = NullableText(row, "store_type"),
+                    StoreTypeOverride = Flag(row, "store_type_override", allowIntegralFlags)
+                });
             }
         }
         return new CatalogDetail(provider, new CatalogRows(source, columns));

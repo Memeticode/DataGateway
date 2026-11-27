@@ -18,6 +18,7 @@ public static class CatalogMapping
         var builder = QueryColumns.CreateBuilder();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var metadata = new List<ColumnMetadata>();
+        var storeTypes = new Dictionary<string, CatalogStoreType>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in rows.Columns.OrderBy(column => column.Ordinal)
                      .ThenBy(column => column.ColumnName, StringComparer.Ordinal))
         {
@@ -25,6 +26,11 @@ public static class CatalogMapping
                 return Reject("Correct the catalog column name: use a bare ASCII SQL identifier.");
             if (!names.Add(row.ColumnName))
                 return Reject($"Column '{row.ColumnName}' is duplicated ignoring case. Correct the catalog.");
+            // Checked before any flag is read, so a documented-only column cannot carry an expression either. The text
+            // itself is never echoed: it is catalog-owner SQL, not caller-facing wording.
+            if (row.Expression is not null)
+                return Reject($"Column '{row.ColumnName}' has an expression, which this version does not support. " +
+                    "Remove the expression from the catalog and compute the column in the source's view.");
 
             // No defaults or type-based capability inference: each catalog bit is independent.
             var capabilities = Capabilities(row);
@@ -45,11 +51,16 @@ public static class CatalogMapping
             metadata.Add(new(row.ColumnName, row.Title, row.Description, row.DataType,
                 row.Unit, row.Magnitude, row.DisplayFormat,
                 row.CanSelect, row.CanFilter, row.CanSort, row.CanGroup, row.CanAggregate));
+            // Kept as written: store_type is in the source database's own spelling, so only that database's engine
+            // reads it (the SQL Server engine parses and checks it; others ignore it), and it never refuses the source.
+            if (row.StoreType is not null)
+                storeTypes.Add(row.ColumnName, new CatalogStoreType(row.StoreType, row.StoreTypeOverride));
         }
         if (!rows.Columns.Any(row => Capabilities(row) != QueryCapability.None))
             return Reject("Switch on at least one flag in the catalog before using this source.");
 
-        return CatalogResult<SourceContract>.Success(new(rows.Source, builder.Build(), metadata.ToArray()));
+        return CatalogResult<SourceContract>.Success(new(rows.Source, builder.Build(), metadata.ToArray(),
+            storeTypes.AsReadOnly()));
     }
 
     private static QueryCapability Capabilities(DataSourceColumnRow row) =>
@@ -62,8 +73,14 @@ public static class CatalogMapping
     private static CatalogResult<SourceContract> Reject(string message) =>
         CatalogResult<SourceContract>.Reject(new("InvalidCatalog", "$.source", message));
 
-    private static bool IsIdentifier(string name) =>
-        name.Length > 0 && IsLeading(name[0]) && name.All(c => IsLeading(c) || char.IsAsciiDigit(c));
+    /// <summary>True when <paramref name="name"/> is a bare ASCII SQL identifier: a letter or underscore, then letters,
+    /// digits or underscores. The one grammar for catalog column names: <see cref="Map"/> refuses a source with any
+    /// other, and tools that write SQL from catalog or view names write none that fail it.</summary>
+    public static bool IsIdentifier(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        return name.Length > 0 && IsLeading(name[0]) && name.All(c => IsLeading(c) || char.IsAsciiDigit(c));
+    }
 
     private static bool IsLeading(char value) => char.IsAsciiLetter(value) || value == '_';
 }

@@ -6,7 +6,10 @@ public sealed partial class SqlServerEngine
 {
     internal const string Unparseable = "The source connection string cannot be parsed.";
 
-    public override void ValidateSourceConnection(string? connection)
+    public override void ValidateSourceConnection(string? connection) => CheckSourceConnection(connection);
+
+    // Static so the metadata read (SqlServerColumnTypes) checks a source string the same way without an engine instance.
+    internal static void CheckSourceConnection(string? connection)
     {
         SqlConnection probe;
         try { probe = new SqlConnection(connection); }

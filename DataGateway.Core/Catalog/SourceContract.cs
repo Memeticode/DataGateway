@@ -11,10 +11,14 @@ public sealed record ColumnMetadata(
     string? Unit, string? Magnitude, string? DisplayFormat,
     bool CanSelect, bool CanFilter, bool CanSort, bool CanGroup, bool CanAggregate);
 
+/// <summary>A column's catalog <c>store_type</c> text and its <c>store_type_override</c>, kept as written.</summary>
+public sealed record CatalogStoreType(string Text, bool Override);
+
 /// <summary>Server-side contract; transport projections must use reasoning metadata only.</summary>
 public sealed class SourceContract
 {
-    internal SourceContract(DataSourceRow source, QueryColumns queryColumns, ColumnMetadata[] columns)
+    internal SourceContract(DataSourceRow source, QueryColumns queryColumns, ColumnMetadata[] columns,
+        IReadOnlyDictionary<string, CatalogStoreType> storeTypes)
     {
         Id = source.Id;
         QueryTimeoutSeconds = source.QueryTimeoutSeconds;
@@ -23,6 +27,7 @@ public sealed class SourceContract
         ConnectionString = source.ConnectionString;
         QueryColumns = queryColumns;
         Columns = Array.AsReadOnly(columns);
+        StoreTypes = storeTypes;
     }
 
     [JsonIgnore] public int Id { get; }
@@ -32,4 +37,11 @@ public sealed class SourceContract
     [JsonIgnore] public string ObjectName { get; }
     [JsonIgnore] public string ConnectionString { get; }
     [JsonIgnore] public QueryColumns QueryColumns { get; }
+
+    /// <summary>Each column's catalog <c>store_type</c> as written, with its <c>store_type_override</c>, keyed by column
+    /// name ignoring case; a column whose <c>store_type</c> is null is absent.</summary>
+    /// <remarks>Server-side only, like the connection: no answer shows it. It is the source database's own spelling, so
+    /// it stays text here; the engine for that database decides what it means (the SQL Server engine parses it and
+    /// checks it against the view; other engines ignore it).</remarks>
+    [JsonIgnore] public IReadOnlyDictionary<string, CatalogStoreType> StoreTypes { get; }
 }

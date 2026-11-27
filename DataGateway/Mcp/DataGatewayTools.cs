@@ -48,7 +48,7 @@ internal static class DataGatewayTools
         (services, body, trail, token) =>
         {
             var catalog = requestCatalog ?? registration.CreateCatalog(services);
-            return QuerySource.RunAsync(body, catalog.TargetAsync, registration.Limits, trail, token);
+            return QuerySource.RunAsync(body, catalog.TargetAsync, registration.Limits, trail, failures.StoreTypes.Report, token);
         }, metadata);
 
     private static IEnumerable<McpServerTool> Create(

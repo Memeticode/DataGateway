@@ -119,7 +119,7 @@ internal sealed class NamedGatewayCatalog : CatalogService<SqliteConnection>
             result = new CatalogDetail(state.Provider(name), new CatalogRows(new DataSourceRow(Text(row, "object_name"), Text(row, "connection_string")) { QueryTimeoutSeconds = Number(row, "query_timeout_seconds"), Id = id, Name = Text(row, "name"), Title = Text(row, "title"), Description = Text(row, "description"), Grain = Text(row, "grain"), IsActive = Number(row, "is_active") != 0, RowCap = Number(row, "row_cap") }, columns.Select(raw =>
             {
                 var col = (IDictionary<string, object?>)raw;
-                return new DataSourceColumnRow(Text(col, "column_name"), Number(col, "ordinal"), Text(col, "title"), Text(col, "description"), Text(col, "data_type"), col["unit"] as string, col["magnitude"] as string, col["display_format"] as string, Number(col, "can_select") != 0, Number(col, "can_filter") != 0, Number(col, "can_sort") != 0, Number(col, "can_group") != 0, Number(col, "can_aggregate") != 0);
+                return new DataSourceColumnRow(Text(col, "column_name"), Number(col, "ordinal"), Text(col, "title"), Text(col, "description"), Text(col, "data_type"), col["unit"] as string, col["magnitude"] as string, col["display_format"] as string, Number(col, "can_select") != 0, Number(col, "can_filter") != 0, Number(col, "can_sort") != 0, Number(col, "can_group") != 0, Number(col, "can_aggregate") != 0) { Expression = NullableText(col, "expression"), StoreType = NullableText(col, "store_type"), StoreTypeOverride = Number(col, "store_type_override") != 0 };
             }).ToArray()));
         }
 
@@ -127,6 +127,13 @@ internal sealed class NamedGatewayCatalog : CatalogService<SqliteConnection>
     }
 
     private static string Text(IDictionary<string, object?> row, string name) => (string)row[name]!;
+    // Strict like CatalogTableReader.NullableText: a non-text cell (a SQLite BLOB, say) is a bad cell, never a silent null.
+    private static string? NullableText(IDictionary<string, object?> row, string name) => row[name] switch
+    {
+        null or DBNull => null,
+        string text => text,
+        _ => throw new InvalidCastException("The catalog cell shape is invalid.")
+    };
     private static int Number(IDictionary<string, object?> row, string name) => Convert.ToInt32(row[name], CultureInfo.InvariantCulture);
 }
 

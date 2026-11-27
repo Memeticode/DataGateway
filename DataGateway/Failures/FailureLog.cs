@@ -17,6 +17,9 @@ internal sealed class FailureLog(ILoggerFactory loggers, JsonQueryLimits limits)
     private readonly ILogger logger = loggers.CreateLogger(Category);
     internal int RequestCharacters { get; } = (int)Math.Min(limits.MaxJsonLength + 1024L, int.MaxValue);
 
+    /// <summary>The store-type findings' own log (not incident lines); it shares this log's logger factory.</summary>
+    internal StoreTypeLog StoreTypes { get; } = new(loggers);
+
     /// <summary>Writes the failure's one line and returns its incident ID for the error body.</summary>
     internal string Write(HttpContext context, string? operation, byte[]? body, CatalogFailure failure)
         => Write(context.User, context.RequestAborted.IsCancellationRequested, operation, body, failure, RequestTrail.Of(context));

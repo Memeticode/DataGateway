@@ -448,7 +448,7 @@ public sealed class SourcesDescribeTests
         ["name"] = "synthetic", ["title"] = "Synthetic", ["description"] = "Synthetic measurements", ["grain"] = "One measurement", ["row_cap"] = 7, ["query_timeout_seconds"] = 30,
         ["column_name"] = column, ["ordinal"] = ordinal, ["column_title"] = "Title " + column, ["column_description"] = "Meaning " + column,
         ["data_type"] = "number", ["unit"] = null, ["magnitude"] = null, ["display_format"] = null,
-        ["can_select"] = enabled, ["can_filter"] = enabled, ["can_sort"] = enabled, ["can_group"] = enabled, ["can_aggregate"] = enabled
+        ["can_select"] = enabled, ["can_filter"] = enabled, ["can_sort"] = enabled, ["can_group"] = enabled, ["can_aggregate"] = enabled, ["expression"] = null, ["store_type"] = null, ["store_type_override"] = false
     };
     private static JsonElement Expected(Dictionary<string, object?>[] rows)
     {

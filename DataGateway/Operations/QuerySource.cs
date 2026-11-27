@@ -2,6 +2,7 @@ using System.Text.Json;
 using DataGateway.Failures;
 using DataGateway.Core.Catalog;
 using DataGateway.Core.Queries;
+using DataGateway.Data;
 using SqlKata.JsonQuery;
 
 namespace DataGateway.Operations;
@@ -14,7 +15,7 @@ internal static class QuerySource
 
     internal static async Task<CatalogResult<QueryResponse>> RunAsync(byte[] body,
         Func<string, CancellationToken, Task<CatalogResult<QuerySourceContext>>> readTarget,
-        JsonQueryLimits limits, RequestTrail trail, CancellationToken token)
+        JsonQueryLimits limits, RequestTrail trail, Action<StoreTypeFinding> storeTypeFindings, CancellationToken token)
     {
         CatalogResult<QueryRequest> request;
         try
@@ -38,7 +39,9 @@ internal static class QuerySource
             limits with { MaxLimit = source.Source.RowCap });
         if (validated.Failure is { } refused) { return CatalogResult<QueryResponse>.Reject(QueryAnswer.RootPath(refused)); }
 
-        var compiled = runner.Compile(validated.Value);
+        // An engine that binds by store type checks the catalog's types against the source first (once per process);
+        // what it finds is logged, never answered.
+        var compiled = await runner.BindStoreTypesAsync(source, runner.Compile(validated.Value), storeTypeFindings, token);
         trail.Query = compiled;
         var fetched = await runner.RunAsync(source, compiled, token);
         if (fetched.Failure is { } failed) { return CatalogResult<QueryResponse>.Reject(failed); }

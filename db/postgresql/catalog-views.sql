@@ -4,7 +4,8 @@ SELECT id, name, connection_string, object_name, title, description, grain, is_a
 FROM datagateway.datasource;
 CREATE OR REPLACE VIEW datagateway.vdatasourcecolumn AS
 SELECT datasource_fk, column_name, ordinal, title, description, data_type, unit, magnitude,
-       display_format, can_select, can_filter, can_sort, can_group, can_aggregate
+       display_format, can_select, can_filter, can_sort, can_group, can_aggregate, expression, store_type,
+       store_type_override
 FROM datagateway.datasourcecolumn;
 CREATE OR REPLACE VIEW datagateway.vmcpserver AS
 SELECT id, title, about

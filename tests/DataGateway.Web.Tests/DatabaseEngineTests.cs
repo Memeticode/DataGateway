@@ -46,12 +46,18 @@ public sealed class DatabaseEngineTests
         Assert.All(type.GetFields(flags), field => Assert.True(field.IsPrivate));
         Assert.All(type.GetProperties(flags).SelectMany(property => property.GetAccessors(true)), accessor => Assert.True(accessor.IsAbstract));
         var hooks = type.GetMethods(flags).Where(method => method.IsVirtual && !method.IsFinal).ToArray();
-        Assert.Equal(new[] { "ConvertCell", "CreateCompiler", "PrepareLikePattern", "PrepareParameter", "RecognizeFailure", "ValidateSourceConnection", "get_MatchedRowCountExpression" }, hooks.Select(method => method.Name).OrderBy(name => name, StringComparer.Ordinal));
-        var parameterHook = hooks.Single(method => method.Name == "PrepareParameter");
+        Assert.Equal(new[] { "ConvertCell", "CreateCompiler", "PrepareLikePattern", "PrepareParameter", "PrepareParameter", "RecognizeFailure", "ValidateSourceConnection", "get_MatchedRowCountExpression" }, hooks.Select(method => method.Name).OrderBy(name => name, StringComparer.Ordinal));
+        var parameterHook = hooks.Single(method => method.Name == "PrepareParameter" && method.GetParameters().Length == 2);
         Assert.True(parameterHook.IsFamily);
         Assert.Equal(typeof(void), parameterHook.ReturnType);
         Assert.Equal(new[] { typeof(DbParameter), typeof(object) }, parameterHook.GetParameters().Select(parameter => parameter.ParameterType));
-        Assert.All(hooks, method => Assert.True(method.IsAbstract));
+        // The store-typed hook is the one optional hook: virtual, defaulting to the untyped one, so an engine that
+        // does not bind by store type needs no change.
+        var typedHook = hooks.Single(method => method.Name == "PrepareParameter" && method.GetParameters().Length == 3);
+        Assert.True(typedHook.IsFamily && !typedHook.IsAbstract);
+        Assert.Equal(typeof(void), typedHook.ReturnType);
+        Assert.Equal(new[] { typeof(DbParameter), typeof(object), typeof(StoreType) }, typedHook.GetParameters().Select(parameter => parameter.ParameterType));
+        Assert.All(hooks.Where(method => method != typedHook), method => Assert.True(method.IsAbstract));
         foreach (var method in type.GetMethods(flags).Except(hooks))
         {
             if (method.Name is "Compile" or "ReadSourceAsync") Assert.True(method.IsPublic && !method.IsVirtual);
@@ -710,7 +716,9 @@ public sealed class DatabaseEngineTests
         var engine = new SqliteEngine();
         object? Hook(string name, params object?[] args)
         {
-            try { return typeof(SqliteEngine).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(engine, args); }
+            // By argument count: PrepareParameter has an untyped and a store-typed overload.
+            try { return typeof(SqliteEngine).GetMethods(BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Single(method => method.Name == name && method.GetParameters().Length == args.Length).Invoke(engine, args); }
             catch (TargetInvocationException error) { ExceptionDispatchInfo.Capture(error.InnerException!).Throw(); throw; }
         }
         Assert.IsType<SqliteCompiler>(Hook("CreateCompiler"));
@@ -732,6 +740,14 @@ public sealed class DatabaseEngineTests
             Assert.Same(value ?? DBNull.Value, parameter.Value);
             Assert.Equal(DbType.Guid, parameter.DbType);
             Assert.Equal("@p", parameter.ParameterName);
+        }
+        // A store type changes nothing on SQLite: the inherited typed hook forwards to the untyped one.
+        Assert.True(StoreType.TryParse("varchar(4)", out var storeType));
+        foreach (var (value, type, bound) in new (object, DbType, object)[] { (true, DbType.Int64, 1L), ("text", DbType.Guid, "text"), (2m, DbType.Guid, 2m) })
+        {
+            var typed = new ProbeParameter { ParameterName = "@p", DbType = DbType.Guid, Size = 7 };
+            Hook("PrepareParameter", typed, value, storeType);
+            Assert.Equal((type, 7, bound), (typed.DbType, typed.Size, typed.Value));
         }
         var boolean = new OutputColumn("flag", "bool");
         Assert.Equal(false, Hook("ConvertCell", 0L, boolean));

@@ -372,6 +372,9 @@ internal sealed class ReadmeWire : IAsyncDisposable
         row["connection_string"] = ErrorLogTests.SourceConnection;
         row["column_name"] = c.GetProperty("name").GetString();
         row["ordinal"] = i + 1;
+        row["expression"] = null;
+        row["store_type"] = null;
+        row["store_type_override"] = false;
         foreach (var p in Fields(c).Where(p => p.Key != "name"))
         {
             var key = p.Key switch { "title" => "column_title", "description" => "column_description", "dataType" => "data_type", "displayFormat" => "display_format", _ => Regex.Replace(p.Key, "[A-Z]", m => "_" + m.Value.ToLowerInvariant()) };

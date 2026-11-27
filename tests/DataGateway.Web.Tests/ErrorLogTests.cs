@@ -514,7 +514,7 @@ public sealed class ErrorLogTests
         ["name"] = "synthetic", ["title"] = "Synthetic", ["description"] = "Synthetic", ["grain"] = "One row", ["row_cap"] = 500, ["query_timeout_seconds"] = 1,
         ["column_name"] = c.ColumnName, ["ordinal"] = c.Ordinal, ["column_title"] = c.Title, ["column_description"] = c.Description,
         ["data_type"] = c.DataType, ["unit"] = null, ["magnitude"] = null, ["display_format"] = null,
-        ["can_select"] = kind != "off", ["can_filter"] = kind != "off", ["can_sort"] = kind != "off", ["can_group"] = kind != "off", ["can_aggregate"] = kind != "off"
+        ["can_select"] = kind != "off", ["can_filter"] = kind != "off", ["can_sort"] = kind != "off", ["can_group"] = kind != "off", ["can_aggregate"] = kind != "off", ["expression"] = null, ["store_type"] = null, ["store_type_override"] = false
     }).ToArray();
     private static DataSourceColumnRow[] Columns() => [new("text", 1, "Text", "Synthetic text", "text", null, null, null, true, true, true, true, true),
         new("number", 2, "Number", "Synthetic number", "number", null, null, null, true, true, true, true, true), new("day", 3, "Day", "Synthetic day", "date", null, null, null, true, true, true, true, true)];
